@@ -311,12 +311,18 @@ func randomHex(n int) string {
 }
 
 // DNSServer is the sing-box resolver for direct lookups: the system's, or
-// a plain DNS server at addr where the core cannot ask the system.
+// a plain DNS server at addr ("1.2.3.4" or "1.2.3.4:53") where the core
+// cannot ask the system.
 func DNSServer(addr string) map[string]any {
 	if addr == "" {
 		return map[string]any{"type": "local", "tag": "local"}
 	}
-	return map[string]any{"type": "udp", "tag": "local", "server": addr}
+	s := map[string]any{"type": "udp", "tag": "local", "server": addr}
+	if host, port, err := net.SplitHostPort(addr); err == nil {
+		p, _ := strconv.Atoi(port)
+		s["server"], s["server_port"] = host, p
+	}
+	return s
 }
 
 func testConfig(s *core.Set, port int, pass, localDNS string) map[string]any {
