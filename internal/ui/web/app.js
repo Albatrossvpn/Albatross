@@ -108,7 +108,8 @@ function render(s) {
     $("st-up").textContent = bytesRate(c.up_rate) + "/ث";
     $("st-time").textContent = duration(Date.now() / 1000 - c.since);
     const proto = protoNames[c.proto] || c.proto || "";
-    $("exit-line").innerHTML = `آی‌پی شما در اینترنت: <code>${esc(c.exit_ip || "—")}</code> · ${esc(proto)} · ${fa(c.group)} سرور آماده · ${c.mode === "tun" ? "تونل کامل" : "پروکسی " + `<code>${esc(c.proxy_addr)}</code>`}`;
+    const backups = c.ready ? `${fa(c.ready)} سرور پشتیبان آماده در همین کشور` : "در حال آماده کردن سرور پشتیبان";
+    $("exit-line").innerHTML = `آی‌پی شما در اینترنت: <code>${esc(c.exit_ip || "—")}</code> · ${esc(proto)} · ${backups} · ${c.mode === "tun" ? "تونل کامل" : "پروکسی " + `<code>${esc(c.proxy_addr)}</code>`}`;
   }
 
   const target = s.countries.find((x) => x.code === s.target);

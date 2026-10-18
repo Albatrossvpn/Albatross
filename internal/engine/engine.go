@@ -35,6 +35,13 @@ type Options struct {
 	Autostart func(enabled bool) error
 	// Sources replaces the built-in source list (tests use it).
 	Sources []sources.Source
+	// LocalDNS is a resolver address the cores use for direct traffic and
+	// server names on systems whose resolver they cannot ask themselves
+	// (Android). Empty means the system's. SetLocalDNS changes it.
+	LocalDNS string
+	// Mobile tunes defaults and pacing for phones: lighter scanning, no
+	// large lists by default, and "proxy" mode is the device-wide VPN.
+	Mobile bool
 }
 
 // SystemProxy sets and clears the OS proxy settings.
@@ -77,6 +84,7 @@ type Engine struct {
 	scan         scanState
 	hintCounts   map[string]int
 	logs         []LogLine
+	localDNS     string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -124,8 +132,9 @@ func New(opt Options) (*Engine, error) {
 		wake:         make(chan struct{}, 1),
 		refill:       make(chan struct{}, 1),
 		hintCounts:   map[string]int{},
+		localDNS:     opt.LocalDNS,
 	}
-	e.settings = loadSettings(e.dir)
+	e.settings = loadSettings(e.dir, opt.Mobile)
 	e.target = e.settings.Country
 	e.bin = core.Locate(append(opt.AppDirs, e.dir)...)
 	e.rt = &core.Runtime{Bin: e.bin, Dir: filepath.Join(e.dir, "run")}
@@ -225,6 +234,20 @@ func (e *Engine) poke() {
 	}
 }
 
+// SetLocalDNS changes the resolver cores started from now on use for
+// direct traffic (see Options.LocalDNS).
+func (e *Engine) SetLocalDNS(addr string) {
+	e.mu.Lock()
+	e.localDNS = addr
+	e.mu.Unlock()
+}
+
+func (e *Engine) dns() string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.localDNS
+}
+
 func (e *Engine) proxyAddr() string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -269,6 +292,16 @@ func (e *Engine) applyIntensity() {
 	e.tester.TCPTimeout = 3 * time.Second
 }
 
+// newTester returns a copy of the tester for one run, with the current
+// intensity and resolver.
+func (e *Engine) newTester() tester.Tester {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	t := *e.tester
+	t.LocalDNS = e.localDNS
+	return t
+}
+
 // Settings returns the current settings.
 func (e *Engine) Settings() Settings {
 	e.mu.Lock()
@@ -284,6 +317,9 @@ func (e *Engine) UpdateSettings(s Settings) error {
 		s.ProxyPort = old.ProxyPort
 	}
 	s.Country = e.target
+	if e.opt.Mobile {
+		s.Mode = "proxy"
+	}
 	e.settings = s
 	e.applyIntensity()
 	connected := e.conn != nil

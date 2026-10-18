@@ -70,7 +70,7 @@ func (e *Engine) refreshWarp() {
 	for _, n := range due {
 		byNode[n] = candidate{key: node.Key64(n.Key()), link: n.Link(), source: -1, node: n}
 	}
-	t := *e.tester
+	t := e.newTester()
 	t.Batch(e.ctx, "methods", due, func(r tester.Result) {
 		c := byNode[r.Node]
 		if r.OK {

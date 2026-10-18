@@ -668,7 +668,7 @@ func (e *Engine) realTest(cands []candidate, spoof string) []candidate {
 			nodes[i] = c.node
 			byNode[c.node] = c
 		}
-		t := *e.tester
+		t := e.newTester()
 		t.Spoof = spoof
 		t.FragmentFor = func(n *node.Node) bool { return byNode[n].frag }
 		err := t.Batch(e.ctx, "test", nodes, func(r tester.Result) {
