@@ -1,0 +1,955 @@
+package node
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"html"
+	"net"
+	"net/url"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"unicode/utf8"
+)
+
+var schemes = []string{
+	"vmess://", "vless://", "trojan://", "ss://", "ssr://", "hysteria2://", "hy2://", "hysteria://",
+	"tuic://", "wireguard://", "wg://", "anytls://", "socks5://", "socks://", "socks4://",
+}
+
+var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|ssr?|hysteria2|hy2|hysteria|tuic|wireguard|wg|anytls|socks5?|socks4)://`)
+
+// ErrUnsupported marks links that parse but cannot be run by any core.
+var ErrUnsupported = errors.New("unsupported")
+
+// ExtractLinks finds share links in any text: plain lists, base64
+// subscriptions, HTML pages (Telegram previews) or mixed content.
+func ExtractLinks(text string) []string {
+	if looksHTML(text) {
+		text = stripHTML(text)
+	}
+	if !schemeRe.MatchString(head(text, 4096)) {
+		if dec, ok := decodeSubscription(text); ok {
+			text = dec
+		}
+	}
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(line, "\ufeff"))
+		if line == "" {
+			continue
+		}
+		locs := schemeRe.FindAllStringIndex(line, -1)
+		for i, loc := range locs {
+			// A scheme inside another link's fragment (e.g. "#vless://...")
+			// still starts a new link only when separated by whitespace.
+			if loc[0] > 0 && !isSpace(line[loc[0]-1]) && i > 0 {
+				continue
+			}
+			end := len(line)
+			for _, next := range locs[i+1:] {
+				if next[0] > 0 && isSpace(line[next[0]-1]) {
+					end = next[0]
+					break
+				}
+			}
+			link := strings.TrimSpace(line[loc[0]:end])
+			link = strings.TrimRight(link, ",;")
+			if len(link) > 12 {
+				out = append(out, link)
+			}
+		}
+	}
+	return out
+}
+
+func isSpace(b byte) bool { return b == ' ' || b == '\t' || b == '\r' }
+
+func head(s string, n int) string {
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
+func looksHTML(s string) bool {
+	h := strings.ToLower(head(s, 4096))
+	return strings.Contains(h, "<html") || strings.Contains(h, "<!doctype") || strings.Contains(h, "<div") || strings.Contains(h, "<body")
+}
+
+var tagRe = regexp.MustCompile(`(?s)<br\s*/?>|</?(div|p|code|pre|span|a|b|i|tr|td|li|blockquote|section)[^>]*>|<[^>]+>`)
+
+func stripHTML(s string) string {
+	s = tagRe.ReplaceAllStringFunc(s, func(t string) string {
+		lt := strings.ToLower(t)
+		if strings.HasPrefix(lt, "<br") || strings.HasPrefix(lt, "</div") || strings.HasPrefix(lt, "</p") ||
+			strings.HasPrefix(lt, "<div") || strings.HasPrefix(lt, "<p") || strings.HasPrefix(lt, "</code") ||
+			strings.HasPrefix(lt, "<code") || strings.HasPrefix(lt, "</pre") || strings.HasPrefix(lt, "</li") ||
+			strings.HasPrefix(lt, "</blockquote") || strings.HasPrefix(lt, "</td") {
+			return "\n"
+		}
+		return ""
+	})
+	return html.UnescapeString(s)
+}
+
+// decodeSubscription decodes a whole-body base64 subscription.
+func decodeSubscription(text string) (string, bool) {
+	compact := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\n' || r == '\r' || r == '\t' {
+			return -1
+		}
+		return r
+	}, text)
+	if len(compact) < 8 {
+		return "", false
+	}
+	b, err := decodeB64(compact)
+	if err != nil {
+		return "", false
+	}
+	s := string(b)
+	if schemeRe.MatchString(head(s, 8192)) || strings.Contains(head(s, 8192), "proxies:") {
+		return s, true
+	}
+	return "", false
+}
+
+// trimB64 cuts trailing junk glued after a base64 body, such as the next
+// link's scheme in "...In0=vless://".
+func trimB64(s string) string {
+	s = strings.TrimSpace(s)
+	end := 0
+	for end < len(s) {
+		c := s[end]
+		if c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '+' || c == '/' || c == '-' || c == '_' {
+			end++
+			continue
+		}
+		break
+	}
+	for end < len(s) && s[end] == '=' {
+		end++
+	}
+	return s[:end]
+}
+
+// decodeB64 accepts standard or URL alphabets, padded or not.
+func decodeB64(s string) ([]byte, error) {
+	s = strings.TrimSpace(s)
+	s = strings.TrimRight(s, "=")
+	if strings.ContainsAny(s, "-_") {
+		return base64.RawURLEncoding.DecodeString(s)
+	}
+	return base64.RawStdEncoding.DecodeString(s)
+}
+
+// ParseLink parses one share link.
+func ParseLink(link string) (*Node, error) {
+	link = strings.TrimSpace(link)
+	i := strings.Index(link, "://")
+	if i <= 0 {
+		return nil, fmt.Errorf("not a link")
+	}
+	scheme := strings.ToLower(link[:i])
+	var n *Node
+	var err error
+	switch scheme {
+	case "vmess":
+		n, err = parseVMess(link)
+	case "vless", "trojan":
+		n, err = parseStandard(link, scheme)
+	case "ss":
+		n, err = parseSS(link)
+	case "hysteria2", "hy2":
+		n, err = parseHy2(link)
+	case "hysteria":
+		n, err = parseHysteria(link)
+	case "tuic":
+		n, err = parseTUIC(link)
+	case "anytls":
+		n, err = parseAnyTLS(link)
+	case "wireguard", "wg":
+		n, err = parseWireGuard(link)
+	case "socks", "socks5":
+		n, err = parseSocks(link)
+	case "ssr", "socks4":
+		return nil, ErrUnsupported
+	default:
+		return nil, ErrUnsupported
+	}
+	if err != nil {
+		return nil, err
+	}
+	n.Source = link
+	n.normalize()
+	if err := n.Validate(); err != nil {
+		return nil, err
+	}
+	return n, nil
+}
+
+// uri is a lenient split of scheme://userinfo@host:port/path?query#fragment.
+type uri struct {
+	user     string
+	host     string
+	port     string
+	path     string
+	query    map[string]string
+	fragment string
+}
+
+func splitURI(link string) (*uri, error) {
+	rest := link[strings.Index(link, "://")+3:]
+	u := &uri{query: map[string]string{}}
+	if i := strings.Index(rest, "#"); i >= 0 {
+		u.fragment = unescape(rest[i+1:])
+		rest = rest[:i]
+	}
+	if i := strings.Index(rest, "?"); i >= 0 {
+		u.query = parseQuery(rest[i+1:])
+		rest = rest[:i]
+	}
+	if i := strings.LastIndex(rest, "@"); i >= 0 {
+		u.user = rest[:i]
+		rest = rest[i+1:]
+	}
+	if i := strings.Index(rest, "/"); i >= 0 {
+		u.path = rest[i:]
+		rest = rest[:i]
+	}
+	host, port, err := splitHostPort(rest)
+	if err != nil {
+		return nil, err
+	}
+	u.host, u.port = host, port
+	return u, nil
+}
+
+func splitHostPort(s string) (string, string, error) {
+	if strings.HasPrefix(s, "[") {
+		end := strings.Index(s, "]")
+		if end < 0 {
+			return "", "", fmt.Errorf("bad ipv6 host")
+		}
+		host := s[1:end]
+		port := strings.TrimPrefix(s[end+1:], ":")
+		return host, port, nil
+	}
+	i := strings.LastIndex(s, ":")
+	if i < 0 {
+		return s, "", nil
+	}
+	if strings.Count(s, ":") > 1 && net.ParseIP(s) != nil {
+		return s, "", nil
+	}
+	return s[:i], s[i+1:], nil
+}
+
+func parseQuery(q string) map[string]string {
+	out := map[string]string{}
+	for _, kv := range strings.Split(q, "&") {
+		if kv == "" {
+			continue
+		}
+		k, v, _ := strings.Cut(kv, "=")
+		k = strings.ToLower(strings.TrimSpace(unescape(k)))
+		for strings.HasPrefix(k, "amp;") {
+			k = k[4:]
+		}
+		if k == "" {
+			continue
+		}
+		if _, dup := out[k]; dup {
+			continue
+		}
+		out[k] = strings.TrimSpace(unescape(v))
+	}
+	return out
+}
+
+func unescape(s string) string {
+	if !strings.Contains(s, "%") {
+		return s
+	}
+	if v, err := url.PathUnescape(s); err == nil {
+		return v
+	}
+	return s
+}
+
+func atoi(s string) int {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, ",-/ "); i > 0 {
+		s = s[:i]
+	}
+	v, _ := strconv.Atoi(s)
+	return v
+}
+
+func truthy(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func cleanName(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+	if utf8.RuneCountInString(s) > 80 {
+		r := []rune(s)
+		s = string(r[:80])
+	}
+	return s
+}
+
+// applyStreamParams reads the Xray-standard transport and TLS query
+// parameters shared by vless, trojan and URL-form vmess.
+func (n *Node) applyStreamParams(q map[string]string) {
+	n.Transport = q["type"]
+	n.HeaderType = q["headertype"]
+	n.Host = q["host"]
+	n.Path = q["path"]
+	n.ServiceName = q["servicename"]
+	n.Mode = q["mode"]
+	n.Extra = q["extra"]
+	n.Seed = q["seed"]
+	if n.Transport == "grpc" && n.ServiceName == "" {
+		n.ServiceName = strings.TrimPrefix(n.Path, "/")
+	}
+	if n.Transport == "grpc" && n.Host == "" {
+		n.Host = q["authority"]
+	}
+	if ed := atoi(q["ed"]); ed > 0 {
+		n.EarlyData = ed
+	}
+	n.Security = q["security"]
+	n.SNI = firstNonEmpty(q["sni"], q["peer"], q["servername"])
+	n.ALPN = splitList(q["alpn"])
+	n.Fingerprint = q["fp"]
+	n.Insecure = truthy(q["allowinsecure"]) || truthy(q["insecure"]) || truthy(q["allow_insecure"]) || truthy(q["skip-cert-verify"])
+	n.PublicKey = firstNonEmpty(q["pbk"], q["publickey"])
+	n.ShortID = q["sid"]
+	n.SpiderX = q["spx"]
+	n.ECH = q["ech"]
+	n.PinnedCert = q["pcs"]
+	n.VerifyName = q["vcn"]
+	n.Flow = q["flow"]
+	n.FinalMask = q["fm"]
+	if strings.Contains(n.FinalMask, "fragment") || q["fragment"] != "" {
+		n.Fragment = true
+	}
+}
+
+func firstNonEmpty(v ...string) string {
+	for _, s := range v {
+		if s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func parseStandard(link, scheme string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{Name: cleanName(u.fragment), Server: u.host, Port: atoi(u.port)}
+	n.applyStreamParams(u.query)
+	if scheme == "vless" {
+		n.Proto = "vless"
+		n.UUID = unescape(u.user)
+		n.Encryption = u.query["encryption"]
+	} else {
+		n.Proto = "trojan"
+		n.Password = unescape(u.user)
+		if n.Security == "" {
+			n.Security = "tls"
+		}
+	}
+	return n, nil
+}
+
+// vmessJSON is the v2rayN share format. Numbers arrive as strings or numbers.
+type vmessJSON struct {
+	PS          any `json:"ps"`
+	Add         any `json:"add"`
+	Port        any `json:"port"`
+	ID          any `json:"id"`
+	Aid         any `json:"aid"`
+	Scy         any `json:"scy"`
+	Net         any `json:"net"`
+	Type        any `json:"type"`
+	Host        any `json:"host"`
+	Path        any `json:"path"`
+	TLS         any `json:"tls"`
+	SNI         any `json:"sni"`
+	ALPN        any `json:"alpn"`
+	FP          any `json:"fp"`
+	Insecure    any `json:"insecure"`
+	AllowInsec  any `json:"allowInsecure"`
+	SkipVerify  any `json:"skip-cert-verify"`
+	ServiceName any `json:"serviceName"`
+	Mode        any `json:"mode"`
+	PBK         any `json:"pbk"`
+	SID         any `json:"sid"`
+}
+
+func str(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(t)
+	case float64:
+		return strconv.FormatFloat(t, 'f', -1, 64)
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	}
+	return strings.TrimSpace(fmt.Sprint(v))
+}
+
+func parseVMess(link string) (*Node, error) {
+	body := link[len("vmess://"):]
+	name := ""
+	if i := strings.Index(body, "#"); i >= 0 {
+		name = unescape(body[i+1:])
+		body = body[:i]
+	}
+	if strings.Contains(body, "@") {
+		// Xray's URL form: vmess://uuid@host:port?type=ws&security=tls...
+		n, err := parseStandard("vless://"+body, "vless")
+		if err != nil {
+			return nil, err
+		}
+		n.Proto = "vmess"
+		n.Encryption = ""
+		n.Method = "auto"
+		n.Name = cleanName(name)
+		return n, nil
+	}
+	if q := strings.Index(body, "?"); q > 0 {
+		// Shadowrocket form: base64(security:uuid@host:port)?remarks=...&obfs=websocket
+		if dec, err := decodeB64(trimB64(body[:q])); err == nil && strings.Contains(string(dec), "@") && !strings.HasPrefix(string(dec), "{") {
+			return parseShadowrocketVMess(string(dec), parseQuery(body[q+1:]), name)
+		}
+	}
+	raw, err := decodeB64(trimB64(body))
+	if err != nil {
+		return nil, fmt.Errorf("vmess base64: %w", err)
+	}
+	var j vmessJSON
+	if err := json.Unmarshal(raw, &j); err != nil {
+		return nil, fmt.Errorf("vmess json: %w", err)
+	}
+	n := &Node{
+		Proto:       "vmess",
+		Name:        cleanName(firstNonEmpty(str(j.PS), name)),
+		Server:      str(j.Add),
+		Port:        atoi(str(j.Port)),
+		UUID:        str(j.ID),
+		AlterID:     atoi(str(j.Aid)),
+		Method:      str(j.Scy),
+		Transport:   strings.ToLower(str(j.Net)),
+		HeaderType:  str(j.Type),
+		Host:        str(j.Host),
+		Path:        str(j.Path),
+		SNI:         str(j.SNI),
+		ALPN:        splitList(str(j.ALPN)),
+		Fingerprint: str(j.FP),
+		Insecure:    truthy(str(j.Insecure)) || truthy(str(j.AllowInsec)) || truthy(str(j.SkipVerify)),
+		Mode:        str(j.Mode),
+		PublicKey:   str(j.PBK),
+		ShortID:     str(j.SID),
+	}
+	switch strings.ToLower(str(j.TLS)) {
+	case "tls", "true", "1":
+		n.Security = "tls"
+	case "reality":
+		n.Security = "reality"
+	}
+	if n.Transport == "grpc" {
+		n.ServiceName = firstNonEmpty(str(j.ServiceName), strings.TrimPrefix(n.Path, "/"))
+	}
+	if n.Transport == "kcp" || n.Transport == "mkcp" {
+		n.Seed = n.Path
+	}
+	return n, nil
+}
+
+func parseShadowrocketVMess(dec string, q map[string]string, name string) (*Node, error) {
+	at := strings.LastIndex(dec, "@")
+	sec, id, _ := strings.Cut(dec[:at], ":")
+	host, port, err := splitHostPort(dec[at+1:])
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{
+		Proto:   "vmess",
+		Name:    cleanName(firstNonEmpty(q["remarks"], name)),
+		Server:  host,
+		Port:    atoi(port),
+		UUID:    id,
+		Method:  sec,
+		AlterID: atoi(q["alterid"]),
+		Path:    q["path"],
+		Host:    q["obfsparam"],
+		SNI:     q["peer"],
+	}
+	switch q["obfs"] {
+	case "websocket", "ws":
+		n.Transport = "ws"
+	case "http":
+		n.Transport, n.HeaderType = "tcp", "http"
+	case "grpc":
+		n.Transport = "grpc"
+		n.ServiceName = q["path"]
+	default:
+		n.Transport = "tcp"
+	}
+	if truthy(q["tls"]) {
+		n.Security = "tls"
+		n.Insecure = truthy(q["allowinsecure"])
+	}
+	return n, nil
+}
+
+func parseSS(link string) (*Node, error) {
+	body := link[len("ss://"):]
+	name := ""
+	if i := strings.Index(body, "#"); i >= 0 {
+		name = unescape(body[i+1:])
+		body = body[:i]
+	}
+	query := map[string]string{}
+	if i := strings.Index(body, "?"); i >= 0 {
+		query = parseQuery(body[i+1:])
+		body = body[:i]
+	}
+	body = strings.TrimSuffix(body, "/")
+	// Mislabelled links: a v2rayN vmess JSON or a vless URL behind "ss://".
+	if !strings.Contains(body, "@") {
+		if dec, err := decodeB64(trimB64(body)); err == nil && strings.HasPrefix(strings.TrimSpace(string(dec)), "{") {
+			return parseVMess("vmess://" + trimB64(body) + "#" + url.PathEscape(name))
+		}
+	} else if at := strings.LastIndex(body, "@"); query["encryption"] != "" || (isUUID(body[:at]) && (query["type"] != "" || query["security"] != "")) {
+		return parseStandard("vless://"+link[len("ss://"):], "vless")
+	} else if query["type"] != "" || query["security"] != "" {
+		return parseStandard("trojan://"+link[len("ss://"):], "trojan")
+	}
+	var method, password, hostport string
+	if at := strings.LastIndex(body, "@"); at >= 0 {
+		userinfo, hp := body[:at], body[at+1:]
+		hostport = strings.TrimSuffix(hp, "/")
+		if dec, err := decodeB64(unescape(userinfo)); err == nil && strings.Contains(string(dec), ":") && utf8.Valid(dec) {
+			method, password, _ = strings.Cut(string(dec), ":")
+		} else {
+			method, password, _ = strings.Cut(unescape(userinfo), ":")
+		}
+	} else {
+		dec, err := decodeB64(unescape(body))
+		if err != nil {
+			return nil, fmt.Errorf("ss base64: %w", err)
+		}
+		s := string(dec)
+		at := strings.LastIndex(s, "@")
+		if at < 0 {
+			return nil, fmt.Errorf("ss: no server")
+		}
+		method, password, _ = strings.Cut(s[:at], ":")
+		hostport = s[at+1:]
+	}
+	host, port, err := splitHostPort(hostport)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{
+		Proto:    "shadowsocks",
+		Name:     cleanName(name),
+		Server:   host,
+		Port:     atoi(port),
+		Method:   strings.ToLower(strings.TrimSpace(method)),
+		Password: password,
+	}
+	if p := query["plugin"]; p != "" {
+		parts := strings.SplitN(p, ";", 2)
+		n.Plugin = parts[0]
+		if len(parts) == 2 {
+			n.PluginOpts = parts[1]
+		}
+	}
+	return n, nil
+}
+
+func parseHy2(link string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	q := u.query
+	n := &Node{
+		Proto:        "hysteria2",
+		Name:         cleanName(u.fragment),
+		Server:       u.host,
+		Password:     unescape(u.user),
+		Security:     "tls",
+		SNI:          firstNonEmpty(q["sni"], q["peer"]),
+		Insecure:     truthy(q["insecure"]) || truthy(q["allowinsecure"]) || truthy(q["allow_insecure"]) || truthy(q["skip-cert-verify"]),
+		ALPN:         splitList(q["alpn"]),
+		Obfs:         q["obfs"],
+		ObfsPassword: q["obfs-password"],
+		UpMbps:       atoi(firstNonEmpty(q["upmbps"], q["up-mbps"], q["up"])),
+		DownMbps:     atoi(firstNonEmpty(q["downmbps"], q["down-mbps"], q["down"])),
+	}
+	if n.Obfs == "none" {
+		n.Obfs = ""
+	}
+	if q["pinsha256"] != "" {
+		// The pin replaces CA validation; sing-box cannot pin a leaf
+		// certificate hash, so fall back to skipping verification.
+		n.Insecure = true
+	}
+	setPorts(n, u.port, q["mport"])
+	return n, nil
+}
+
+// setPorts handles "443", "20000-30000" and "443,20000-30000".
+func setPorts(n *Node, port, mport string) {
+	spec := port
+	if mport != "" {
+		spec = mport
+	}
+	if strings.ContainsAny(spec, ",-") {
+		n.PortHop = spec
+		n.Port = atoi(spec)
+		if p := atoi(port); p > 0 {
+			n.Port = p
+		}
+		return
+	}
+	n.Port = atoi(port)
+}
+
+func parseHysteria(link string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	q := u.query
+	if p := q["protocol"]; p != "" && p != "udp" {
+		return nil, ErrUnsupported
+	}
+	n := &Node{
+		Proto:        "hysteria",
+		Name:         cleanName(u.fragment),
+		Server:       u.host,
+		Password:     firstNonEmpty(q["auth"], q["auth_str"], unescape(u.user)),
+		Security:     "tls",
+		SNI:          firstNonEmpty(q["peer"], q["sni"]),
+		Insecure:     truthy(q["insecure"]) || truthy(q["allowinsecure"]),
+		ALPN:         splitList(q["alpn"]),
+		ObfsPassword: firstNonEmpty(q["obfsparam"], q["obfs-password"]),
+		UpMbps:       atoi(firstNonEmpty(q["upmbps"], q["up"])),
+		DownMbps:     atoi(firstNonEmpty(q["downmbps"], q["down"])),
+	}
+	if o := q["obfs"]; o != "" && o != "none" && o != "xplus" && n.ObfsPassword == "" {
+		// Some links put the xplus password directly in obfs.
+		n.ObfsPassword = o
+	}
+	setPorts(n, u.port, q["mport"])
+	return n, nil
+}
+
+func parseTUIC(link string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	q := u.query
+	id, pw, _ := strings.Cut(unescape(u.user), ":")
+	n := &Node{
+		Proto:             "tuic",
+		Name:              cleanName(u.fragment),
+		Server:            u.host,
+		Port:              atoi(u.port),
+		UUID:              id,
+		Password:          pw,
+		Security:          "tls",
+		SNI:               q["sni"],
+		Insecure:          truthy(q["allow_insecure"]) || truthy(q["insecure"]) || truthy(q["allowinsecure"]),
+		ALPN:              splitList(q["alpn"]),
+		CongestionControl: firstNonEmpty(q["congestion_control"], q["congestion_controller"]),
+		UDPRelayMode:      q["udp_relay_mode"],
+		DisableSNI:        truthy(q["disable_sni"]),
+	}
+	return n, nil
+}
+
+func parseAnyTLS(link string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	q := u.query
+	return &Node{
+		Proto:       "anytls",
+		Name:        cleanName(u.fragment),
+		Server:      u.host,
+		Port:        atoi(u.port),
+		Password:    unescape(u.user),
+		Security:    "tls",
+		SNI:         q["sni"],
+		Insecure:    truthy(q["insecure"]) || truthy(q["allowinsecure"]),
+		ALPN:        splitList(q["alpn"]),
+		Fingerprint: q["fp"],
+	}, nil
+}
+
+func parseWireGuard(link string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	q := u.query
+	n := &Node{
+		Proto:         "wireguard",
+		Name:          cleanName(u.fragment),
+		Server:        u.host,
+		Port:          atoi(u.port),
+		PrivateKey:    firstNonEmpty(unescape(u.user), q["privatekey"], q["secretkey"]),
+		PeerPublicKey: firstNonEmpty(q["publickey"], q["peerpublickey"], q["public_key"]),
+		PreSharedKey:  firstNonEmpty(q["presharedkey"], q["psk"]),
+		MTU:           atoi(q["mtu"]),
+	}
+	for _, a := range splitList(firstNonEmpty(q["address"], q["ip"], q["addresses"])) {
+		n.LocalAddress = append(n.LocalAddress, a)
+	}
+	if r := q["reserved"]; r != "" {
+		n.Reserved = parseReserved(r)
+	}
+	return n, nil
+}
+
+func parseReserved(s string) []int {
+	if strings.Contains(s, ",") {
+		var out []int
+		for _, p := range splitList(s) {
+			v, err := strconv.Atoi(p)
+			if err != nil || v < 0 || v > 255 {
+				return nil
+			}
+			out = append(out, v)
+		}
+		if len(out) == 3 {
+			return out
+		}
+		return nil
+	}
+	if b, err := decodeB64(s); err == nil && len(b) == 3 {
+		return []int{int(b[0]), int(b[1]), int(b[2])}
+	}
+	return nil
+}
+
+func parseSocks(link string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{Proto: "socks", Name: cleanName(u.fragment), Server: u.host, Port: atoi(u.port)}
+	if u.user != "" {
+		user := unescape(u.user)
+		if !strings.Contains(user, ":") {
+			if dec, err := decodeB64(user); err == nil {
+				user = string(dec)
+			}
+		}
+		n.Username, n.Password, _ = strings.Cut(user, ":")
+	}
+	return n, nil
+}
+
+var fingerprints = map[string]bool{
+	"chrome": true, "firefox": true, "edge": true, "safari": true, "360": true, "qq": true,
+	"ios": true, "android": true, "random": true, "randomized": true,
+}
+
+// normalize fixes common inconsistencies so the two cores agree on a node.
+func (n *Node) normalize() {
+	n.Server = strings.Trim(strings.TrimSpace(n.Server), "[]")
+	n.Transport = strings.ToLower(strings.TrimSpace(n.Transport))
+	switch n.Transport {
+	case "raw", "none":
+		n.Transport = "tcp"
+	case "h2":
+		n.Transport = "http"
+	case "splithttp":
+		n.Transport = "xhttp"
+	case "mkcp":
+		n.Transport = "kcp"
+	case "gun":
+		n.Transport = "grpc"
+	}
+	if n.Proto == "vless" || n.Proto == "vmess" || n.Proto == "trojan" {
+		if n.Transport == "" {
+			n.Transport = "tcp"
+		}
+	} else if n.Proto != "shadowsocks" {
+		n.Transport = ""
+	}
+	n.HeaderType = strings.ToLower(n.HeaderType)
+	if n.HeaderType != "http" {
+		if n.Transport != "kcp" {
+			n.HeaderType = ""
+		}
+	}
+	n.Security = strings.ToLower(n.Security)
+	switch n.Security {
+	case "tls", "reality":
+	case "xtls":
+		n.Security = "tls"
+	default:
+		if n.Proto == "vless" || n.Proto == "vmess" || n.Proto == "shadowsocks" || n.Proto == "socks" {
+			n.Security = ""
+		}
+	}
+	if n.Security == "" {
+		n.SNI, n.ALPN, n.Fingerprint, n.PublicKey, n.ShortID = "", nil, "", "", ""
+		n.Insecure = false
+	}
+	n.Fingerprint = strings.ToLower(n.Fingerprint)
+	if n.Fingerprint != "" && !fingerprints[n.Fingerprint] {
+		n.Fingerprint = "chrome"
+	}
+	if n.Security == "reality" && n.Fingerprint == "" {
+		n.Fingerprint = "chrome"
+	}
+	n.Flow = strings.ToLower(n.Flow)
+	if n.Flow == "none" {
+		n.Flow = ""
+	}
+	if n.Flow != "" && (n.Transport != "tcp" || n.Security == "") {
+		n.Flow = ""
+	}
+	n.Encryption = strings.TrimSpace(n.Encryption)
+	if n.Proto == "vless" && !strings.HasPrefix(n.Encryption, "mlkem768x25519plus.") {
+		n.Encryption = "none"
+	}
+	if n.Proto == "vmess" {
+		n.Method = strings.ToLower(n.Method)
+		switch n.Method {
+		case "auto", "none", "zero", "aes-128-gcm", "chacha20-poly1305":
+		default:
+			n.Method = "auto"
+		}
+		if n.AlterID < 0 || n.AlterID > 65535 {
+			n.AlterID = 0
+		}
+	}
+	if n.Proto == "shadowsocks" {
+		switch n.Plugin {
+		case "simple-obfs", "obfs":
+			n.Plugin = "obfs-local"
+		}
+		if n.Method == "chacha20-poly1305" {
+			n.Method = "chacha20-ietf-poly1305"
+		}
+	}
+	if n.Path != "" && !strings.HasPrefix(n.Path, "/") && (n.Transport == "ws" || n.Transport == "httpupgrade" || n.Transport == "http" || n.Transport == "xhttp") {
+		n.Path = "/" + n.Path
+	}
+	if n.Transport == "ws" || n.Transport == "httpupgrade" {
+		n.Path, n.EarlyData = splitEarlyData(n.Path, n.EarlyData)
+	}
+	if strings.Contains(n.Path, "%") {
+		n.Path = badEscapeRe.ReplaceAllStringFunc(n.Path, func(m string) string { return "%25" + m[1:] })
+	}
+	if (n.Proto == "vmess" || n.Proto == "vless" || n.Proto == "tuic") && n.UUID != "" && !isUUID(n.UUID) {
+		n.UUID = uuidV5(n.UUID)
+	}
+	if n.Proto == "wireguard" {
+		for i, a := range n.LocalAddress {
+			if !strings.Contains(a, "/") {
+				if strings.Contains(a, ":") {
+					n.LocalAddress[i] = a + "/128"
+				} else {
+					n.LocalAddress[i] = a + "/32"
+				}
+			}
+		}
+	}
+	n.Name = cleanName(n.Name)
+}
+
+var badEscapeRe = regexp.MustCompile(`%(?:[^0-9A-Fa-f]|[0-9A-Fa-f][^0-9A-Fa-f]|[0-9A-Fa-f]?$)`)
+
+// splitEarlyData moves Xray's "?ed=2048" path suffix into EarlyData.
+func splitEarlyData(path string, ed int) (string, int) {
+	i := strings.Index(path, "?")
+	if i < 0 {
+		return path, ed
+	}
+	q := parseQuery(path[i+1:])
+	if v := atoi(q["ed"]); v > 0 {
+		ed = v
+		delete(q, "ed")
+		path = path[:i]
+		if len(q) > 0 {
+			var parts []string
+			for k, v := range q {
+				parts = append(parts, k+"="+v)
+			}
+			sort.Strings(parts)
+			path += "?" + strings.Join(parts, "&")
+		}
+	}
+	return path, ed
+}
+
+// ParseText extracts every usable node from a subscription body in any of
+// the supported formats. It also reports how many links it saw.
+func ParseText(text string) (nodes []*Node, seen int) {
+	if strings.Contains(head(text, 1<<16), "proxies:") {
+		nodes = ParseClash(text)
+		if len(nodes) > 0 {
+			return nodes, len(nodes)
+		}
+	} else if !schemeRe.MatchString(head(text, 4096)) && !looksHTML(text) {
+		if dec, ok := decodeSubscription(text); ok && strings.Contains(head(dec, 1<<16), "proxies:") {
+			if nodes = ParseClash(dec); len(nodes) > 0 {
+				return nodes, len(nodes)
+			}
+		}
+	}
+	links := ExtractLinks(text)
+	for _, l := range links {
+		if n, err := ParseLink(l); err == nil {
+			nodes = append(nodes, n)
+		}
+	}
+	return nodes, len(links)
+}
