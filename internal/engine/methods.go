@@ -77,7 +77,7 @@ func (e *Engine) refreshWarp() {
 			if r.Node.WPMode == "psiphon" && r.Country == "" {
 				r.Country = r.Node.WPCountry
 			}
-			e.recordOK(c, r, false)
+			e.recordOK(c, r)
 			e.mu.Lock()
 			if s := e.good[c.key]; s != nil {
 				s.Source = "warp-plus"

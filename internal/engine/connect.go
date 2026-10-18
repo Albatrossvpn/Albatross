@@ -229,7 +229,7 @@ func (e *Engine) start(country string, servers []*Server) error {
 	fragFor := map[*node.Node]bool{}
 	byNode := map[*node.Node]*Server{}
 	for _, s := range servers {
-		n := s.Node()
+		n := s.runNode()
 		if n == nil {
 			continue
 		}
@@ -267,6 +267,9 @@ func (e *Engine) start(country string, servers []*Server) error {
 		clashSecret: c.clashSecret, exe: e.opt.ExeName,
 	}
 	build := core.BuildOptions{Fragment: set.Fragment == "on", FragmentFor: func(n *node.Node) bool { return fragFor[n] }}
+	if set.SpoofSNI != "" && e.opt.IsAdmin() {
+		build.Spoof = set.SpoofSNI
+	}
 	ctx, cancel := context.WithTimeout(e.ctx, 30*time.Second)
 	defer cancel()
 	run, err := e.rt.Run(ctx, "connect", nodes, build, func(s *core.Set) map[string]any {

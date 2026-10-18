@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/cezomagoanlace29861-jpg/vp/internal/antiblock"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/pool"
 )
@@ -29,7 +30,9 @@ type Server struct {
 	LastOK    time.Time `json:"last_ok"`
 	Fails     int       `json:"fails"` // consecutive failures since LastOK
 	OKCount   int       `json:"ok_count"`
-	Fragment  bool      `json:"fragment,omitempty"` // only works with TLS fragmentation
+	Fragment  bool      `json:"fragment,omitempty"`   // only works with TLS fragmentation
+	PinIP     string    `json:"pin_ip,omitempty"`     // connect here instead of resolving the name
+	PinReason string    `json:"pin_reason,omitempty"` // "dns" (poisoned) or "clean" (Cloudflare edge)
 	Plain     bool      `json:"plain,omitempty"`
 	Source    string    `json:"source,omitempty"`
 
@@ -47,6 +50,16 @@ func (s *Server) Node() *node.Node {
 		s.node = n
 	}
 	return s.node
+}
+
+// runNode is the node as it must run: pinned to a working IP when the
+// name is poisoned or a clean Cloudflare edge was needed.
+func (s *Server) runNode() *node.Node {
+	n := s.Node()
+	if n == nil || s.PinIP == "" {
+		return n
+	}
+	return antiblock.Pin(n, s.PinIP)
 }
 
 // usable reports whether the server is worth connecting to now.
