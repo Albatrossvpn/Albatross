@@ -58,10 +58,10 @@ func TestBatchEndToEnd(t *testing.T) {
 	time.Sleep(700 * time.Millisecond)
 
 	links := map[string]bool{
-		"vless://" + uuid + "@" + hostIP + ":" + strconv.Itoa(ports[0]) + "?type=tcp&security=none#vless":                                     true,
-		"ss://YWVzLTEyOC1nY206c2VjcmV0@" + hostIP + ":" + strconv.Itoa(ports[1]) + "#ss":                                                      true,
+		"vless://" + uuid + "@" + hostIP + ":" + strconv.Itoa(ports[0]) + "?type=tcp&security=none#vless":                                    true,
+		"ss://YWVzLTEyOC1nY206c2VjcmV0@" + hostIP + ":" + strconv.Itoa(ports[1]) + "#ss":                                                     true,
 		"vless://" + uuid + "@" + hostIP + ":" + strconv.Itoa(ports[3]) + "?type=xhttp&path=%2Fx&mode=auto&security=none&encryption=none#xh": true,
-		"vless://" + uuid + "@" + hostIP + ":" + strconv.Itoa(ports[4]) + "?type=tcp&security=none#dead":                                      false,
+		"vless://" + uuid + "@" + hostIP + ":" + strconv.Itoa(ports[4]) + "?type=tcp&security=none#dead":                                     false,
 	}
 	vm, _ := json.Marshal(map[string]any{"add": hostIP, "port": ports[2], "id": uuid, "aid": 0, "net": "ws", "path": "/ws", "ps": "vmess"})
 	links["vmess://"+b64(vm)] = true
