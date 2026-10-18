@@ -24,6 +24,7 @@ type Snapshot struct {
 	Version    string        `json:"version"`
 	Cores      CoreInfo      `json:"cores"`
 	WorkingNow int           `json:"working_now"`
+	Mobile     bool          `json:"mobile"` // the Android app: one VPN mode, no admin`
 	TotalGood  int           `json:"total_good"`
 }
 
@@ -56,6 +57,7 @@ func (e *Engine) Snapshot() Snapshot {
 	countries := e.Countries()
 	now := time.Now()
 	e.mu.Lock()
+	e.uiSeen = now
 	total, untested, dead := e.poolStats[0], e.poolStats[1], e.poolStats[2]
 	working := 0
 	for _, s := range e.good {
@@ -78,6 +80,7 @@ func (e *Engine) Snapshot() Snapshot {
 		Countries:  countries,
 		Settings:   e.settings,
 		Version:    e.opt.Version,
+		Mobile:     e.opt.Mobile,
 		Cores:      CoreInfo{SingBox: e.bin.SingBox != "", Xray: e.bin.Xray != "", WarpPlus: e.bin.WarpPlus != ""},
 		WorkingNow: working,
 		TotalGood:  len(e.good),
@@ -133,6 +136,9 @@ func (e *Engine) Import(text string) (int, error) {
 	}
 	e.mu.Unlock()
 	added := e.ingest(idx, importSource, text, nil)
+	if len(text) > 1<<20 {
+		releaseMemory()
+	}
 	e.poke()
 	return added, nil
 }

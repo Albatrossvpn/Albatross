@@ -85,6 +85,9 @@ type Engine struct {
 	hintCounts   map[string]int
 	logs         []LogLine
 	localDNS     string
+	uiSeen       time.Time     // last time the UI asked for a snapshot
+	countries    []CountryInfo // cached for countryCache
+	countriesAt  time.Time
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -501,6 +504,11 @@ type CountryInfo struct {
 func (e *Engine) Countries() []CountryInfo {
 	now := time.Now()
 	e.mu.Lock()
+	if now.Sub(e.countriesAt) < countryCache {
+		out := e.countries
+		e.mu.Unlock()
+		return out
+	}
 	m := map[string]*CountryInfo{}
 	get := func(code string) *CountryInfo {
 		ci, ok := m[code]
@@ -544,8 +552,15 @@ func (e *Engine) Countries() []CountryInfo {
 		}
 		return out[i].Candidates > out[j].Candidates
 	})
+	e.mu.Lock()
+	e.countries, e.countriesAt = out, now
+	e.mu.Unlock()
 	return out
 }
+
+// countryCache is how long the country list is reused. The UI asks every
+// second and the list changes slowly.
+const countryCache = 3 * time.Second
 
 // ServerInfo is a working server as shown in the UI.
 type ServerInfo struct {

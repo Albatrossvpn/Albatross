@@ -933,25 +933,35 @@ func splitEarlyData(path string, ed int) (string, int) {
 // ParseText extracts every usable node from a subscription body in any of
 // the supported formats. It also reports how many links it saw.
 func ParseText(text string) (nodes []*Node, seen int) {
+	seen = EachText(text, func(n *Node) { nodes = append(nodes, n) })
+	return nodes, seen
+}
+
+// EachText is ParseText one node at a time: fn gets every usable node as
+// it is parsed, so a list of a hundred thousand links never sits in memory
+// as nodes all at once. It reports how many links it saw.
+func EachText(text string, fn func(*Node)) (seen int) {
+	var clash []*Node
 	if strings.Contains(head(text, 1<<16), "proxies:") {
-		nodes = ParseClash(text)
-		if len(nodes) > 0 {
-			return nodes, len(nodes)
-		}
+		clash = ParseClash(text)
 	} else if !schemeRe.MatchString(head(text, 4096)) && !looksHTML(text) {
 		if dec, ok := decodeSubscription(text); ok && strings.Contains(head(dec, 1<<16), "proxies:") {
-			if nodes = ParseClash(dec); len(nodes) > 0 {
-				return nodes, len(nodes)
-			}
+			clash = ParseClash(dec)
 		}
+	}
+	if len(clash) > 0 {
+		for _, n := range clash {
+			fn(n)
+		}
+		return len(clash)
 	}
 	links := ExtractLinks(text)
 	for _, l := range links {
 		if n, err := ParseLink(l); err == nil {
-			nodes = append(nodes, n)
+			fn(n)
 		}
 	}
-	return nodes, len(links)
+	return len(links)
 }
 
 // Link returns a string that ParseLink turns back into this node: the
