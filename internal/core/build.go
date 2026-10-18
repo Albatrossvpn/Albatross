@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
@@ -30,21 +32,35 @@ type Set struct {
 
 // BuildOptions tune generated outbounds.
 type BuildOptions struct {
+	// Fragment fragments the TLS ClientHello of every TLS node.
 	Fragment bool
+	// FragmentFor, when set, picks fragmentation per node instead.
+	FragmentFor func(*node.Node) bool
+	// warpPorts maps warp-plus nodes to the SOCKS port their process
+	// listens on; nodes without a port are left out.
+	warpPorts map[*node.Node]int
 }
 
 // BuildSet lays nodes out for sing-box and, when needed, Xray.
 func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 	s := &Set{Nodes: nodes, Tags: make([]string, len(nodes))}
-	var xrayNodes []int
+	var xrayNodes, wpNodes []int
 	for i, n := range nodes {
 		tag := "n" + strconv.Itoa(i)
 		s.Tags[i] = tag
-		if n.Engine() == node.EngineXray {
+		switch n.Engine() {
+		case node.EngineXray:
 			xrayNodes = append(xrayNodes, i)
 			continue
+		case node.EngineWarpPlus:
+			wpNodes = append(wpNodes, i)
+			continue
 		}
-		obj, ep := n.SingBox(tag, node.SingBoxOptions{Fragment: o.Fragment})
+		frag := o.Fragment
+		if o.FragmentFor != nil {
+			frag = frag || o.FragmentFor(n)
+		}
+		obj, ep := n.SingBox(tag, node.SingBoxOptions{Fragment: frag})
 		if ep {
 			s.Endpoints = append(s.Endpoints, obj)
 			s.epIdx = append(s.epIdx, i)
@@ -52,6 +68,16 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 			s.Outbounds = append(s.Outbounds, obj)
 			s.outIdx = append(s.outIdx, i)
 		}
+	}
+	for _, i := range wpNodes {
+		port := o.warpPorts[nodes[i]]
+		if port == 0 {
+			port = 9 // discard: no process serves this node
+		}
+		s.Outbounds = append(s.Outbounds, map[string]any{
+			"type": "socks", "tag": s.Tags[i], "server": "127.0.0.1", "server_port": port, "version": "5",
+		})
+		s.outIdx = append(s.outIdx, i)
 	}
 	if len(xrayNodes) == 0 {
 		return s, nil
@@ -95,10 +121,12 @@ type Running struct {
 	Set      *Set
 	SingBox  *Process
 	Xray     *Process
-	Rejected []*node.Node
+	WarpPlus []*Process
+	Rejected []*node.Node // configs a core refused
+	Failed   []*node.Node // warp-plus methods that could not connect
 }
 
-// Stop stops both cores.
+// Stop stops every core.
 func (r *Running) Stop() {
 	if r == nil {
 		return
@@ -106,6 +134,9 @@ func (r *Running) Stop() {
 	r.SingBox.Stop()
 	if r.Xray != nil {
 		r.Xray.Stop()
+	}
+	for _, p := range r.WarpPlus {
+		p.Stop()
 	}
 }
 
@@ -139,15 +170,25 @@ type ConfigFunc func(s *Set) map[string]any
 func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o BuildOptions, cfg ConfigFunc, probe string) (*Running, error) {
 	var rejected []*node.Node
 	nodes = append([]*node.Node(nil), nodes...)
+	wp, ports, failed, nodes := r.startWarpPlus(ctx, nodes)
+	o.warpPorts = ports
+	stopWP := func() {
+		for _, p := range wp {
+			p.Stop()
+		}
+	}
 	for attempt := 0; attempt < 200; attempt++ {
 		if len(nodes) == 0 {
-			return nil, fmt.Errorf("no usable servers")
+			stopWP()
+			return &Running{Rejected: rejected, Failed: failed}, fmt.Errorf("no usable servers")
 		}
 		if err := ctx.Err(); err != nil {
+			stopWP()
 			return nil, err
 		}
 		set, err := BuildSet(nodes, o)
 		if err != nil {
+			stopWP()
 			return nil, err
 		}
 		var xr *Process
@@ -170,6 +211,7 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 					}
 					continue
 				}
+				stopWP()
 				return nil, err
 			}
 		}
@@ -195,13 +237,77 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 					}
 				}
 			}
+			stopWP()
 			return nil, err
 		}
-		return &Running{Set: set, SingBox: sb, Xray: xr, Rejected: rejected}, nil
+		return &Running{Set: set, SingBox: sb, Xray: xr, WarpPlus: wp, Rejected: rejected, Failed: failed}, nil
 	}
+	stopWP()
 	return nil, fmt.Errorf("too many rejected servers")
 }
 
+// startWarpPlus launches one warp-plus process per warp-plus node, in
+// parallel, and waits for each to open its SOCKS port. warp-plus only
+// listens once its tunnel is up, so this also tests the method.
+func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Process, map[*node.Node]int, []*node.Node, []*node.Node) {
+	var idx []int
+	for i, n := range nodes {
+		if n.Engine() == node.EngineWarpPlus {
+			idx = append(idx, i)
+		}
+	}
+	if len(idx) == 0 {
+		return nil, nil, nil, nodes
+	}
+	procs := make([]*Process, len(nodes))
+	ports, err := FreePorts(len(idx))
+	if err == nil && r.Bin.WarpPlus != "" {
+		var wg sync.WaitGroup
+		for k, i := range idx {
+			wg.Add(1)
+			go func(i, port int) {
+				defer wg.Done()
+				n := nodes[i]
+				bind := "127.0.0.1:" + strconv.Itoa(port)
+				cache := filepath.Join(r.Dir, "warp-plus", n.WPMode+"-"+strings.ToLower(n.WPCountry))
+				os.MkdirAll(cache, 0o755)
+				var onLine func(string)
+				if r.OnLine != nil {
+					onLine = func(l string) { r.OnLine("warp-plus", l) }
+				}
+				p, err := Start("warp-plus", r.Bin.WarpPlus, n.WarpPlusArgs(bind, cache), nil, onLine)
+				if err != nil {
+					return
+				}
+				if err := p.WaitListening(ctx, bind, 75*time.Second); err != nil {
+					p.Stop()
+					return
+				}
+				procs[i] = p
+			}(i, ports[k])
+		}
+		wg.Wait()
+	}
+	bound := map[*node.Node]int{}
+	var keep, failed []*node.Node
+	var running []*Process
+	k := 0
+	for i, n := range nodes {
+		if n.Engine() != node.EngineWarpPlus {
+			keep = append(keep, n)
+			continue
+		}
+		if procs[i] != nil {
+			keep = append(keep, n)
+			running = append(running, procs[i])
+			bound[n] = ports[k]
+		} else {
+			failed = append(failed, n)
+		}
+		k++
+	}
+	return running, bound, failed, keep
+}
 func dropIdx(nodes []*node.Node, idx []int, rejected []*node.Node) ([]*node.Node, []*node.Node) {
 	drop := map[int]bool{}
 	for _, i := range idx {

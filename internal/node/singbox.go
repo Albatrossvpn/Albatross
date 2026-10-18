@@ -7,8 +7,8 @@ import (
 
 // SingBoxOptions adjusts generated sing-box outbounds.
 type SingBoxOptions struct {
-	// Fragment splits the TLS ClientHello into several records, which gets
-	// past some SNI filters.
+	// Fragment splits the TLS ClientHello across TCP segments and TLS
+	// records, which gets past SNI filters that do not reassemble.
 	Fragment bool
 }
 
@@ -227,7 +227,7 @@ func (n *Node) sbTLS(o SingBoxOptions) map[string]any {
 			t["utls"] = map[string]any{"enabled": true, "fingerprint": "chrome"}
 		}
 	} else {
-		if n.Fragment {
+		if n.Fragment || o.Fragment {
 			t["fragment"] = true
 		}
 		if o.Fragment {

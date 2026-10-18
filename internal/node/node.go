@@ -19,6 +19,7 @@ const (
 	EngineNone Engine = iota
 	EngineSingBox
 	EngineXray
+	EngineWarpPlus
 )
 
 func (e Engine) String() string {
@@ -27,6 +28,8 @@ func (e Engine) String() string {
 		return "sing-box"
 	case EngineXray:
 		return "xray"
+	case EngineWarpPlus:
+		return "warp-plus"
 	}
 	return "none"
 }
@@ -93,6 +96,10 @@ type Node struct {
 	// OpenVPN (VPN Gate) material.
 	OVPN *OpenVPN `json:"ovpn,omitempty"`
 
+	// warp-plus methods: "warp", "gool" (WARP in WARP) or "psiphon".
+	WPMode    string `json:"wp_mode,omitempty"`
+	WPCountry string `json:"wp_country,omitempty"`
+
 	// Source is the original share link, kept for export.
 	Source string `json:"-"`
 }
@@ -144,6 +151,8 @@ func (n *Node) Key() string {
 	w(n.PrivateKey)
 	w(n.PeerPublicKey)
 	w(n.ECH)
+	w(n.WPMode)
+	w(n.WPCountry)
 	if n.OVPN != nil {
 		w(n.OVPN.Network)
 		w(strings.Join(n.OVPN.CA, ""))
@@ -166,7 +175,7 @@ func Key64(key string) uint64 {
 // reachability probe says nothing about it.
 func (n *Node) UDPBased() bool {
 	switch n.Proto {
-	case "hysteria", "hysteria2", "tuic", "wireguard":
+	case "hysteria", "hysteria2", "tuic", "wireguard", "warpplus":
 		return true
 	case "openvpn":
 		return n.OVPN != nil && n.OVPN.Network == "udp"
@@ -183,6 +192,9 @@ func (n *Node) Endpoint() string {
 func (n *Node) Engine() Engine {
 	if n.Validate() != nil {
 		return EngineNone
+	}
+	if n.Proto == "warpplus" {
+		return EngineWarpPlus
 	}
 	if n.needsXray() {
 		if n.xraySupported() {
@@ -230,6 +242,17 @@ func (n *Node) xraySupported() bool {
 
 // Validate rejects nodes that would make a core refuse its whole config.
 func (n *Node) Validate() error {
+	if n.Proto == "warpplus" {
+		switch n.WPMode {
+		case "warp", "gool":
+			return nil
+		case "psiphon":
+			if len(n.WPCountry) == 2 {
+				return nil
+			}
+		}
+		return fmt.Errorf("bad warp-plus method")
+	}
 	if n.Server == "" || strings.ContainsAny(n.Server, " \t/\\?#@,\"'") {
 		return fmt.Errorf("bad server %q", n.Server)
 	}
