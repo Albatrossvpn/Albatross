@@ -349,30 +349,38 @@ func (n *Node) sbOpenVPN(out map[string]any) map[string]any {
 	out["server_port"] = n.Port
 	out["network"] = v.Network
 	tls := map[string]any{"certificate": v.CA}
-	if len(v.Cert) > 0 {
+	if len(v.Cert) > 0 && len(v.Key) > 0 {
 		tls["client_certificate"] = v.Cert
-	}
-	if len(v.Key) > 0 {
 		tls["client_key"] = v.Key
 	}
 	if len(v.TLSCrypt) > 0 {
-		tls["control_wrap"] = map[string]any{"type": "tls-crypt", "key": v.TLSCrypt}
+		tls["control_wrap"] = map[string]any{"type": "tls_crypt", "key": v.TLSCrypt}
 	} else if len(v.TLSAuth) > 0 {
-		w := map[string]any{"type": "tls-auth", "key": v.TLSAuth}
-		if v.KeyDir != "" {
-			w["direction"] = v.KeyDir
+		w := map[string]any{"type": "tls_auth", "key": v.TLSAuth}
+		switch v.KeyDir {
+		case "1":
+			w["direction"] = "client"
+		case "0":
+			w["direction"] = "server"
 		}
 		tls["control_wrap"] = w
 	}
 	out["tls"] = tls
-	if v.Cipher != "" {
-		out["cipher"] = v.Cipher
+	ciphers := v.DataCipher
+	if len(ciphers) == 0 && v.Cipher != "" {
+		ciphers = []string{v.Cipher}
 	}
-	if len(v.DataCipher) > 0 {
-		out["data_ciphers"] = v.DataCipher
+	if len(ciphers) > 0 {
+		out["data_ciphers"] = ciphers
+	}
+	if v.Cipher != "" {
+		out["data_ciphers_fallback"] = v.Cipher
 	}
 	if v.Auth != "" {
 		out["auth"] = v.Auth
+	}
+	if v.Compress != "" {
+		out["allow_compression"] = "asym"
 	}
 	out["route_no_pull"] = true
 	return out
