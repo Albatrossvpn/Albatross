@@ -317,6 +317,9 @@ func (f *Fetcher) loadBody(s Source) (string, bool) {
 	return string(b), true
 }
 
+// Cached returns the last downloaded body of a source, if any.
+func (f *Fetcher) Cached(s Source) (string, bool) { return f.loadBody(s) }
+
 // CachedAt reports when a source was last fetched successfully.
 func (f *Fetcher) CachedAt(s Source) time.Time {
 	m, err := f.loadMeta(s)

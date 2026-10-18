@@ -978,3 +978,29 @@ func parseInternal(link string) (*Node, error) {
 	}
 	return n, nil
 }
+
+// WarpPlus makes a node for a warp-plus method.
+func WarpPlus(mode, country string) *Node {
+	n := &Node{Proto: "warpplus", WPMode: mode, WPCountry: strings.ToUpper(country)}
+	switch mode {
+	case "psiphon":
+		n.Name = "Psiphon " + n.WPCountry
+	case "gool":
+		n.Name = "WARP in WARP"
+	default:
+		n.Name = "Cloudflare WARP"
+	}
+	return n
+}
+
+// WarpPlusArgs are the command-line flags that run this method.
+func (n *Node) WarpPlusArgs(bind, cacheDir string) []string {
+	args := []string{"-b", bind, "--cache-dir", cacheDir, "-4", "--scan"}
+	switch n.WPMode {
+	case "gool":
+		args = append(args, "--gool")
+	case "psiphon":
+		args = append(args, "--cfon", "--country", n.WPCountry)
+	}
+	return args
+}

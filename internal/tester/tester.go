@@ -134,20 +134,18 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 	run, err := t.Runtime.Run(ctx, name, nodes, core.BuildOptions{Fragment: t.Fragment}, func(s *core.Set) map[string]any {
 		return testConfig(s, port, pass)
 	}, "127.0.0.1:"+strconv.Itoa(port))
-	if err != nil {
-		var rejected []*node.Node
-		if run != nil {
-			rejected = run.Rejected
-		}
-		for _, n := range rejected {
+	if run != nil {
+		for _, n := range run.Rejected {
 			onResult(Result{Node: n, Rejected: true, Err: "rejected by core"})
 		}
+		for _, n := range run.Failed {
+			onResult(Result{Node: n, Err: "could not connect"})
+		}
+	}
+	if err != nil {
 		return err
 	}
 	defer run.Stop()
-	for _, n := range run.Rejected {
-		onResult(Result{Node: n, Rejected: true, Err: "rejected by core"})
-	}
 	conc := t.Concurrency
 	if conc <= 0 {
 		conc = 32
@@ -170,7 +168,11 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 				return
 			}
 			proxy := &url.URL{Scheme: "http", User: url.UserPassword(tag, pass), Host: "127.0.0.1:" + strconv.Itoa(port)}
-			r := Probe(ctx, proxy, timeout)
+			limit := timeout
+			if n.Engine() == node.EngineWarpPlus {
+				limit = 3 * timeout
+			}
+			r := Probe(ctx, proxy, limit)
 			if !run.Alive() {
 				// The core crashed; the result says nothing about the node.
 				return
@@ -194,7 +196,8 @@ func Probe(ctx context.Context, proxy *url.URL, timeout time.Duration) Result {
 			return Result{OK: true, Delay: time.Since(start), Country: country, ExitIP: ip}
 		}
 		lastErr = err
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || isTimeout(err) {
+			// A server that times out once will not answer the fallback.
 			break
 		}
 	}
@@ -264,6 +267,14 @@ func parseTrace(body string) (ip, country string, err error) {
 		country = ""
 	}
 	return ip, country, nil
+}
+
+func isTimeout(err error) bool {
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	return errors.Is(err, context.DeadlineExceeded)
 }
 
 func shortErr(err error) string {
