@@ -92,6 +92,37 @@ func TestRealData(t *testing.T) {
 	}
 }
 
+func TestVPNGateRealData(t *testing.T) {
+	path, bin := os.Getenv("VPNGATE_CSV"), os.Getenv("SING_BOX")
+	if path == "" || bin == "" {
+		t.Skip("VPNGATE_CSV or SING_BOX not set")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers := ParseVPNGate(string(raw))
+	if len(servers) == 0 {
+		t.Fatal("no servers parsed")
+	}
+	var nodes []*Node
+	for _, s := range servers {
+		back, err := ParseLink(s.Node.Link())
+		if err != nil || back.Key() != s.Node.Key() {
+			t.Fatalf("round trip failed: %v", err)
+		}
+		nodes = append(nodes, back)
+	}
+	bad := checkSingBox(t, bin, nodes)
+	t.Logf("vpngate: %d servers, sing-box rejected %d", len(nodes), len(bad))
+	for _, b := range bad {
+		t.Logf("  %s", b.err)
+	}
+	if len(bad) > 0 {
+		t.Fail()
+	}
+}
+
 func truncate(s string, n int) string {
 	if len(s) > n {
 		return s[:n] + "…"
