@@ -362,13 +362,17 @@ func (e *Engine) monitor(ctx context.Context, c *connection) {
 	defer health.Stop()
 	upgrade := time.NewTicker(4 * time.Minute)
 	defer upgrade.Stop()
-	failures := 0
+	failures, ticks := 0, 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-traffic.C:
 			e.updateTraffic(c)
+			ticks++
+			if ticks%5 == 0 {
+				e.updateActive(c)
+			}
 		case <-health.C:
 			if !c.running.Alive() {
 				e.logf("warn", "هسته متوقف شد؛ اتصال دوباره…")
@@ -667,6 +671,10 @@ func (e *Engine) connInfo() *ConnInfo {
 		if s.Key == active {
 			info.Server, info.Proto = s.Name, s.Proto
 		}
+	}
+	if info.Server == "" && len(c.servers) > 0 {
+		// urltest starts on the first (fastest known) server.
+		info.Server, info.Proto = c.servers[0].Name, c.servers[0].Proto
 	}
 	return info
 }

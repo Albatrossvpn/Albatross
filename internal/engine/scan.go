@@ -769,7 +769,9 @@ func (e *Engine) statsLoop() {
 		}
 		counts := map[string]int{}
 		e.pool.Each(func(en *pool.Entry) {
-			if en.Hint[0] == 0 || en.State == pool.StateRejected || (en.State == pool.StateDead && en.Fails > 2) {
+			// Only untested servers are "possible": tested ones already
+			// count under their real exit country.
+			if en.Hint[0] == 0 || en.State != pool.StateNew {
 				return
 			}
 			counts[en.HintCode()]++
