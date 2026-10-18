@@ -75,6 +75,10 @@ ANDROID_HOME=/path/to/sdk VERSION=0.1.0 bash build/android/build.sh   # dist/Aza
 
 On Android the engine runs in the app process (gomobile) and the cores run as executables shipped as native libraries. Where Windows sets the system proxy, Android starts a `VpnService`; tun2socks carries the tunnel's packets to the local proxy. Set the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` repository secrets so CI signs APKs with one key (otherwise each build is signed with a throwaway debug key and cannot update the previous install).
 
+### Forcing an update
+
+Every copy from 0.2.2 on reads `update.json` from the `main` branch (directly, through GitHub's CDN mirrors, or through its own VPN) at start and every 6 hours, and keeps the last copy so it also holds offline. Raise `min_version` to stop older versions from connecting: they show a "new version needed" screen with `download_url`. A `latest_version` newer than the running one only shows an "update available" banner. Mirrors cache the file, so a change can take a few hours to reach everyone. Versions before 0.2.2 do not check.
+
 CI (`.github/workflows/build.yml`) runs the tests including end-to-end runs against real local servers, builds the app, bundles the cores, smoke-tests it on Windows, builds and installs the installer, and publishes a release for `v*` tags.
 
 Opt-in validation against real data:

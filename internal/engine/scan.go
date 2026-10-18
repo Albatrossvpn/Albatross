@@ -61,6 +61,7 @@ func (e *Engine) refreshLoop() {
 		if time.Since(ruleCheck) > 6*time.Hour {
 			ruleCheck = time.Now()
 			go updateRules(e.ctx, filepath.Join(e.dir, "rules"), e.anyClient)
+			go e.checkUpdate()
 		}
 		e.refreshDue()
 		e.mu.Lock()
