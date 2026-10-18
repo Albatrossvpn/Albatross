@@ -48,6 +48,11 @@ type Tester struct {
 	// LocalDNS resolves server names where the core cannot ask the system
 	// (Android); empty means the system's resolver.
 	LocalDNS string
+	// Mobile builds configs for the Android app: no auto_detect_interface.
+	// sing-box watches the interfaces over netlink for it, which Android
+	// denies to apps, and then refuses to start. The app is left out of its
+	// own VPN, so it has no tunnel to steer around anyway.
+	Mobile bool
 }
 
 // TCPProbe dials every TCP-based node and returns the connect time, or -1
@@ -138,7 +143,7 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 	pass := randomHex(8)
 	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof}
 	run, err := t.Runtime.Run(ctx, name, nodes, opts, func(s *core.Set) map[string]any {
-		return testConfig(s, port, pass, t.LocalDNS)
+		return testConfig(s, port, pass, t.LocalDNS, t.Mobile)
 	}, "127.0.0.1:"+strconv.Itoa(port))
 	if run != nil {
 		for _, n := range run.Rejected {
@@ -325,7 +330,7 @@ func DNSServer(addr string) map[string]any {
 	return s
 }
 
-func testConfig(s *core.Set, port int, pass, localDNS string) map[string]any {
+func testConfig(s *core.Set, port int, pass, localDNS string, mobile bool) map[string]any {
 	users := make([]any, 0, len(s.Tags))
 	rules := make([]any, 0, len(s.Tags)+1)
 	for _, tag := range s.Tags {
@@ -346,7 +351,7 @@ func testConfig(s *core.Set, port int, pass, localDNS string) map[string]any {
 			"rules":                   rules,
 			"default_domain_resolver": "local",
 			// Bind to the physical interface so tests bypass our own TUN.
-			"auto_detect_interface": true,
+			"auto_detect_interface": !mobile,
 		},
 	}
 	if len(s.Endpoints) > 0 {
