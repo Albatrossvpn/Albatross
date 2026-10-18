@@ -369,7 +369,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	opts := connOptions{
 		listen: listen, port: proxyPort, tun: set.Mode == "tun", bypassIran: set.BypassIran,
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
-		clashSecret: c.clashSecret, exe: e.opt.ExeName, localDNS: e.dns(),
+		clashSecret: c.clashSecret, exe: e.opt.ExeName, localDNS: e.dns(), mobile: e.opt.Mobile,
 	}
 	build := core.BuildOptions{
 		Fragment:    set.Fragment == "on",
@@ -534,6 +534,7 @@ type connOptions struct {
 	clashSecret string
 	exe         string
 	localDNS    string
+	mobile      bool
 }
 
 // connectConfig builds the sing-box config for a live connection.
@@ -589,9 +590,10 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		})
 	}
 	route := map[string]any{
-		"rules":                   rules,
-		"final":                   "proxy",
-		"auto_detect_interface":   true,
+		"rules": rules,
+		"final": "proxy",
+		// Never on Android: see tester.Tester.Mobile.
+		"auto_detect_interface":   !o.mobile,
 		"default_domain_resolver": "local",
 	}
 	if len(ruleSets) > 0 {

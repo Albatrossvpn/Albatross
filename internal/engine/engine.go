@@ -302,6 +302,7 @@ func (e *Engine) newTester() tester.Tester {
 	defer e.mu.Unlock()
 	t := *e.tester
 	t.LocalDNS = e.localDNS
+	t.Mobile = e.opt.Mobile
 	return t
 }
 

@@ -140,6 +140,25 @@ func TestAndroidPath(t *testing.T) {
 	case <-time.After(60 * time.Second):
 		t.Fatal("the engine never asked for the VPN")
 	}
+	// Android denies apps the netlink socket that sing-box's
+	// auto_detect_interface needs, and sing-box then refuses to start, so
+	// no config written on a phone may ask for it.
+	configs, _ := filepath.Glob(filepath.Join(dir, "data", "azadrah", "run", "*sing-box.json"))
+	if len(configs) == 0 {
+		t.Fatal("no core configs written")
+	}
+	for _, path := range configs {
+		var cfg struct {
+			Route map[string]any `json:"route"`
+		}
+		b, _ := os.ReadFile(path)
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Route["auto_detect_interface"] == true {
+			t.Fatalf("%s asks for auto_detect_interface, which stops sing-box on Android", filepath.Base(path))
+		}
+	}
 
 	// TCP into the tunnel: only the VPN server can reach testIP.
 	direct := &http.Client{Timeout: 15 * time.Second, Transport: &http.Transport{Proxy: nil}}
