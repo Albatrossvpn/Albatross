@@ -53,6 +53,7 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
+.mobile .desktop-only { display: none !important; }
 body {
   background: var(--bg-grad), var(--bg);
   color: var(--text);
