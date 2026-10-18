@@ -43,6 +43,8 @@ type Tester struct {
 	TCPConcurrency int
 	TCPTimeout     time.Duration
 	Fragment       bool
+	FragmentFor    func(*node.Node) bool
+	Spoof          string
 }
 
 // TCPProbe dials every TCP-based node and returns the connect time, or -1
@@ -131,7 +133,8 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 	}
 	port := ports[0]
 	pass := randomHex(8)
-	run, err := t.Runtime.Run(ctx, name, nodes, core.BuildOptions{Fragment: t.Fragment}, func(s *core.Set) map[string]any {
+	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof}
+	run, err := t.Runtime.Run(ctx, name, nodes, opts, func(s *core.Set) map[string]any {
 		return testConfig(s, port, pass)
 	}, "127.0.0.1:"+strconv.Itoa(port))
 	if run != nil {

@@ -36,6 +36,8 @@ type BuildOptions struct {
 	Fragment bool
 	// FragmentFor, when set, picks fragmentation per node instead.
 	FragmentFor func(*node.Node) bool
+	// Spoof is the allowed SNI for forged ClientHellos ("" = off).
+	Spoof string
 	// warpPorts maps warp-plus nodes to the SOCKS port their process
 	// listens on; nodes without a port are left out.
 	warpPorts map[*node.Node]int
@@ -60,7 +62,7 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 		if o.FragmentFor != nil {
 			frag = frag || o.FragmentFor(n)
 		}
-		obj, ep := n.SingBox(tag, node.SingBoxOptions{Fragment: frag})
+		obj, ep := n.SingBox(tag, node.SingBoxOptions{Fragment: frag, Spoof: o.Spoof})
 		if ep {
 			s.Endpoints = append(s.Endpoints, obj)
 			s.epIdx = append(s.epIdx, i)
