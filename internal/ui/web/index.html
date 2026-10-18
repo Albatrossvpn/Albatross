@@ -100,7 +100,7 @@
     <section class="view" id="view-settings">
       <div class="view-head"><h2>تنظیمات</h2></div>
 
-      <div class="card group">
+      <div class="card group desktop-only">
         <div class="group-title">نوع اتصال</div>
         <div class="segmented" id="set-mode">
           <button data-v="proxy">پروکسی سیستم</button>
@@ -127,7 +127,7 @@
         <label class="toggle"><input type="checkbox" id="set-clean_ip"><span class="t-body"><b>آی‌پی تمیز کلودفلر</b><small>برای سرورهای پشت CDN، آی‌پی‌هایی را که روی اینترنت شما باز هستند پیدا می‌کند</small></span><span class="switch"></span></label>
         <label class="toggle"><input type="checkbox" id="set-warp"><span class="t-body"><b>WARP و سایفون</b><small>روش‌های پشتیبان: Cloudflare WARP، WARP در WARP و Psiphon در ۳۲ کشور</small></span><span class="switch"></span></label>
         <label class="toggle"><input type="checkbox" id="set-allow_plain"><span class="t-body"><b>سرورهای بدون رمزنگاری</b><small>برخی تونل‌های داخلی؛ سایت‌های HTTPS همچنان رمزنگاری می‌شوند</small></span><span class="switch"></span></label>
-        <div class="field column">
+        <div class="field column desktop-only">
           <span class="t-body"><b>جعل SNI (TLS Spoof)</b><small>یک دامنه مجاز بنویسید تا قبل از اتصال واقعی، دست‌دهی جعلی با آن فرستاده شود. فقط با دسترسی مدیر. برای اینترنت ملی/لیست سفید.</small></span>
           <input id="set-spoof_sni" dir="ltr" placeholder="مثلاً www.aparat.com">
         </div>
@@ -147,7 +147,7 @@
       <div class="card group">
         <div class="group-title">برنامه</div>
         <label class="toggle"><input type="checkbox" id="set-auto_connect"><span class="t-body"><b>اتصال خودکار هنگام اجرا</b><small>به آخرین کشور انتخاب‌شده وصل شود</small></span><span class="switch"></span></label>
-        <label class="toggle"><input type="checkbox" id="set-start_with_windows"><span class="t-body"><b>اجرا همراه ویندوز</b><small>بعد از روشن شدن کامپیوتر خودکار باز شود</small></span><span class="switch"></span></label>
+        <label class="toggle desktop-only"><input type="checkbox" id="set-start_with_windows"><span class="t-body"><b>اجرا همراه ویندوز</b><small>بعد از روشن شدن کامپیوتر خودکار باز شود</small></span><span class="switch"></span></label>
         <label class="toggle"><input type="checkbox" id="set-allow_lan"><span class="t-body"><b>اشتراک در شبکه محلی</b><small>گوشی و دستگاه‌های دیگر هم با آی‌پی این کامپیوتر از پروکسی استفاده کنند</small></span><span class="switch"></span></label>
         <div class="field">
           <span class="t-body"><b>پورت پروکسی</b><small>HTTP و SOCKS روی یک پورت</small></span>

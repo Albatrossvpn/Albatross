@@ -80,6 +80,7 @@ let view = "home";
 
 function render(s) {
   state = s;
+  document.body.classList.toggle("mobile", !!s.mobile);
   const p = $("power");
   const busy = s.status === "searching" || s.status === "connecting" || s.status === "reconnecting";
   p.classList.toggle("busy", busy);
@@ -109,7 +110,7 @@ function render(s) {
     $("st-time").textContent = duration(Date.now() / 1000 - c.since);
     const proto = protoNames[c.proto] || c.proto || "";
     const backups = c.ready ? `${fa(c.ready)} سرور پشتیبان آماده در همین کشور` : "در حال آماده کردن سرور پشتیبان";
-    $("exit-line").innerHTML = `آی‌پی شما در اینترنت: <code>${esc(c.exit_ip || "—")}</code> · ${esc(proto)} · ${backups} · ${c.mode === "tun" ? "تونل کامل" : "پروکسی " + `<code>${esc(c.proxy_addr)}</code>`}`;
+    $("exit-line").innerHTML = `آی‌پی شما در اینترنت: <code>${esc(c.exit_ip || "—")}</code> · ${esc(proto)} · ${backups} · ${s.mobile ? "VPN برای همه برنامه‌ها" : c.mode === "tun" ? "تونل کامل" : "پروکسی " + `<code>${esc(c.proxy_addr)}</code>`}`;
   }
 
   const target = s.countries.find((x) => x.code === s.target);
@@ -418,11 +419,28 @@ async function loadLogs() {
   }).join("") || `<div class="empty">هنوز گزارشی نیست</div>`;
 }
 
+// The Android back button: close what is open, then go home; false lets
+// the app go to the background.
+window.azadrahBack = () => {
+  if (!$("sheet").classList.contains("hidden")) { closeSheet(); return true; }
+  if (!$("admin-modal").classList.contains("hidden")) { $("admin-modal").classList.add("hidden"); return true; }
+  if (view !== "home") { show("home"); return true; }
+  return false;
+};
+
 // ---------- Loop ----------
 
-poll();
-setInterval(poll, 1000);
+// Once a second while visible; a hidden window (minimized, in the tray, or
+// an app in the background) checks in rarely, which lets the engine skip
+// work nobody would see.
+async function loop() {
+  await poll();
+  setTimeout(loop, document.hidden ? 5000 : 1000);
+}
+loop();
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 setInterval(() => {
+  if (document.hidden) return;
   if (view === "logs") loadLogs();
   if (view === "servers") loadServers();
 }, 4000);

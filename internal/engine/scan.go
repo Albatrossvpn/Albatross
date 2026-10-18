@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -121,8 +122,13 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 	e.mu.Lock()
 	e.scan.Phase = ""
 	e.mu.Unlock()
+	releaseMemory()
 	e.poke()
 }
+
+// releaseMemory hands memory freed after parsing large lists back to the
+// system right away instead of keeping it for later.
+func releaseMemory() { debug.FreeOSMemory() }
 
 // refreshDue downloads every source whose refresh time has come.
 func (e *Engine) refreshDue() {
@@ -221,6 +227,7 @@ func (e *Engine) refreshDue() {
 	e.mu.Unlock()
 	e.pool.NextCycle()
 	e.pool.Compact(6)
+	releaseMemory()
 	e.logf("info", "به‌روزرسانی منابع تمام شد: %d منبع در دسترس، %d سرور در صف آزمایش.", total, e.pool.Len())
 }
 
@@ -236,22 +243,6 @@ var parseSlots = make(chan struct{}, 2)
 func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint64][2]uint32) int {
 	parseSlots <- struct{}{}
 	defer func() { <-parseSlots }()
-	type item struct {
-		n    *node.Node
-		hint string
-	}
-	var items []item
-	switch s.Kind {
-	case sources.KindVPNGate:
-		for _, v := range node.ParseVPNGate(text) {
-			items = append(items, item{v.Node, v.Country})
-		}
-	default:
-		nodes, _ := node.ParseText(text)
-		for _, n := range nodes {
-			items = append(items, item{n, ""})
-		}
-	}
 	scores := e.sourceScores()
 	scoreOf := func(i uint16) float64 {
 		if int(i) < len(scores) {
@@ -260,14 +251,14 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 		return 0
 	}
 	fresh := s.Kind == sources.KindTelegram || s.Tier == sources.TierPriority || s.Tier == sources.TierUser
-	added := 0
-	for _, it := range items {
-		n := it.n
+	added, count := 0, 0
+	// Nodes go into the pool as they are parsed; see node.EachText.
+	add := func(n *node.Node, hint string) {
+		count++
 		eng := n.Engine()
 		if eng == node.EngineNone {
-			continue
+			return
 		}
-		hint := it.hint
 		if hint == "" {
 			hint = geo.Hint(n.Name)
 		}
@@ -296,8 +287,16 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 			}
 		}
 	}
+	switch s.Kind {
+	case sources.KindVPNGate:
+		for _, v := range node.ParseVPNGate(text) {
+			add(v.Node, v.Country)
+		}
+	default:
+		node.EachText(text, func(n *node.Node) { add(n, "") })
+	}
 	e.mu.Lock()
-	e.srcStats[idx].Nodes = len(items)
+	e.srcStats[idx].Nodes = count
 	e.mu.Unlock()
 	return added
 }
@@ -471,18 +470,54 @@ func (e *Engine) pickBatch(size int) []candidate {
 	return out
 }
 
+// scanPace says how hard to scan right now: how many candidates per batch,
+// how many servers one test core holds, and the pause between batches.
+// Searching for a server gets everything. Once the chosen country (or the
+// world, for the fastest) has plenty of working servers, connected or not,
+// scanning drops to a trickle of small batches in small cores.
+func (e *Engine) scanPace() (size, chunk int, pause time.Duration) {
+	now := time.Now()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	size, chunk = 300, 150
+	switch e.settings.Intensity {
+	case "max":
+		size = 600
+	case "low":
+		size = 120
+	}
+	if e.wantConnect && e.conn == nil {
+		return size, chunk, 0
+	}
+	ready := 0
+	for _, s := range e.good {
+		if s.Country != "IR" && s.usable(now) && (e.target == "" || s.Country == e.target) {
+			ready++
+		}
+	}
+	switch {
+	case e.settings.Intensity == "max":
+		if e.conn != nil {
+			pause = 3 * time.Second
+		}
+	case ready >= 2*groupSize:
+		size, chunk, pause = max(size/5, 24), 50, time.Minute
+	case ready >= groupSize:
+		size, chunk, pause = size/2, 75, 15*time.Second
+	case e.conn != nil:
+		pause = 3 * time.Second
+	}
+	if e.settings.Intensity == "low" {
+		pause += 5 * time.Second
+	}
+	return size, chunk, pause
+}
+
 // scanLoop tests candidates forever.
 func (e *Engine) scanLoop() {
 	defer e.wg.Done()
 	for e.ctx.Err() == nil {
-		size := 300
-		e.mu.Lock()
-		if e.settings.Intensity == "max" {
-			size = 600
-		} else if e.settings.Intensity == "low" {
-			size = 120
-		}
-		e.mu.Unlock()
+		size, chunk, _ := e.scanPace()
 		batch := e.pickBatch(size)
 		if len(batch) == 0 {
 			select {
@@ -493,29 +528,27 @@ func (e *Engine) scanLoop() {
 			}
 			continue
 		}
-		e.runBatch(batch)
-		e.mu.Lock()
-		connected := e.conn != nil
-		low := e.settings.Intensity == "low"
-		e.mu.Unlock()
-		pause := time.Duration(0)
-		if connected {
-			pause = 3 * time.Second
-		}
-		if low {
-			pause += 5 * time.Second
-		}
-		if pause > 0 {
+		e.runBatch(batch, chunk)
+		done := time.Now()
+		// Wake-ups (a new target, a connect request, new candidates) end the
+		// pause only when the pace they lead to allows it.
+		for {
+			_, _, pause := e.scanPace()
+			left := time.Until(done.Add(pause))
+			if left <= 0 {
+				break
+			}
 			select {
 			case <-e.ctx.Done():
 				return
-			case <-time.After(pause):
+			case <-e.wake:
+			case <-time.After(left):
 			}
 		}
 	}
 }
 
-func (e *Engine) runBatch(batch []candidate) {
+func (e *Engine) runBatch(batch []candidate, chunk int) {
 	e.mu.Lock()
 	frag := e.settings.Fragment
 	cleanOn := e.settings.CleanIP
@@ -576,7 +609,7 @@ func (e *Engine) runBatch(batch []candidate) {
 	// Real tests. Servers that fail get one more chance with the tricks
 	// that beat SNI filtering: a fragmented ClientHello and, behind
 	// Cloudflare, an edge IP that is not blocked here.
-	failed := e.realTest(live, spoof)
+	failed := e.realTest(live, spoof, chunk)
 	var retry []candidate
 	clean := e.cf.Best()
 	for _, c := range failed {
@@ -594,7 +627,7 @@ func (e *Engine) runBatch(batch []candidate) {
 		}
 	}
 	if len(retry) > 0 && e.ctx.Err() == nil {
-		for _, c := range e.realTest(retry, spoof) {
+		for _, c := range e.realTest(retry, spoof, chunk) {
 			e.recordFail(c, "failed")
 		}
 	}
@@ -654,8 +687,7 @@ func (e *Engine) unpoison(cands []candidate) []candidate {
 // realTest tests candidates in chunks and returns the ones that failed.
 // Rejected and working servers are recorded here; failures are left to
 // the caller, which may retry them.
-func (e *Engine) realTest(cands []candidate, spoof string) []candidate {
-	const chunk = 150
+func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidate {
 	var failed []candidate
 	var mu sync.Mutex
 	for _, part := range chunks(cands, chunk) {
@@ -791,23 +823,28 @@ func (e *Engine) statsLoop() {
 	defer e.wg.Done()
 	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
-	saves := 0
-	for {
+	for n := 1; ; n++ {
 		select {
 		case <-e.ctx.Done():
 			return
 		case <-tick.C:
 		}
-		counts := map[string]int{}
-		e.pool.Each(func(en *pool.Entry) {
-			// Only untested servers are "possible": tested ones already
-			// count under their real exit country.
-			if en.Hint[0] == 0 || en.State != pool.StateNew {
-				return
-			}
-			counts[en.HintCode()]++
-		})
-		total, untested, dead, okN := e.pool.Stats()
+		if n%24 == 0 {
+			e.saveServers()
+			e.saveSourceStats()
+			e.saveStates()
+		}
+		// Counting a large pool is the costliest thing here; nobody sees the
+		// numbers while the window is closed, so do it once a minute then.
+		e.mu.Lock()
+		watched := time.Since(e.uiSeen) < 3*time.Second
+		e.mu.Unlock()
+		if !watched && n%12 != 0 {
+			continue
+		}
+		// Only untested servers are "possible": tested ones already count
+		// under their real exit country.
+		total, untested, dead, okN, counts := e.pool.Census()
 		e.mu.Lock()
 		e.poolStats = [4]int{total, untested, dead, okN}
 		e.hintCounts = counts
@@ -818,11 +855,5 @@ func (e *Engine) statsLoop() {
 		}
 		e.scan.recent = e.scan.recent[i:]
 		e.mu.Unlock()
-		saves++
-		if saves%24 == 0 {
-			e.saveServers()
-			e.saveSourceStats()
-			e.saveStates()
-		}
 	}
 }
