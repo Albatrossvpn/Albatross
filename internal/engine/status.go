@@ -24,7 +24,8 @@ type Snapshot struct {
 	Version    string        `json:"version"`
 	Cores      CoreInfo      `json:"cores"`
 	WorkingNow int           `json:"working_now"`
-	Mobile     bool          `json:"mobile"` // the Android app: one VPN mode, no admin`
+	Mobile     bool          `json:"mobile"` // the Android app: one VPN mode, no admin
+	Update     *UpdateInfo   `json:"update,omitempty"`
 	TotalGood  int           `json:"total_good"`
 }
 
@@ -81,6 +82,7 @@ func (e *Engine) Snapshot() Snapshot {
 		Settings:   e.settings,
 		Version:    e.opt.Version,
 		Mobile:     e.opt.Mobile,
+		Update:     e.update,
 		Cores:      CoreInfo{SingBox: e.bin.SingBox != "", Xray: e.bin.Xray != "", WarpPlus: e.bin.WarpPlus != ""},
 		WorkingNow: working,
 		TotalGood:  len(e.good),

@@ -104,6 +104,9 @@ func (c *connection) uses(key string) bool {
 // Connect connects to the fastest servers in country ("" = anywhere). If
 // none are known yet it searches until it finds some.
 func (e *Engine) Connect(country string) error {
+	if e.updateRequired() {
+		return ErrUpdateRequired
+	}
 	country = strings.ToUpper(strings.TrimSpace(country))
 	e.mu.Lock()
 	e.target = country
@@ -124,6 +127,9 @@ func (e *Engine) Connect(country string) error {
 
 // ConnectServer connects to one specific working server.
 func (e *Engine) ConnectServer(key string) error {
+	if e.updateRequired() {
+		return ErrUpdateRequired
+	}
 	e.mu.Lock()
 	var s *Server
 	for _, g := range e.good {
