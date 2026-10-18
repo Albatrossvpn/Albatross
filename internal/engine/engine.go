@@ -72,6 +72,8 @@ type Engine struct {
 	message      string
 	target       string // country the user wants ("" = fastest anywhere)
 	wantConnect  bool   // keep trying to connect until a server is found
+	connGen      int    // bumped by every user connect/disconnect; stale loops exit
+	poolStats    [4]int // total, untested, dead, ok; refreshed by statsLoop
 	scan         scanState
 	hintCounts   map[string]int
 	logs         []LogLine
