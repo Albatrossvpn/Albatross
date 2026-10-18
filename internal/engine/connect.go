@@ -2,12 +2,9 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"net/url"
 	"path/filepath"
 	"sort"
@@ -22,33 +19,58 @@ import (
 	"github.com/cezomagoanlace29861-jpg/vp/internal/tester"
 )
 
-// groupSize is how many servers one connection keeps ready. sing-box's
-// urltest keeps using the lowest-delay one and fails over instantly.
-const groupSize = 12
+// groupSize is how many servers one connection keeps ready: the one in use
+// and its backups, all from the same country. They run in one core behind a
+// selector, so moving to a backup is a change of selection, not a restart.
+const groupSize = 8
+
+// minReady is how many members of a group should be known to work. Below
+// that the group is refreshed with new servers from the same country the
+// next time the connection is idle.
+const minReady = 3
 
 type connection struct {
-	country     string
+	country     string // what the user asked for ("" = fastest anywhere)
+	home        string // country the group was built in; backups stay here
+	pinned      bool   // the user picked this one server
 	mode        string
 	proxyAddr   string
 	running     *core.Running
 	servers     []*Server
-	tags        map[string]string // sing-box tag -> server key
+	members     []*member
 	clashAddr   string
 	clashSecret string
 	started     time.Time
 	sysProxy    bool
 	cancel      context.CancelFunc
+	wake        chan struct{} // asks the monitor to check the active server now
 
-	mu      sync.Mutex
-	active  string // key of the server urltest picked
+	mu       sync.Mutex
+	active   *member
+	delay    int
+	exitIP   string
+	exitCC   string
+	up       int64
+	down     int64
+	upRate   int64
+	dnRate   int64
+	lastBusy time.Time // last second that carried traffic
+	waiting  time.Time // when data went out with nothing back since
+	healthy  bool
+}
+
+// member is one server of a live group.
+type member struct {
+	tag      string // outbound tag in the core
+	server   *Server
+	country  string // exit country when the group was built
+	endpoint string // host:port to dial for an offline check ("" for UDP)
+
+	// Guarded by connection.mu.
+	alive   bool
 	delay   int
-	exitIP  string
-	exitCC  string
-	up      int64
-	down    int64
-	upRate  int64
-	dnRate  int64
-	healthy bool
+	fails   int // failed checks in a row
+	checked time.Time
 }
 
 func (c *connection) ready() bool {
@@ -57,10 +79,17 @@ func (c *connection) ready() bool {
 	return c.healthy
 }
 
-func (c *connection) activeKey() string {
+func (c *connection) activeMember() *member {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.active
+}
+
+func (c *connection) activeKey() string {
+	if m := c.activeMember(); m != nil {
+		return m.server.Key
+	}
+	return ""
 }
 
 func (c *connection) uses(key string) bool {
@@ -90,7 +119,7 @@ func (e *Engine) Connect(country string) error {
 		return ErrNeedAdmin
 	}
 	e.poke()
-	return e.connectLoop(gen, country, nil)
+	return e.connectLoop(gen, country, "", nil, nil)
 }
 
 // ConnectServer connects to one specific working server.
@@ -111,7 +140,7 @@ func (e *Engine) ConnectServer(key string) error {
 	e.connGen++
 	gen := e.connGen
 	e.mu.Unlock()
-	return e.connectLoop(gen, s.Country, []*Server{s})
+	return e.connectLoop(gen, s.Country, "", []*Server{s}, nil)
 }
 
 func countryName(code string) string {
@@ -122,10 +151,16 @@ func countryName(code string) string {
 	return c.FA
 }
 
-func (e *Engine) connectLoop(gen int, country string, pinned []*Server) error {
+// connectLoop keeps trying until a group in country is up. home keeps a
+// fastest-anywhere connection in the country it was already using; avoid
+// lists servers that just failed.
+func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, avoid []string) error {
 	name := countryName(country)
 	deadline := time.Now().Add(3 * time.Minute)
-	var exclude = map[string]bool{}
+	exclude := map[string]bool{}
+	for _, k := range avoid {
+		exclude[k] = true
+	}
 	for attempt := 0; ; attempt++ {
 		e.mu.Lock()
 		want := e.wantConnect && e.target == country && e.connGen == gen
@@ -135,9 +170,14 @@ func (e *Engine) connectLoop(gen int, country string, pinned []*Server) error {
 		}
 		picks := pinned
 		if picks == nil {
-			picks = e.bestServers(country, groupSize, exclude)
+			picks = e.pickGroup(country, home, exclude)
 		}
 		if len(picks) == 0 {
+			if len(exclude) > 0 {
+				// Everything usable has been tried once; try again after the
+				// pause. Servers that keep failing drop out on their own.
+				exclude = map[string]bool{}
+			}
 			e.setStatus(StatusSearching, fmt.Sprintf("در حال جستجوی سرور سالم برای %s…", name))
 			if time.Now().After(deadline) {
 				e.setStatus(StatusSearching, fmt.Sprintf("هنوز سروری برای %s پیدا نشده؛ جستجو ادامه دارد و به محض پیدا شدن وصل می‌شوید.", name))
@@ -150,7 +190,7 @@ func (e *Engine) connectLoop(gen int, country string, pinned []*Server) error {
 			continue
 		}
 		e.setStatus(StatusConnecting, fmt.Sprintf("در حال اتصال به %s…", name))
-		err := e.start(gen, country, picks)
+		err := e.start(gen, country, picks, pinned != nil)
 		if err == nil {
 			return nil
 		}
@@ -160,11 +200,6 @@ func (e *Engine) connectLoop(gen int, country string, pinned []*Server) error {
 		e.logf("warn", "اتصال ناموفق: %v", err)
 		for _, s := range picks {
 			exclude[s.Key] = true
-			if errors.Is(err, errServers) {
-				e.mu.Lock()
-				s.Fails++
-				e.mu.Unlock()
-			}
 		}
 		if pinned != nil {
 			e.setStatus(StatusIdle, "این سرور الان کار نمی‌کند.")
@@ -177,6 +212,35 @@ func (e *Engine) connectLoop(gen int, country string, pinned []*Server) error {
 			exclude = map[string]bool{}
 		}
 	}
+}
+
+// pickGroup chooses the servers for a connection: the fastest in country
+// with backups from the same country. A fastest-anywhere group forms around
+// the best server's country (or home, when it already had one) and reaches
+// into other countries only when that country runs short.
+func (e *Engine) pickGroup(country, home string, exclude map[string]bool) []*Server {
+	if country != "" {
+		return e.bestServers(country, groupSize, exclude)
+	}
+	if home == "" {
+		best := e.bestServers("", 1, exclude)
+		if len(best) == 0 {
+			return nil
+		}
+		home = best[0].Country
+	}
+	group := e.bestServers(home, groupSize, exclude)
+	if len(group) >= minReady {
+		return group
+	}
+	skip := map[string]bool{}
+	for k := range exclude {
+		skip[k] = true
+	}
+	for _, s := range group {
+		skip[s.Key] = true
+	}
+	return append(group, e.bestServers("", groupSize-len(group), skip)...)
 }
 
 // bestServers picks the lowest-delay usable servers in a country.
@@ -218,7 +282,7 @@ func (e *Engine) bestServers(country string, n int, exclude map[string]bool) []*
 			keys[nd.PrivateKey] = true
 		}
 		if nd.Proto == "warpplus" {
-			if warpPlus >= 2 {
+			if warpPlus >= 1 {
 				continue
 			}
 			warpPlus++
@@ -246,7 +310,7 @@ func portFree(listen string, port int) bool {
 }
 
 // start runs the cores for a group of servers and switches over to them.
-func (e *Engine) start(gen int, country string, servers []*Server) error {
+func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) error {
 	e.mu.Lock()
 	set := e.settings
 	old := e.conn
@@ -287,21 +351,31 @@ func (e *Engine) start(gen int, country string, servers []*Server) error {
 	if err != nil {
 		return err
 	}
+	home := country
+	if home == "" {
+		home = servers[0].Country
+	}
 	c := &connection{
 		country:     country,
+		home:        home,
+		pinned:      pinned,
 		mode:        set.Mode,
 		proxyAddr:   "127.0.0.1:" + strconv.Itoa(proxyPort),
 		clashAddr:   "127.0.0.1:" + strconv.Itoa(ports[0]),
 		clashSecret: randomToken(),
 		started:     time.Now(),
-		tags:        map[string]string{},
+		wake:        make(chan struct{}, 1),
 	}
 	opts := connOptions{
 		listen: listen, port: proxyPort, tun: set.Mode == "tun", bypassIran: set.BypassIran,
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
-		clashSecret: c.clashSecret, exe: e.opt.ExeName,
+		clashSecret: c.clashSecret, exe: e.opt.ExeName, localDNS: e.dns(),
 	}
-	build := core.BuildOptions{Fragment: set.Fragment == "on", FragmentFor: func(n *node.Node) bool { return fragFor[n] }}
+	build := core.BuildOptions{
+		Fragment:    set.Fragment == "on",
+		FragmentFor: func(n *node.Node) bool { return fragFor[n] },
+		OnLine:      c.watchLog,
+	}
 	if set.SpoofSNI != "" && e.opt.IsAdmin() {
 		build.Spoof = set.SpoofSNI
 	}
@@ -321,16 +395,56 @@ func (e *Engine) start(gen int, country string, servers []*Server) error {
 		}
 	}
 	c.running = run
+	// The API that switches servers can come up a moment after the proxy
+	// port does.
+	if err := run.SingBox.WaitListening(ctx, c.clashAddr, 5*time.Second); err != nil {
+		run.Stop()
+		return err
+	}
+	e.mu.Lock()
 	for i, n := range run.Set.Nodes {
 		if s := byNode[n]; s != nil {
+			m := &member{tag: run.Set.Tags[i], server: s, country: s.Country}
+			if !n.UDPBased() && n.Proto != "warpplus" {
+				m.endpoint = n.Endpoint()
+			}
+			c.members = append(c.members, m)
 			c.servers = append(c.servers, s)
-			c.tags[run.Set.Tags[i]] = s.Key
 		}
 	}
-	// Prove the connection works before telling anyone it does.
-	r := tester.Probe(e.ctx, &url.URL{Scheme: "http", Host: c.proxyAddr}, 12*time.Second)
+	e.mu.Unlock()
+	// Test the whole group at once and start on the first server to answer;
+	// the rest keep being tested and become the known-good backups.
+	proxy := &url.URL{Scheme: "http", Host: c.proxyAddr}
+	var r tester.Result
+	tried := map[*member]bool{}
+	for try := 0; try < 3 && !r.OK; try++ {
+		var rest []*member
+		for _, m := range c.members {
+			if !tried[m] {
+				rest = append(rest, m)
+			}
+		}
+		m := e.race(e.ctx, c, rest, 8*time.Second)
+		if m == nil {
+			break
+		}
+		tried[m] = true
+		if err := c.use(e.ctx, m); err != nil {
+			run.Stop()
+			return err
+		}
+		// Prove the whole path works before telling anyone it does.
+		r = tester.Probe(e.ctx, proxy, 12*time.Second)
+		if !r.OK {
+			e.noteResult(c, m, 0, false)
+		}
+	}
 	if !r.OK {
 		run.Stop()
+		if len(tried) == 0 {
+			return fmt.Errorf("%w: no server in the group answered", errServers)
+		}
 		return fmt.Errorf("%w: test through the new connection failed: %s", errServers, r.Err)
 	}
 	e.mu.Lock()
@@ -357,18 +471,28 @@ func (e *Engine) start(gen int, country string, servers []*Server) error {
 	e.mu.Lock()
 	e.conn = c
 	e.mu.Unlock()
-	e.updateActive(c)
-	where := countryName(r.Country)
-	if r.Country == "" {
-		where = countryName(country)
-	}
-	e.setStatus(StatusConnected, fmt.Sprintf("وصل هستید — %s", where))
-	e.logf("info", "وصل شد به %s با %d سرور آماده (تأخیر %d میلی‌ثانیه).", where, len(c.servers), c.delay)
+	e.setStatus(StatusConnected, connectedMessage(c))
+	e.logf("info", "وصل شد به %s با %d سرور در یک گروه (تأخیر %d میلی‌ثانیه).", exitName(c), len(c.members), c.delay)
 	go e.monitor(mctx, c)
 	// Sources blocked on the direct path (Telegram, GitHub) can now be
 	// read through the VPN.
 	e.triggerRefill()
 	return nil
+}
+
+// exitName is the country traffic leaves from, as the user sees it.
+func exitName(c *connection) string {
+	c.mu.Lock()
+	cc := c.exitCC
+	c.mu.Unlock()
+	if cc == "" {
+		cc = c.country
+	}
+	return countryName(cc)
+}
+
+func connectedMessage(c *connection) string {
+	return fmt.Sprintf("وصل هستید — %s", exitName(c))
 }
 
 // Disconnect stops the VPN and restores system settings.
@@ -399,180 +523,6 @@ func (e *Engine) stopConn(c *connection, clearProxy bool) {
 	e.mu.Unlock()
 }
 
-// monitor watches a connection: traffic, which server is in use, health,
-// and whether faster servers have appeared.
-func (e *Engine) monitor(ctx context.Context, c *connection) {
-	traffic := time.NewTicker(time.Second)
-	defer traffic.Stop()
-	health := time.NewTicker(20 * time.Second)
-	defer health.Stop()
-	upgrade := time.NewTicker(4 * time.Minute)
-	defer upgrade.Stop()
-	failures, ticks := 0, 0
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-traffic.C:
-			e.updateTraffic(c)
-			ticks++
-			if ticks%5 == 0 {
-				e.updateActive(c)
-			}
-		case <-health.C:
-			if !c.running.Alive() {
-				e.logf("warn", "هسته متوقف شد؛ اتصال دوباره…")
-				e.reconnect(c, "")
-				return
-			}
-			e.updateActive(c)
-			r := tester.Probe(ctx, &url.URL{Scheme: "http", Host: c.proxyAddr}, 12*time.Second)
-			if ctx.Err() != nil {
-				return
-			}
-			if r.OK {
-				failures = 0
-				c.mu.Lock()
-				c.healthy, c.exitIP, c.delay = true, r.ExitIP, int(r.Delay/time.Millisecond)
-				if r.Country != "" {
-					c.exitCC = r.Country
-				}
-				c.mu.Unlock()
-				continue
-			}
-			failures++
-			if failures >= 2 {
-				e.logf("warn", "اتصال قطع شده؛ جابه‌جایی به سرورهای دیگر…")
-				e.reconnect(c, c.activeKey())
-				return
-			}
-		case <-upgrade.C:
-			e.mu.Lock()
-			auto := e.settings.AutoSwitch
-			e.mu.Unlock()
-			if !auto || len(c.servers) == 1 && c.country == "" {
-				continue
-			}
-			if e.betterAvailable(c) {
-				e.logf("info", "سرورهای سریع‌تری پیدا شد؛ جابه‌جایی…")
-				e.reconnect(c, "")
-				return
-			}
-		}
-	}
-}
-
-// betterAvailable reports whether the best known servers beat the current
-// group by a clear margin, or the group has mostly died.
-func (e *Engine) betterAvailable(c *connection) bool {
-	now := time.Now()
-	best := e.bestServers(c.country, groupSize, nil)
-	if len(best) == 0 {
-		return false
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	alive := 0
-	for _, s := range c.servers {
-		if s.usable(now) {
-			alive++
-		}
-	}
-	if alive < 2 && len(best) > alive {
-		return true
-	}
-	inGroup := map[string]bool{}
-	for _, s := range c.servers {
-		inGroup[s.Key] = true
-	}
-	c.mu.Lock()
-	cur := c.delay
-	c.mu.Unlock()
-	for _, s := range best[:min(3, len(best))] {
-		if !inGroup[s.Key] && cur > 0 && float64(s.Delay) < float64(cur)*0.6 && cur-s.Delay > 80 {
-			return true
-		}
-	}
-	return false
-}
-
-func (e *Engine) reconnect(c *connection, failedKey string) {
-	e.setStatus(StatusReconnecting, "در حال جابه‌جایی به سرور بهتر…")
-	e.mu.Lock()
-	if failedKey != "" {
-		for _, s := range e.good {
-			if s.Key == failedKey {
-				s.Fails++
-			}
-		}
-	}
-	country := c.country
-	gen := e.connGen
-	e.mu.Unlock()
-	e.stopConn(c, false)
-	go func() {
-		if err := e.connectLoop(gen, country, nil); err != nil {
-			e.mu.Lock()
-			still := e.conn == nil
-			e.mu.Unlock()
-			if still {
-				e.opt.SysProxy.Clear()
-			}
-		}
-	}()
-}
-
-func (e *Engine) clashGet(c *connection, path string, v any) error {
-	req, _ := http.NewRequest(http.MethodGet, "http://"+c.clashAddr+path, nil)
-	req.Header.Set("Authorization", "Bearer "+c.clashSecret)
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, v)
-}
-
-func (e *Engine) updateActive(c *connection) {
-	var p struct {
-		Now     string `json:"now"`
-		History []struct {
-			Delay int `json:"delay"`
-		} `json:"history"`
-	}
-	if e.clashGet(c, "/proxies/proxy", &p) != nil {
-		return
-	}
-	c.mu.Lock()
-	if key, ok := c.tags[p.Now]; ok {
-		c.active = key
-	}
-	c.mu.Unlock()
-}
-
-func (e *Engine) updateTraffic(c *connection) {
-	var conns struct {
-		Up   int64 `json:"uploadTotal"`
-		Down int64 `json:"downloadTotal"`
-	}
-	if e.clashGet(c, "/connections", &conns) != nil {
-		return
-	}
-	c.mu.Lock()
-	if c.up > 0 || c.down > 0 {
-		c.upRate = max(conns.Up-c.up, 0)
-		c.dnRate = max(conns.Down-c.down, 0)
-	}
-	c.up, c.down = conns.Up, conns.Down
-	c.mu.Unlock()
-}
-
 type connOptions struct {
 	listen      string
 	port        int
@@ -583,16 +533,18 @@ type connOptions struct {
 	clashAddr   string
 	clashSecret string
 	exe         string
+	localDNS    string
 }
 
 // connectConfig builds the sing-box config for a live connection.
 func connectConfig(s *core.Set, o connOptions) map[string]any {
 	outbounds := append([]any{}, s.Outbounds...)
 	outbounds = append(outbounds,
+		// The engine picks the member in use and moves to a backup itself
+		// (see failover.go), so a switch takes effect at once.
 		map[string]any{
-			"type": "urltest", "tag": "proxy", "outbounds": s.Tags,
-			"url": "https://www.gstatic.com/generate_204", "interval": "1m", "tolerance": 50,
-			"idle_timeout": "30m", "interrupt_exist_connections": false,
+			"type": "selector", "tag": "proxy", "outbounds": s.Tags, "default": s.Tags[0],
+			"interrupt_exist_connections": false,
 		},
 		map[string]any{"type": "direct", "tag": "direct"},
 	)
@@ -647,7 +599,7 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 	}
 	dns := map[string]any{
 		"servers": []any{
-			map[string]any{"type": "local", "tag": "local"},
+			tester.DNSServer(o.localDNS),
 			map[string]any{"type": "https", "tag": "remote", "server": "1.1.1.1", "detour": "proxy"},
 		},
 		"rules":    dnsRules,
@@ -690,6 +642,7 @@ type ConnInfo struct {
 	UpRate      int64  `json:"up_rate"`
 	DownRate    int64  `json:"down_rate"`
 	Group       int    `json:"group"`
+	Ready       int    `json:"ready"` // backups known to work right now
 	Mode        string `json:"mode"`
 	ProxyAddr   string `json:"proxy_addr"`
 }
@@ -704,23 +657,24 @@ func (e *Engine) connInfo() *ConnInfo {
 	c.mu.Lock()
 	info := &ConnInfo{
 		Country: c.exitCC, Target: c.country, ExitIP: c.exitIP, Delay: c.delay, Since: c.started.Unix(),
-		Up: c.up, Down: c.down, UpRate: c.upRate, DownRate: c.dnRate, Group: len(c.servers), Mode: c.mode,
+		Up: c.up, Down: c.down, UpRate: c.upRate, DownRate: c.dnRate, Group: len(c.members), Mode: c.mode,
 		ProxyAddr: c.proxyAddr,
 	}
 	active := c.active
+	for _, m := range c.members {
+		if m.alive && m != active {
+			info.Ready++
+		}
+	}
 	c.mu.Unlock()
 	if info.Country == "" {
 		info.Country = c.country
 	}
 	info.CountryName = countryName(info.Country)
 	info.Flag = geo.Flag(info.Country)
-	for _, s := range c.servers {
-		if s.Key == active {
-			info.Server, info.Proto = s.Name, s.Proto
-		}
-	}
-	if info.Server == "" && len(c.servers) > 0 {
-		// urltest starts on the first (fastest known) server.
+	if active != nil {
+		info.Server, info.Proto = active.server.Name, active.server.Proto
+	} else if len(c.servers) > 0 {
 		info.Server, info.Proto = c.servers[0].Name, c.servers[0].Proto
 	}
 	return info

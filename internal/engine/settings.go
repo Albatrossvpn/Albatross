@@ -21,8 +21,9 @@ type Settings struct {
 	ProxyPort int `json:"proxy_port"`
 	// AllowLAN lets other devices on the network use the proxy port.
 	AllowLAN bool `json:"allow_lan"`
-	// AutoSwitch moves to faster servers in the chosen country while
-	// connected, and away from failing ones.
+	// AutoSwitch moves to clearly faster servers in the same country while
+	// connected and refreshes backups that stopped working. Moving off a
+	// server that failed happens either way.
 	AutoSwitch bool `json:"auto_switch"`
 	// Fragment controls TLS ClientHello fragmentation: "auto" retries
 	// servers that fail with fragmentation on, "on" always fragments,
@@ -70,11 +71,21 @@ func DefaultSettings() Settings {
 	}
 }
 
-func loadSettings(dir string) Settings {
+func loadSettings(dir string, mobile bool) Settings {
 	s := DefaultSettings()
+	if mobile {
+		// On a phone, mobile data and battery matter more than covering
+		// every list.
+		s.DeepSources = false
+		s.Intensity = "low"
+	}
 	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
 	if err == nil {
 		json.Unmarshal(b, &s)
+	}
+	if mobile {
+		// "proxy" is the device-wide VPN there; there is no other mode.
+		s.Mode = "proxy"
 	}
 	if s.ProxyPort <= 0 || s.ProxyPort > 65535 {
 		s.ProxyPort = 10808

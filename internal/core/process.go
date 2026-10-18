@@ -105,6 +105,9 @@ func Start(name, bin string, args []string, env []string, onLine func(string)) (
 	return p, nil
 }
 
+// Pid is the operating-system process ID.
+func (p *Process) Pid() int { return p.cmd.Process.Pid }
+
 // Done is closed when the process exits.
 func (p *Process) Done() <-chan struct{} { return p.done }
 

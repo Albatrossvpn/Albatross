@@ -45,6 +45,9 @@ type Tester struct {
 	Fragment       bool
 	FragmentFor    func(*node.Node) bool
 	Spoof          string
+	// LocalDNS resolves server names where the core cannot ask the system
+	// (Android); empty means the system's resolver.
+	LocalDNS string
 }
 
 // TCPProbe dials every TCP-based node and returns the connect time, or -1
@@ -135,7 +138,7 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 	pass := randomHex(8)
 	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof}
 	run, err := t.Runtime.Run(ctx, name, nodes, opts, func(s *core.Set) map[string]any {
-		return testConfig(s, port, pass)
+		return testConfig(s, port, pass, t.LocalDNS)
 	}, "127.0.0.1:"+strconv.Itoa(port))
 	if run != nil {
 		for _, n := range run.Rejected {
@@ -307,7 +310,16 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-func testConfig(s *core.Set, port int, pass string) map[string]any {
+// DNSServer is the sing-box resolver for direct lookups: the system's, or
+// a plain DNS server at addr where the core cannot ask the system.
+func DNSServer(addr string) map[string]any {
+	if addr == "" {
+		return map[string]any{"type": "local", "tag": "local"}
+	}
+	return map[string]any{"type": "udp", "tag": "local", "server": addr}
+}
+
+func testConfig(s *core.Set, port int, pass, localDNS string) map[string]any {
 	users := make([]any, 0, len(s.Tags))
 	rules := make([]any, 0, len(s.Tags)+1)
 	for _, tag := range s.Tags {
@@ -318,7 +330,7 @@ func testConfig(s *core.Set, port int, pass string) map[string]any {
 	cfg := map[string]any{
 		"log": map[string]any{"level": "warn", "timestamp": false},
 		"dns": map[string]any{
-			"servers": []any{map[string]any{"type": "local", "tag": "local"}},
+			"servers": []any{DNSServer(localDNS)},
 		},
 		"inbounds": []any{map[string]any{
 			"type": "mixed", "tag": "test-in", "listen": "127.0.0.1", "listen_port": port, "users": users,
