@@ -42,7 +42,9 @@ func refreshEvery(s sources.Source) time.Duration {
 	case s.Kind == sources.KindVPNGate:
 		return time.Hour
 	case s.Tier == sources.TierDeep:
-		return 4 * time.Hour
+		// The deep lists are large; their new servers mostly reach the
+		// priority lists and Telegram first anyway.
+		return 12 * time.Hour
 	}
 	return 30 * time.Minute
 }
@@ -124,6 +126,7 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 
 // refreshDue downloads every source whose refresh time has come.
 func (e *Engine) refreshDue() {
+	connected := e.proxyClient() != nil
 	e.mu.Lock()
 	var due []int
 	now := time.Now()
@@ -131,7 +134,17 @@ func (e *Engine) refreshDue() {
 		if !s.Enabled {
 			continue
 		}
-		if now.Sub(e.srcStats[i].Fetched) >= refreshEvery(s) {
+		st := e.srcStats[i]
+		if s.Kind == sources.KindTelegram && !connected && st.LastError != "" && now.Sub(st.Fetched) < 3*time.Hour {
+			// t.me is usually blocked on the direct path; wait until the
+			// VPN is up instead of stalling every refresh on timeouts.
+			continue
+		}
+		if s.Kind == sources.KindTelegram && connected && st.LastError != "" {
+			due = append(due, i)
+			continue
+		}
+		if now.Sub(st.Fetched) >= refreshEvery(s) {
 			due = append(due, i)
 		}
 	}
@@ -176,9 +189,21 @@ func (e *Engine) refreshDue() {
 			}
 		}()
 	}
-	for _, tier := range []int{sources.TierUser, sources.TierPriority, sources.TierDeep} {
+	// Subscriptions first, then Telegram, then the big deep lists.
+	order := func(s sources.Source) int {
+		switch {
+		case s.Tier == sources.TierUser:
+			return 0
+		case s.Tier == sources.TierPriority && s.Kind != sources.KindTelegram:
+			return 1
+		case s.Kind == sources.KindTelegram:
+			return 2
+		}
+		return 3
+	}
+	for rank := 0; rank <= 3; rank++ {
 		for _, i := range due {
-			if srcs[i].Tier != tier {
+			if order(srcs[i]) != rank {
 				continue
 			}
 			select {
@@ -203,8 +228,14 @@ func (e *Engine) cachedText(s sources.Source) (string, bool) {
 	return e.fetcher.Cached(s)
 }
 
+// parseSlots bounds concurrent parsing; a big list briefly holds tens of
+// thousands of parsed nodes in memory.
+var parseSlots = make(chan struct{}, 2)
+
 // ingest parses a source body and adds its nodes to the pool.
 func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint64][2]uint32) int {
+	parseSlots <- struct{}{}
+	defer func() { <-parseSlots }()
 	type item struct {
 		n    *node.Node
 		hint string
@@ -758,7 +789,7 @@ func (e *Engine) recordFail(c candidate, reason string) {
 // statsLoop keeps derived numbers fresh and saves state regularly.
 func (e *Engine) statsLoop() {
 	defer e.wg.Done()
-	tick := time.NewTicker(15 * time.Second)
+	tick := time.NewTicker(5 * time.Second)
 	defer tick.Stop()
 	saves := 0
 	for {
@@ -776,7 +807,9 @@ func (e *Engine) statsLoop() {
 			}
 			counts[en.HintCode()]++
 		})
+		total, untested, dead, okN := e.pool.Stats()
 		e.mu.Lock()
+		e.poolStats = [4]int{total, untested, dead, okN}
 		e.hintCounts = counts
 		cut := time.Now().Add(-time.Minute)
 		i := 0
@@ -786,7 +819,7 @@ func (e *Engine) statsLoop() {
 		e.scan.recent = e.scan.recent[i:]
 		e.mu.Unlock()
 		saves++
-		if saves%8 == 0 {
+		if saves%24 == 0 {
 			e.saveServers()
 			e.saveSourceStats()
 			e.saveStates()

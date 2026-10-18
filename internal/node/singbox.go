@@ -224,7 +224,7 @@ func (n *Node) sbTLS(o SingBoxOptions) map[string]any {
 	if n.Fingerprint != "" {
 		t["utls"] = map[string]any{"enabled": true, "fingerprint": n.Fingerprint}
 	}
-	if o.Spoof != "" {
+	if o.Spoof != "" && n.Security == "tls" {
 		t["spoof"] = o.Spoof
 	}
 	if n.Security == "reality" {
