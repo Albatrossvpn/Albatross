@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -79,6 +80,8 @@ func (e *Engine) Connect(country string) error {
 	e.target = country
 	e.settings.Country = country
 	e.wantConnect = true
+	e.connGen++
+	gen := e.connGen
 	mode := e.settings.Mode
 	e.mu.Unlock()
 	saveJSON(filepath.Join(e.dir, "settings.json"), e.Settings())
@@ -87,7 +90,7 @@ func (e *Engine) Connect(country string) error {
 		return ErrNeedAdmin
 	}
 	e.poke()
-	return e.connectLoop(country, nil)
+	return e.connectLoop(gen, country, nil)
 }
 
 // ConnectServer connects to one specific working server.
@@ -105,8 +108,10 @@ func (e *Engine) ConnectServer(key string) error {
 	}
 	e.target = s.Country
 	e.wantConnect = true
+	e.connGen++
+	gen := e.connGen
 	e.mu.Unlock()
-	return e.connectLoop(s.Country, []*Server{s})
+	return e.connectLoop(gen, s.Country, []*Server{s})
 }
 
 func countryName(code string) string {
@@ -117,13 +122,13 @@ func countryName(code string) string {
 	return c.FA
 }
 
-func (e *Engine) connectLoop(country string, pinned []*Server) error {
+func (e *Engine) connectLoop(gen int, country string, pinned []*Server) error {
 	name := countryName(country)
 	deadline := time.Now().Add(3 * time.Minute)
 	var exclude = map[string]bool{}
 	for attempt := 0; ; attempt++ {
 		e.mu.Lock()
-		want := e.wantConnect && e.target == country
+		want := e.wantConnect && e.target == country && e.connGen == gen
 		e.mu.Unlock()
 		if !want || e.ctx.Err() != nil {
 			return errors.New("cancelled")
@@ -145,16 +150,21 @@ func (e *Engine) connectLoop(country string, pinned []*Server) error {
 			continue
 		}
 		e.setStatus(StatusConnecting, fmt.Sprintf("در حال اتصال به %s…", name))
-		err := e.start(country, picks)
+		err := e.start(gen, country, picks)
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, errStale) {
+			return err
 		}
 		e.logf("warn", "اتصال ناموفق: %v", err)
 		for _, s := range picks {
 			exclude[s.Key] = true
-			e.mu.Lock()
-			s.Fails++
-			e.mu.Unlock()
+			if errors.Is(err, errServers) {
+				e.mu.Lock()
+				s.Fails++
+				e.mu.Unlock()
+			}
 		}
 		if pinned != nil {
 			e.setStatus(StatusIdle, "این سرور الان کار نمی‌کند.")
@@ -218,8 +228,25 @@ func (e *Engine) bestServers(country string, n int, exclude map[string]bool) []*
 	return out
 }
 
+var (
+	// errStale means the user asked for something else meanwhile.
+	errStale = errors.New("superseded")
+	// errServers means the servers, not the local setup, failed.
+	errServers = errors.New("servers failed")
+)
+
+// portFree reports whether a local TCP port can be bound.
+func portFree(listen string, port int) bool {
+	l, err := net.Listen("tcp", net.JoinHostPort(listen, strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	l.Close()
+	return true
+}
+
 // start runs the cores for a group of servers and switches over to them.
-func (e *Engine) start(country string, servers []*Server) error {
+func (e *Engine) start(gen int, country string, servers []*Server) error {
 	e.mu.Lock()
 	set := e.settings
 	old := e.conn
@@ -248,6 +275,14 @@ func (e *Engine) start(country string, servers []*Server) error {
 	if set.AllowLAN {
 		listen = "0.0.0.0"
 	}
+	proxyPort := set.ProxyPort
+	if !portFree(listen, proxyPort) {
+		// Another program (often another VPN client) holds the port.
+		if p, err := core.FreePorts(1); err == nil {
+			e.logf("warn", "پورت %d در اختیار برنامه دیگری است؛ از پورت %d استفاده شد.", proxyPort, p[0])
+			proxyPort = p[0]
+		}
+	}
 	ports, err := core.FreePorts(1)
 	if err != nil {
 		return err
@@ -255,14 +290,14 @@ func (e *Engine) start(country string, servers []*Server) error {
 	c := &connection{
 		country:     country,
 		mode:        set.Mode,
-		proxyAddr:   "127.0.0.1:" + strconv.Itoa(set.ProxyPort),
+		proxyAddr:   "127.0.0.1:" + strconv.Itoa(proxyPort),
 		clashAddr:   "127.0.0.1:" + strconv.Itoa(ports[0]),
 		clashSecret: randomToken(),
 		started:     time.Now(),
 		tags:        map[string]string{},
 	}
 	opts := connOptions{
-		listen: listen, port: set.ProxyPort, tun: set.Mode == "tun", bypassIran: set.BypassIran,
+		listen: listen, port: proxyPort, tun: set.Mode == "tun", bypassIran: set.BypassIran,
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
 		clashSecret: c.clashSecret, exe: e.opt.ExeName,
 	}
@@ -296,7 +331,14 @@ func (e *Engine) start(country string, servers []*Server) error {
 	r := tester.Probe(e.ctx, &url.URL{Scheme: "http", Host: c.proxyAddr}, 12*time.Second)
 	if !r.OK {
 		run.Stop()
-		return fmt.Errorf("test through the new connection failed: %s", r.Err)
+		return fmt.Errorf("%w: test through the new connection failed: %s", errServers, r.Err)
+	}
+	e.mu.Lock()
+	stale := e.connGen != gen
+	e.mu.Unlock()
+	if stale {
+		run.Stop()
+		return errStale
 	}
 	c.exitIP, c.exitCC, c.delay, c.healthy = r.ExitIP, r.Country, int(r.Delay/time.Millisecond), true
 	if set.Mode == "proxy" {
@@ -323,6 +365,9 @@ func (e *Engine) start(country string, servers []*Server) error {
 	e.setStatus(StatusConnected, fmt.Sprintf("وصل هستید — %s", where))
 	e.logf("info", "وصل شد به %s با %d سرور آماده (تأخیر %d میلی‌ثانیه).", where, len(c.servers), c.delay)
 	go e.monitor(mctx, c)
+	// Sources blocked on the direct path (Telegram, GitHub) can now be
+	// read through the VPN.
+	e.triggerRefill()
 	return nil
 }
 
@@ -330,6 +375,7 @@ func (e *Engine) start(country string, servers []*Server) error {
 func (e *Engine) Disconnect() {
 	e.mu.Lock()
 	e.wantConnect = false
+	e.connGen++
 	c := e.conn
 	e.mu.Unlock()
 	if c != nil {
@@ -461,10 +507,11 @@ func (e *Engine) reconnect(c *connection, failedKey string) {
 		}
 	}
 	country := c.country
+	gen := e.connGen
 	e.mu.Unlock()
 	e.stopConn(c, false)
 	go func() {
-		if err := e.connectLoop(country, nil); err != nil {
+		if err := e.connectLoop(gen, country, nil); err != nil {
 			e.mu.Lock()
 			still := e.conn == nil
 			e.mu.Unlock()

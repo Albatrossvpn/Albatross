@@ -312,7 +312,8 @@ function renderSources() {
   const enabled = sourcesCache.filter((s) => s.enabled);
   const okSum = sourcesCache.reduce((a, s) => a + (s.ok || 0), 0);
   const tg = sourcesCache.filter((s) => s.kind === "telegram").length;
-  $("sources-summary").textContent = `${fa(sourcesCache.length)} منبع (${fa(tg)} کانال تلگرام) · ${fa(enabled.length)} فعال · ${fa(okSum)} سرور سالم از این منابع پیدا شده. تلگرام بعد از اتصال از طریق خود VPN خوانده می‌شود.`;
+  const dl = state ? ` · دریافت‌شده در این اجرا: ${bytesRate(state.scan.downloaded)}` : "";
+  $("sources-summary").textContent = `${fa(sourcesCache.length)} منبع (${fa(tg)} کانال تلگرام) · ${fa(enabled.length)} فعال · ${fa(okSum)} سرور سالم از این منابع پیدا شده${dl}. تلگرام بعد از اتصال از طریق خود VPN خوانده می‌شود.`;
   const list = sourcesCache.filter((s) => !q || s.label.toLowerCase().includes(q)).slice(0, 300);
   $("sources-list").innerHTML = list.map((s) => {
     const kind = s.kind === "telegram" ? "تلگرام" : s.kind === "vpngate" ? "OpenVPN" : s.tier === 0 ? "اولویت‌دار" : s.tier === 2 ? "شما" : "عمیق";

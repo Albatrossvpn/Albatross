@@ -54,9 +54,9 @@ type CoreInfo struct {
 // Snapshot returns the current state for the UI.
 func (e *Engine) Snapshot() Snapshot {
 	countries := e.Countries()
-	total, untested, dead, _ := e.pool.Stats()
 	now := time.Now()
 	e.mu.Lock()
+	total, untested, dead := e.poolStats[0], e.poolStats[1], e.poolStats[2]
 	working := 0
 	for _, s := range e.good {
 		if s.usable(now) {
