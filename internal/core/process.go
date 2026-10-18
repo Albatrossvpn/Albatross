@@ -32,8 +32,11 @@ func Locate(dirs ...string) Binaries {
 		exe = ".exe"
 	}
 	find := func(name string) string {
+		// Android only runs executables shipped as native libraries
+		// (lib<name>.so in the app's library directory).
+		lib := "lib" + strings.ReplaceAll(name, "-", "") + ".so"
 		for _, d := range dirs {
-			for _, p := range []string{filepath.Join(d, "core", name+exe), filepath.Join(d, name+exe)} {
+			for _, p := range []string{filepath.Join(d, "core", name+exe), filepath.Join(d, name+exe), filepath.Join(d, lib)} {
 				if st, err := os.Stat(p); err == nil && !st.IsDir() {
 					return p
 				}

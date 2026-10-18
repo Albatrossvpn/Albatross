@@ -43,6 +43,16 @@ jobs:
         run: |
           export E2E_HOST_IP="$(hostname -I | awk '{print $1}')"
           go test -count=1 -timeout 15m ./...
+      - name: Android tunnel path
+        # Makes a TUN device the way Android's VpnService does, so it needs root.
+        env:
+          SING_BOX: /tmp/cores/sing-box
+          XRAY: /tmp/cores/xray
+          E2E_UPSTREAM: direct
+        run: |
+          export E2E_HOST_IP="$(hostname -I | awk '{print $1}')"
+          go test -c -o /tmp/mobile.test ./mobile
+          sudo --preserve-env=SING_BOX,XRAY,E2E_UPSTREAM,E2E_HOST_IP /tmp/mobile.test -test.count=1 -test.v -test.run AndroidPath
 
   build:
     needs: test
@@ -72,6 +82,50 @@ jobs:
         with:
           name: Azadrah-portable-${{ steps.version.outputs.version }}
           path: dist/*.zip
+
+  android:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK and NDK
+        run: |
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdk" --licenses > /dev/null || true
+          "$sdk" "platforms;android-35" "build-tools;35.0.0" "ndk;27.3.13750724" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
+      - name: Build APKs
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          AZADRAH_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          AZADRAH_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          AZADRAH_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          # Without a key in the repository secrets the APKs get a debug key.
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/azadrah.jks"
+            export AZADRAH_KEYSTORE="$RUNNER_TEMP/azadrah.jks"
+          fi
+          bash build/android/build.sh
+          "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging dist/*arm64-v8a.apk | head -3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Azadrah-android-${{ env.VERSION }}
+          path: dist/*.apk
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
 
   installer:
     needs: build
