@@ -20,8 +20,9 @@ import (
 
 // Binaries are the core executables.
 type Binaries struct {
-	SingBox string
-	Xray    string
+	SingBox  string
+	Xray     string
+	WarpPlus string
 }
 
 // Locate finds the cores next to the app or in its data directory.
@@ -43,7 +44,7 @@ func Locate(dirs ...string) Binaries {
 		}
 		return ""
 	}
-	return Binaries{SingBox: find("sing-box"), Xray: find("xray")}
+	return Binaries{SingBox: find("sing-box"), Xray: find("xray"), WarpPlus: find("warp-plus")}
 }
 
 // Process is a running core.
