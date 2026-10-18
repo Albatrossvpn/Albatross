@@ -26,6 +26,7 @@
   <main>
     <!-- Home -->
     <section class="view active" id="view-home">
+      <button class="update-banner hidden" id="update-banner"></button>
       <div class="hero">
         <button id="power" class="power" aria-label="اتصال">
           <span class="halo"></span>
@@ -196,6 +197,17 @@
       <div class="row-end">
         <button class="btn" id="admin-cancel">فعلاً نه</button>
         <button class="btn primary" id="admin-ok">اجرای دوباره با دسترسی مدیر</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- This version may no longer connect -->
+  <div class="modal-backdrop hidden" id="update-modal">
+    <div class="modal">
+      <h3>نسخهٔ جدید لازم است</h3>
+      <p id="update-text">این نسخه دیگر پشتیبانی نمی‌شود. برای ادامهٔ استفاده، نسخهٔ جدید را نصب کنید.</p>
+      <div class="row-end">
+        <button class="btn primary" id="update-get">دریافت نسخهٔ جدید</button>
       </div>
     </div>
   </div>

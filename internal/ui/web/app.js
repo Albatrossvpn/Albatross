@@ -137,6 +137,14 @@ function render(s) {
   $("n-candidates").textContent = fa(sc.untested);
   $("n-rate").textContent = fa(sc.per_minute);
 
+  const u = s.update;
+  $("update-banner").classList.toggle("hidden", !u || u.required);
+  $("update-modal").classList.toggle("hidden", !u || !u.required);
+  if (u) {
+    $("update-banner").textContent = `نسخهٔ ${u.latest} آمده است — برای دریافت بزنید${u.message ? " · " + u.message : ""}`;
+    if (u.message) $("update-text").textContent = u.message;
+  }
+
   $("admin-chip").classList.toggle("hidden", !s.admin);
   if (!settingsDirty) fillSettings(s.settings);
   $("version").textContent = s.version ? "نسخه " + s.version : "";
@@ -406,6 +414,9 @@ $("admin-ok").addEventListener("click", async () => {
     toast("برنامه با دسترسی مدیر دوباره باز می‌شود…");
   } catch (err) { toast(err.message); }
 });
+const getUpdate = () => state && state.update && api("POST", "/api/open", { url: state.update.url }).catch((e) => toast(e.message));
+$("update-banner").addEventListener("click", getUpdate);
+$("update-get").addEventListener("click", getUpdate);
 $("quit-btn").addEventListener("click", () => api("POST", "/api/quit").catch(() => {}));
 
 // ---------- Logs ----------

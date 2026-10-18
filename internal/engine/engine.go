@@ -85,6 +85,7 @@ type Engine struct {
 	hintCounts   map[string]int
 	logs         []LogLine
 	localDNS     string
+	update       *UpdateInfo   // a newer version, from update.json
 	uiSeen       time.Time     // last time the UI asked for a snapshot
 	countries    []CountryInfo // cached for countryCache
 	countriesAt  time.Time
@@ -182,6 +183,7 @@ func (e *Engine) Start() {
 		e.logf("warn", "هسته Xray پیدا نشد؛ سرورهای xhttp و چند نوع دیگر آزمایش نمی‌شوند.")
 	}
 	e.logf("info", "%d سرور سالم از دفعه قبل بارگذاری شد.", len(e.good))
+	e.loadUpdate()
 	e.wg.Add(3)
 	go e.refreshLoop()
 	go e.scanLoop()
