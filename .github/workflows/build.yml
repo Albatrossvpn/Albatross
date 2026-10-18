@@ -121,11 +121,6 @@ jobs:
         with:
           name: Azadrah-android-${{ env.VERSION }}
           path: dist/*.apk
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.apk
 
   installer:
     needs: build
@@ -223,15 +218,23 @@ jobs:
           files: dist/Azadrah-Setup-*.exe
           generate_release_notes: true
 
-  release-portable:
+  # The installer job creates the release; this adds the portable zip and
+  # the APKs to it, so two jobs never race to create it.
+  release-assets:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, installer]
+    needs: [build, installer, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: Azadrah-portable-${{ needs.build.outputs.version }}
           path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: Azadrah-android-${{ needs.build.outputs.version }}
+          path: dist
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          files: |
+            dist/*.zip
+            dist/*.apk
