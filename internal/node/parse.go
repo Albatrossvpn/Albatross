@@ -835,9 +835,7 @@ func (n *Node) normalize() {
 	case "xtls":
 		n.Security = "tls"
 	default:
-		if n.Proto == "vless" || n.Proto == "vmess" || n.Proto == "shadowsocks" || n.Proto == "socks" {
-			n.Security = ""
-		}
+		n.Security = ""
 	}
 	if n.Security == "" {
 		n.SNI, n.ALPN, n.Fingerprint, n.PublicKey, n.ShortID = "", nil, "", "", ""
