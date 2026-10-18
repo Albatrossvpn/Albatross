@@ -27,9 +27,16 @@ func TestBatchEndToEnd(t *testing.T) {
 	if sb == "" || xr == "" || up == "" || hostIP == "" {
 		t.Skip("SING_BOX, XRAY, E2E_UPSTREAM and E2E_HOST_IP must be set")
 	}
-	upURL, _ := url.Parse(up)
-	upHost, upPortS, _ := net.SplitHostPort(upURL.Host)
-	upPort, _ := strconv.Atoi(upPortS)
+	// E2E_UPSTREAM=direct lets the test servers reach the internet directly.
+	upstream := map[string]any{"type": "direct"}
+	xrayUpstream := map[string]any{"protocol": "freedom"}
+	if up != "direct" {
+		upURL, _ := url.Parse(up)
+		upHost, upPortS, _ := net.SplitHostPort(upURL.Host)
+		upPort, _ := strconv.Atoi(upPortS)
+		upstream = map[string]any{"type": "http", "server": upHost, "server_port": upPort}
+		xrayUpstream = map[string]any{"protocol": "http", "settings": map[string]any{"servers": []any{map[string]any{"address": upHost, "port": upPort}}}}
+	}
 	ports, _ := core.FreePorts(5)
 	dir := t.TempDir()
 	uuid := "b831381d-6324-4d53-ad4f-8cda48b30811"
@@ -42,7 +49,7 @@ func TestBatchEndToEnd(t *testing.T) {
 			map[string]any{"type": "vmess", "listen": "0.0.0.0", "listen_port": ports[2], "users": []any{map[string]any{"uuid": uuid}},
 				"transport": map[string]any{"type": "ws", "path": "/ws"}},
 		},
-		"outbounds": []any{map[string]any{"type": "http", "server": upHost, "server_port": upPort}},
+		"outbounds": []any{upstream},
 	}
 	serverXray := map[string]any{
 		"log": map[string]any{"loglevel": "warning"},
@@ -51,7 +58,7 @@ func TestBatchEndToEnd(t *testing.T) {
 			"settings":       map[string]any{"clients": []any{map[string]any{"id": uuid}}, "decryption": "none"},
 			"streamSettings": map[string]any{"network": "xhttp", "xhttpSettings": map[string]any{"path": "/x", "mode": "auto"}},
 		}},
-		"outbounds": []any{map[string]any{"protocol": "http", "settings": map[string]any{"servers": []any{map[string]any{"address": upHost, "port": upPort}}}}},
+		"outbounds": []any{xrayUpstream},
 	}
 	startServer(t, sb, dir, "server-sb.json", serverSB, "run", "-c")
 	startServer(t, xr, dir, "server-xray.json", serverXray, "run", "-c")
