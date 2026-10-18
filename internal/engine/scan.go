@@ -3,10 +3,12 @@ package engine
 import (
 	"container/heap"
 	"math/rand"
+	"net"
 	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/cezomagoanlace29861-jpg/vp/internal/antiblock"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/pool"
@@ -59,8 +61,14 @@ func (e *Engine) refreshLoop() {
 		}
 		e.refreshDue()
 		e.mu.Lock()
-		warp := e.settings.Warp
+		warp, clean := e.settings.Warp, e.settings.CleanIP
 		e.mu.Unlock()
+		if clean && e.cf.Age() > 2*time.Hour {
+			found := e.cf.Scan(e.ctx, 400, 8)
+			if len(found) > 0 {
+				e.logf("info", "%d آی‌پی تمیز کلودفلر پیدا شد (بهترین: %s، %d میلی‌ثانیه).", len(found), found[0].IP, found[0].Latency/time.Millisecond)
+			}
+		}
 		if warp {
 			e.refreshWarp()
 		}
@@ -288,11 +296,14 @@ func (e *Engine) sourceScores() []float64 {
 
 // candidate is a server picked for testing.
 type candidate struct {
-	key    uint64
-	link   string
-	source int // -1 for servers re-verified from the working list
-	node   *node.Node
-	good   *Server
+	key       uint64
+	link      string
+	source    int // -1 for servers re-verified from the working list
+	node      *node.Node
+	good      *Server
+	frag      bool   // fragment the TLS ClientHello
+	pin       string // connect to this IP instead of resolving the name
+	pinReason string
 }
 
 type scored struct {
@@ -474,6 +485,15 @@ func (e *Engine) scanLoop() {
 }
 
 func (e *Engine) runBatch(batch []candidate) {
+	e.mu.Lock()
+	frag := e.settings.Fragment
+	cleanOn := e.settings.CleanIP
+	spoof := ""
+	if e.settings.SpoofSNI != "" && e.opt.IsAdmin() {
+		spoof = e.settings.SpoofSNI
+	}
+	e.mu.Unlock()
+
 	// Parse.
 	var cands []candidate
 	for _, c := range batch {
@@ -483,17 +503,23 @@ func (e *Engine) runBatch(batch []candidate) {
 			continue
 		}
 		c.node = n
+		if c.good != nil && c.good.PinIP != "" {
+			c.node, c.pin, c.pinReason = antiblock.Pin(n, c.good.PinIP), c.good.PinIP, c.good.PinReason
+		}
 		cands = append(cands, c)
 	}
 	e.mu.Lock()
 	e.scan.Testing = len(cands)
-	frag := e.settings.Fragment
 	e.mu.Unlock()
 	defer func() {
 		e.mu.Lock()
 		e.scan.Testing = 0
 		e.mu.Unlock()
 	}()
+
+	// Censored resolvers answer blocked names with a fake address; pin
+	// those servers to the real one found over DNS-over-HTTPS.
+	cands = e.unpoison(cands)
 
 	// TCP probe.
 	nodes := make([]*node.Node, len(cands))
@@ -503,7 +529,7 @@ func (e *Engine) runBatch(batch []candidate) {
 	probes := e.tester.TCPProbe(e.ctx, nodes)
 	var live []candidate
 	for i, c := range cands {
-		if probes[i] < 0 {
+		if probes[i] < 0 && !(cleanOn && antiblock.CDNFrontable(c.node)) {
 			e.recordFail(c, "unreachable")
 			continue
 		}
@@ -512,25 +538,99 @@ func (e *Engine) runBatch(batch []candidate) {
 	if e.ctx.Err() != nil {
 		return
 	}
+	for i := range live {
+		live[i].frag = frag == "on" || (live[i].good != nil && live[i].good.Fragment)
+	}
 
-	// Real tests, in chunks so one core holds a bounded number of nodes.
-	retry := e.realTest(live, frag == "on")
-	if frag == "auto" && len(retry) > 0 {
-		e.realTest(retry, true)
+	// Real tests. Servers that fail get one more chance with the tricks
+	// that beat SNI filtering: a fragmented ClientHello and, behind
+	// Cloudflare, an edge IP that is not blocked here.
+	failed := e.realTest(live, spoof)
+	var retry []candidate
+	clean := e.cf.Best()
+	for _, c := range failed {
+		r := c
+		changed := false
+		if frag == "auto" && !r.frag && r.node.Security == "tls" && !r.node.UDPBased() {
+			r.frag, changed = true, true
+		}
+		if cleanOn && len(clean) > 0 && antiblock.CDNFrontable(c.node) && r.pinReason != "clean" {
+			ip := clean[rand.Intn(min(len(clean), 3))].IP
+			r.node, r.pin, r.pinReason, changed = antiblock.Pin(c.node, ip), ip, "clean", true
+		}
+		if changed {
+			retry = append(retry, r)
+		}
+	}
+	if len(retry) > 0 && e.ctx.Err() == nil {
+		for _, c := range e.realTest(retry, spoof) {
+			e.recordFail(c, "failed")
+		}
+	}
+	for _, c := range failed {
+		if !containsCand(retry, c.key) {
+			e.recordFail(c, "failed")
+		}
 	}
 }
 
-// realTest tests candidates and returns TLS ones that failed, which may
-// work with fragmentation.
-func (e *Engine) realTest(cands []candidate, fragment bool) []candidate {
+func containsCand(list []candidate, key uint64) bool {
+	for _, c := range list {
+		if c.key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// unpoison resolves server names and pins nodes whose name the local
+// resolver answered with a censor's fake address.
+func (e *Engine) unpoison(cands []candidate) []candidate {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 32)
+	out := make([]candidate, len(cands))
+	drop := make([]bool, len(cands))
+	for i, c := range cands {
+		out[i] = c
+		if c.pin != "" || c.node.Proto == "warpplus" || net.ParseIP(c.node.Server) != nil {
+			continue
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(i int, c candidate) {
+			defer func() { <-sem; wg.Done() }()
+			r := e.resolver.Lookup(e.ctx, c.node.Server)
+			switch {
+			case r.Poisoned && r.IP != "":
+				out[i].node, out[i].pin, out[i].pinReason = antiblock.Pin(c.node, r.IP), r.IP, "dns"
+			case r.Poisoned:
+				drop[i] = true
+			}
+		}(i, c)
+	}
+	wg.Wait()
+	var keep []candidate
+	for i, c := range out {
+		if drop[i] {
+			e.recordFail(c, "dns blocked")
+			continue
+		}
+		keep = append(keep, c)
+	}
+	return keep
+}
+
+// realTest tests candidates in chunks and returns the ones that failed.
+// Rejected and working servers are recorded here; failures are left to
+// the caller, which may retry them.
+func (e *Engine) realTest(cands []candidate, spoof string) []candidate {
 	const chunk = 150
-	var retry []candidate
+	var failed []candidate
 	var mu sync.Mutex
-	for start := 0; start < len(cands); start += chunk {
+	for _, part := range chunks(cands, chunk) {
 		if e.ctx.Err() != nil {
 			return nil
 		}
-		part := cands[start:min(start+chunk, len(cands))]
 		byNode := map[*node.Node]candidate{}
 		nodes := make([]*node.Node, len(part))
 		for i, c := range part {
@@ -538,35 +638,58 @@ func (e *Engine) realTest(cands []candidate, fragment bool) []candidate {
 			byNode[c.node] = c
 		}
 		t := *e.tester
-		t.Fragment = fragment
-		seen := map[*node.Node]bool{}
+		t.Spoof = spoof
+		t.FragmentFor = func(n *node.Node) bool { return byNode[n].frag }
 		err := t.Batch(e.ctx, "test", nodes, func(r tester.Result) {
 			c := byNode[r.Node]
-			mu.Lock()
-			seen[r.Node] = true
-			mu.Unlock()
 			switch {
 			case r.Rejected:
 				e.pool.Update(c.key, func(p *pool.Entry) { p.State = pool.StateRejected; p.LastTest = pool.Minutes(time.Now()) })
 			case r.OK:
-				e.recordOK(c, r, fragment)
+				e.recordOK(c, r)
 			default:
-				if !fragment && r.Node.Security == "tls" && !r.Node.UDPBased() && r.Err != "refused" {
-					mu.Lock()
-					retry = append(retry, c)
-					mu.Unlock()
-				}
-				e.recordFail(c, r.Err)
+				mu.Lock()
+				failed = append(failed, c)
+				mu.Unlock()
 			}
 		})
 		if err != nil && e.ctx.Err() == nil {
 			e.logf("warn", "آزمایش گروهی ناموفق بود: %v", err)
 		}
 	}
-	return retry
+	return failed
 }
 
-func (e *Engine) recordOK(c candidate, r tester.Result, fragment bool) {
+// chunks splits candidates so one core holds a bounded number of nodes and
+// no two WireGuard nodes with the same key share a core (they would steal
+// each other's session).
+func chunks(cands []candidate, size int) [][]candidate {
+	var out [][]candidate
+	rest := cands
+	for len(rest) > 0 {
+		var cur, later []candidate
+		keys := map[string]bool{}
+		for _, c := range rest {
+			k := ""
+			if c.node.Proto == "wireguard" {
+				k = c.node.PrivateKey
+			}
+			if len(cur) >= size || (k != "" && keys[k]) {
+				later = append(later, c)
+				continue
+			}
+			if k != "" {
+				keys[k] = true
+			}
+			cur = append(cur, c)
+		}
+		out = append(out, cur)
+		rest = later
+	}
+	return out
+}
+
+func (e *Engine) recordOK(c candidate, r tester.Result) {
 	now := time.Now()
 	n := c.node
 	e.pool.Update(c.key, func(p *pool.Entry) {
@@ -601,7 +724,8 @@ func (e *Engine) recordOK(c candidate, r tester.Result, fragment bool) {
 	s.TestedAt, s.LastOK = now, now
 	s.Fails = 0
 	s.OKCount++
-	s.Fragment = fragment
+	s.Fragment = c.frag
+	s.PinIP, s.PinReason = c.pin, c.pinReason
 	e.scan.Tested++
 	e.scan.recent = append(e.scan.recent, now)
 }

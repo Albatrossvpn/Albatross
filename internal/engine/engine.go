@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cezomagoanlace29861-jpg/vp/internal/antiblock"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/pool"
@@ -54,8 +55,10 @@ type Engine struct {
 	rt   *core.Runtime
 	pool *pool.Pool
 
-	fetcher *sources.Fetcher
-	tester  *tester.Tester
+	fetcher  *sources.Fetcher
+	tester   *tester.Tester
+	resolver *antiblock.Resolver
+	cf       *antiblock.Scanner
 
 	mu           sync.Mutex
 	settings     Settings
@@ -138,6 +141,8 @@ func New(opt Options) (*Engine, error) {
 	}}
 	e.fetcher = &sources.Fetcher{Direct: direct, Proxy: e.proxyClient, CacheDir: filepath.Join(e.dir, "cache")}
 	e.tester = &tester.Tester{Runtime: e.rt}
+	e.resolver = &antiblock.Resolver{Client: e.anyClient}
+	e.cf = &antiblock.Scanner{}
 	e.applyIntensity()
 	if err := installRules(filepath.Join(e.dir, "rules")); err != nil {
 		e.logf("warn", "نصب فهرست سایت‌های ایرانی ناموفق بود: %v", err)

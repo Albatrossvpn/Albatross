@@ -10,6 +10,9 @@ type SingBoxOptions struct {
 	// Fragment splits the TLS ClientHello across TCP segments and TLS
 	// records, which gets past SNI filters that do not reassemble.
 	Fragment bool
+	// Spoof sends a forged ClientHello with this allowed SNI first, which
+	// fools whitelist filters. Needs administrator rights.
+	Spoof string
 }
 
 // SingBox returns the sing-box object for this node. WireGuard and OpenVPN
@@ -220,6 +223,9 @@ func (n *Node) sbTLS(o SingBoxOptions) map[string]any {
 	}
 	if n.Fingerprint != "" {
 		t["utls"] = map[string]any{"enabled": true, "fingerprint": n.Fingerprint}
+	}
+	if o.Spoof != "" {
+		t["spoof"] = o.Spoof
 	}
 	if n.Security == "reality" {
 		t["reality"] = map[string]any{"enabled": true, "public_key": n.PublicKey, "short_id": n.ShortID}
