@@ -247,6 +247,9 @@ func (e *Engine) race(ctx context.Context, c *connection, list []*member, timeou
 // and of its backups, and whether the group should be refreshed.
 func (e *Engine) monitor(ctx context.Context, c *connection) {
 	go c.streamTraffic(ctx)
+	if c.bypassIran {
+		go e.learnIran(ctx, c)
+	}
 	check := time.NewTimer(checkBusy)
 	defer check.Stop()
 	// The race at connect time already checked most of the group; look at
