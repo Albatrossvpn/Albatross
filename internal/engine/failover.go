@@ -175,9 +175,11 @@ type logErr struct {
 }
 
 // watchLog reacts to the core reporting failed connections: the server in
-// use is checked right away instead of at the next tick. One site failing
-// says nothing about the server (the site may be down or refuse the
-// visitor), so it takes failures to several sites within a few seconds.
+// use is checked right away instead of at the next tick. Failing to reach
+// the server itself ("dial tcp <server>") is checked at once. A failure
+// further on says nothing about the server when only one site has it (the
+// site may be down or refuse the visitor), so that takes failures to
+// several sites within a few seconds.
 func (c *connection) watchLog(core, line string) {
 	if core != "sing-box" || !strings.HasPrefix(line, "ERROR") || !strings.Contains(line, "connection") ||
 		strings.Contains(line, "outbound/direct") {
@@ -189,6 +191,10 @@ func (c *connection) watchLog(core, line string) {
 		if h, _, err := net.SplitHostPort(host); err == nil {
 			host = h
 		}
+	}
+	if strings.Contains(line, ": dial tcp ") || strings.Contains(line, ": dial udp ") {
+		c.poke()
+		return
 	}
 	now := time.Now()
 	c.mu.Lock()
@@ -395,7 +401,7 @@ func (e *Engine) checkActive(ctx context.Context, c *connection, urgent bool) bo
 	if reached && !ok && ctx.Err() == nil {
 		// A second try rules out one lost request, or a busy server
 		// answering a little late.
-		d, ok, reached = c.test(ctx, m, 4*time.Second)
+		d, ok, reached = c.test(ctx, m, max(timeout, 3*time.Second))
 	}
 	if ctx.Err() != nil {
 		return false
@@ -710,7 +716,7 @@ func (c *connection) addTraffic(up, down int64) {
 		c.waiting = now
 	case down > 0:
 		c.waiting = time.Time{}
-	case !c.waiting.IsZero() && now.Sub(c.waiting) >= 3*time.Second:
+	case !c.waiting.IsZero() && now.Sub(c.waiting) >= 2*time.Second:
 		c.waiting = time.Time{}
 		stalled = true
 	}

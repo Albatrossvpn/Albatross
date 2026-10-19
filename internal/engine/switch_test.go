@@ -36,6 +36,11 @@ func TestWatchLogNeedsSeveralSites(t *testing.T) {
 	if !poked(c) {
 		t.Fatal("three failing sites did not trigger a check")
 	}
+	// Not reaching the server at all is checked at once.
+	c.watchLog("sing-box", "ERROR [9 0ms] connection: open connection to ipinfo.io:443 using outbound/selector[proxy]: dial tcp 10.1.0.173:44387: connect: connection refused")
+	if !poked(c) {
+		t.Fatal("an unreachable server did not trigger a check")
+	}
 }
 
 // Sending a lot with little coming back is an upload, not a stall.
@@ -50,7 +55,7 @@ func TestUploadIsNotStall(t *testing.T) {
 	}
 	// A small request that never gets an answer is.
 	c.addTraffic(600, 0)
-	c.waiting = c.waiting.Add(-4 * time.Second)
+	c.waiting = c.waiting.Add(-3 * time.Second)
 	c.addTraffic(0, 0)
 	if !poked(c) {
 		t.Fatal("a stall was missed")
