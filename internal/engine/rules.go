@@ -43,7 +43,16 @@ func installRules(dir string) error {
 			return err
 		}
 	}
+	// The core refuses to start without the learned list, even empty.
+	if path := filepath.Join(dir, learnedFile); !fileExists(path) {
+		return writeLearned(path, nil)
+	}
 	return nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // updateRules downloads fresh rule sets if the local ones are a day old.
