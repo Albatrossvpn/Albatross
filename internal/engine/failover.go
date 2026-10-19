@@ -31,7 +31,33 @@ const (
 	idleAfter = 30 * time.Second
 	// refreshAfter is the youngest a group can be refreshed at.
 	refreshAfter = 5 * time.Minute
+	// stayAtLeast is how long a member stays in use before it is swapped
+	// for a better one; a member that stops answering is left at once.
+	// Each swap changes the exit address, which can sign users out.
+	stayAtLeast = 3 * time.Minute
 )
+
+// Speed tests: real downloads through one member, made only while traffic
+// flows and only when the member in use is not already fast.
+// speedURL serves the number of bytes asked for; tests point it elsewhere.
+var speedURL = "https://speed.cloudflare.com/__down?bytes="
+
+const (
+	// fastEnough is the speed (bytes/s) at which nothing is compared.
+	fastEnough = 1 << 20
+	// usable is the lowest speed a backup is preferred at before untested ones.
+	usable = 150 << 10
+	// speedFresh is how long a speed result is trusted.
+	speedFresh = 15 * time.Minute
+)
+
+// speedPlan is how often and how much to test; phones test less and smaller.
+func speedPlan(mobile bool) (every time.Duration, size int) {
+	if mobile {
+		return 5 * time.Minute, 512 << 10
+	}
+	return 3 * time.Minute, 2 << 20
+}
 
 // healthURL is what the core fetches through a member to check it.
 const healthURL = "https://www.gstatic.com/generate_204"
@@ -101,6 +127,9 @@ func (c *connection) use(ctx context.Context, m *member) error {
 		return err
 	}
 	c.mu.Lock()
+	if c.active != m {
+		c.switched = time.Now()
+	}
 	c.active = m
 	if m.delay > 0 {
 		c.delay = m.delay
@@ -140,11 +169,44 @@ func (c *connection) poke() {
 	}
 }
 
+type logErr struct {
+	at   time.Time
+	host string
+}
+
 // watchLog reacts to the core reporting failed connections: the server in
-// use is checked right away instead of at the next tick.
+// use is checked right away instead of at the next tick. One site failing
+// says nothing about the server (the site may be down or refuse the
+// visitor), so it takes failures to several sites within a few seconds.
 func (c *connection) watchLog(core, line string) {
-	if core == "sing-box" && strings.HasPrefix(line, "ERROR") && strings.Contains(line, "connection") &&
-		!strings.Contains(line, "outbound/direct") {
+	if core != "sing-box" || !strings.HasPrefix(line, "ERROR") || !strings.Contains(line, "connection") ||
+		strings.Contains(line, "outbound/direct") {
+		return
+	}
+	host := line
+	if _, rest, ok := strings.Cut(line, "connection to "); ok {
+		host, _, _ = strings.Cut(rest, " ")
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+	}
+	now := time.Now()
+	c.mu.Lock()
+	keep := c.errs[:0]
+	hosts := map[string]bool{host: true}
+	for _, e := range c.errs {
+		if now.Sub(e.at) < 10*time.Second {
+			keep = append(keep, e)
+			hosts[e.host] = true
+		}
+	}
+	c.errs = append(keep, logErr{now, host})
+	trouble := len(hosts) >= 3
+	if trouble {
+		c.errs = nil
+	}
+	c.mu.Unlock()
+	if trouble {
 		c.poke()
 	}
 }
@@ -164,7 +226,8 @@ func (c *connection) every(busy, quiet time.Duration) time.Duration {
 }
 
 // backups lists the members known to work, other than skip, best first:
-// the group's own country, then lowest delay.
+// the group's own country, then those measured fast (fastest first), then
+// untested ones (lowest delay first), then those measured slow.
 func (c *connection) backups(skip map[*member]bool) []*member {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -174,14 +237,35 @@ func (c *connection) backups(skip map[*member]bool) []*member {
 			out = append(out, m)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		hi, hj := out[i].country == c.home, out[j].country == c.home
-		if hi != hj {
-			return hi
+	rank := func(m *member) int {
+		switch {
+		case !m.speedKnown():
+			return 1
+		case m.speed >= usable:
+			return 0
 		}
-		return out[i].delay < out[j].delay
+		return 2
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if ha, hb := a.country == c.home, b.country == c.home; ha != hb {
+			return ha
+		}
+		if ra, rb := rank(a), rank(b); ra != rb {
+			return ra < rb
+		}
+		if rank(a) != 1 {
+			return a.speed > b.speed
+		}
+		return a.delay < b.delay
 	})
 	return out
+}
+
+// speedKnown reports whether m has a recent speed result. The caller holds
+// connection.mu.
+func (m *member) speedKnown() bool {
+	return !m.speedAt.IsZero() && time.Since(m.speedAt) < speedFresh
 }
 
 // noteResult records a check of a member, on the member and on the server
@@ -191,6 +275,10 @@ func (e *Engine) noteResult(c *connection, m *member, delay int, ok bool) {
 	c.mu.Lock()
 	m.checked = now
 	if ok {
+		// One sample is noisy; a member's delay is a running average.
+		if m.delay > 0 && m.alive {
+			delay = (m.delay + delay) / 2
+		}
 		m.alive, m.delay, m.fails = true, delay, 0
 	} else {
 		m.alive = false
@@ -304,9 +392,10 @@ func (e *Engine) checkActive(ctx context.Context, c *connection, urgent bool) bo
 		timeout = min(max(3*usual+500*time.Millisecond, 1500*time.Millisecond), 3*time.Second)
 	}
 	d, ok, reached := c.test(ctx, m, timeout)
-	if reached && !ok && !urgent && ctx.Err() == nil {
-		// A second try rules out one lost request.
-		d, ok, reached = c.test(ctx, m, 3*time.Second)
+	if reached && !ok && ctx.Err() == nil {
+		// A second try rules out one lost request, or a busy server
+		// answering a little late.
+		d, ok, reached = c.test(ctx, m, 4*time.Second)
 	}
 	if ctx.Err() != nil {
 		return false
@@ -444,7 +533,10 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 	if !auto || c.pinned {
 		return true
 	}
-	if b := c.faster(); b != nil && c.use(ctx, b) == nil {
+	if !c.idle() {
+		// Speed tests take seconds; health checks must not wait for them.
+		go e.speedRound(ctx, c)
+	} else if b := c.faster(); b != nil && c.use(ctx, b) == nil {
 		c.mu.Lock()
 		d := b.delay
 		c.mu.Unlock()
@@ -460,17 +552,22 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 	return true
 }
 
-// faster returns a live member clearly faster than the one in use.
+// faster returns a live member clearly faster than the one in use. It is
+// asked only while idle: under the user's traffic the member in use answers
+// later than idle backups do, which would make every backup look faster.
 func (c *connection) faster() *member {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	cur := c.active.delay
-	if cur <= 0 {
+	if cur <= 0 || time.Since(c.switched) < stayAtLeast {
 		return nil
 	}
 	var best *member
 	for _, m := range c.members {
 		if m == c.active || !m.alive || m.country != c.active.country {
+			continue
+		}
+		if m.speedKnown() && m.speed < usable {
 			continue
 		}
 		if float64(m.delay) < float64(cur)*0.6 && cur-m.delay > 80 && (best == nil || m.delay < best.delay) {
@@ -599,18 +696,21 @@ func (c *connection) addTraffic(up, down int64) {
 	if up+down > 0 {
 		c.lastBusy = time.Now()
 	}
-	// Apps that sent something and got nothing back for a couple of
-	// seconds usually mean the server in use went silent.
+	// Apps that sent a request and got nothing back for a few seconds
+	// usually mean the server in use went silent. An upload (a file, a
+	// video call) sends a lot and gets little back; that is not a stall.
 	now := time.Now()
 	stalled := false
 	switch {
+	case up >= 64<<10:
+		c.waiting = time.Time{}
 	case up > 0 && c.waiting.IsZero():
 		// Download in the same second may belong to older connections; only
 		// a later answer counts.
 		c.waiting = now
 	case down > 0:
 		c.waiting = time.Time{}
-	case !c.waiting.IsZero() && now.Sub(c.waiting) >= 2*time.Second:
+	case !c.waiting.IsZero() && now.Sub(c.waiting) >= 3*time.Second:
 		c.waiting = time.Time{}
 		stalled = true
 	}
@@ -618,4 +718,123 @@ func (c *connection) addTraffic(up, down int64) {
 	if stalled {
 		c.poke()
 	}
+}
+
+// speed downloads through one member and returns its speed in bytes per
+// second, timed from the first byte so connection setup is left out.
+func (c *connection) speed(ctx context.Context, m *member, size int) (float64, error) {
+	proxy := &url.URL{Scheme: "http", User: url.UserPassword(m.tag, c.clashSecret), Host: c.probeAddr}
+	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy), DisableKeepAlives: true}}
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, speedURL+strconv.Itoa(size), nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("speed test: HTTP %d", resp.StatusCode)
+	}
+	start := time.Now()
+	// A server too slow to finish in time is measured on what arrived.
+	n, _ := io.Copy(io.Discard, io.LimitReader(resp.Body, int64(size)))
+	took := time.Since(start)
+	if n < 64<<10 {
+		if ctx.Err() != nil {
+			return float64(n) / took.Seconds(), nil
+		}
+		return 0, fmt.Errorf("speed test: only %d bytes", n)
+	}
+	return float64(n) / max(took.Seconds(), 0.05), nil
+}
+
+// noteSpeed records a speed result on m.
+func (c *connection) noteSpeed(m *member, bps float64) {
+	c.mu.Lock()
+	m.speed, m.speedAt = bps, time.Now()
+	c.mu.Unlock()
+}
+
+// speedRound measures the member in use while traffic flows and, when it is
+// slow, its best backups; it moves to one that is much faster. A server can
+// answer pings quickly and still carry little, so delay alone cannot tell.
+// To avoid swapping on one unlucky test, a backup must win twice in a row
+// unless it is more than four times as fast.
+func (e *Engine) speedRound(ctx context.Context, c *connection) {
+	every, size := speedPlan(e.opt.Mobile)
+	c.mu.Lock()
+	due := time.Since(c.speedAt) >= every && time.Since(c.switched) >= stayAtLeast
+	if due {
+		c.speedAt = time.Now()
+	}
+	active := c.active
+	c.mu.Unlock()
+	if !due {
+		return
+	}
+	cur, err := c.speed(ctx, active, size)
+	if err != nil {
+		// The health checks decide about a member that does not answer.
+		return
+	}
+	c.noteSpeed(active, cur)
+	if cur >= fastEnough {
+		c.mu.Lock()
+		c.slowRuns = 0
+		c.mu.Unlock()
+		return
+	}
+	var best *member
+	var bestSpeed float64
+	tested := 0
+	for _, b := range c.backups(map[*member]bool{active: true}) {
+		if tested == 2 || ctx.Err() != nil {
+			break
+		}
+		c.mu.Lock()
+		same := b.country == active.country
+		c.mu.Unlock()
+		if !same {
+			continue
+		}
+		tested++
+		s, err := c.speed(ctx, b, size)
+		if err != nil {
+			continue
+		}
+		c.noteSpeed(b, s)
+		if s > bestSpeed {
+			best, bestSpeed = b, s
+		}
+	}
+	c.mu.Lock()
+	better := best != nil && bestSpeed >= 2*cur && bestSpeed-cur >= 200<<10
+	if better {
+		c.slowRuns++
+	} else {
+		c.slowRuns = 0
+	}
+	// A failover may have moved traffic meanwhile.
+	swap := better && (c.slowRuns >= 2 || bestSpeed >= 4*cur) && c.active == active
+	if swap {
+		c.slowRuns = 0
+	}
+	c.mu.Unlock()
+	if !swap || c.use(ctx, best) != nil {
+		return
+	}
+	e.logf("info", "سرعت سرور «%s» پایین بود (%s)؛ به «%s» (%s) در همان کشور منتقل شدید.",
+		active.server.Name, rate(cur), best.server.Name, rate(bestSpeed))
+}
+
+// rate formats a speed in bytes per second for the log.
+func rate(bps float64) string {
+	if bps >= 1<<20 {
+		return fmt.Sprintf("%.1f مگابایت بر ثانیه", bps/(1<<20))
+	}
+	return fmt.Sprintf("%.0f کیلوبایت بر ثانیه", bps/(1<<10))
 }
