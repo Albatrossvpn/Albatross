@@ -41,6 +41,7 @@ type connection struct {
 	members     []*member
 	clashAddr   string
 	clashSecret string
+	probeAddr   string // reaches one member by name, for speed tests
 	started     time.Time
 	sysProxy    bool
 	cancel      context.CancelFunc
@@ -58,6 +59,10 @@ type connection struct {
 	lastBusy time.Time // last second that carried traffic
 	waiting  time.Time // when data went out with nothing back since
 	healthy  bool
+	switched time.Time // last time the member in use changed
+	speedAt  time.Time // last speed round
+	slowRuns int       // speed rounds in a row that found a much faster backup
+	errs     []logErr  // recent failed connections, for watchLog
 }
 
 // member is one server of a live group.
@@ -72,6 +77,8 @@ type member struct {
 	delay   int
 	fails   int // failed checks in a row
 	checked time.Time
+	speed   float64 // download bytes per second at the last speed test
+	speedAt time.Time
 }
 
 func (c *connection) ready() bool {
@@ -354,7 +361,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 			proxyPort = p[0]
 		}
 	}
-	ports, err := core.FreePorts(1)
+	ports, err := core.FreePorts(2)
 	if err != nil {
 		return err
 	}
@@ -370,6 +377,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		mode:        set.Mode,
 		proxyAddr:   "127.0.0.1:" + strconv.Itoa(proxyPort),
 		clashAddr:   "127.0.0.1:" + strconv.Itoa(ports[0]),
+		probeAddr:   "127.0.0.1:" + strconv.Itoa(ports[1]),
 		clashSecret: randomToken(),
 		started:     time.Now(),
 		wake:        make(chan struct{}, 1),
@@ -377,7 +385,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	opts := connOptions{
 		listen: listen, port: proxyPort, tun: set.Mode == "tun", bypassIran: set.BypassIran,
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
-		clashSecret: c.clashSecret, exe: e.opt.ExeName, localDNS: e.dns(), mobile: e.opt.Mobile,
+		clashSecret: c.clashSecret, probeAddr: c.probeAddr, exe: e.opt.ExeName, localDNS: e.dns(), mobile: e.opt.Mobile,
 	}
 	build := core.BuildOptions{
 		Fragment:    set.Fragment == "on",
@@ -540,6 +548,7 @@ type connOptions struct {
 	rulesDir    string
 	clashAddr   string
 	clashSecret string
+	probeAddr   string
 	exe         string
 	localDNS    string
 	mobile      bool
@@ -558,6 +567,20 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		map[string]any{"type": "direct", "tag": "direct"},
 	)
 	inbounds := []any{map[string]any{"type": "mixed", "tag": "mixed-in", "listen": o.listen, "listen_port": o.port}}
+	var rules []any
+	if o.probeAddr != "" {
+		// The engine measures any member's speed through this inbound by
+		// naming it as the user, without moving the user's traffic.
+		host, port, _ := net.SplitHostPort(o.probeAddr)
+		p, _ := strconv.Atoi(port)
+		users := make([]any, 0, len(s.Tags))
+		for _, tag := range s.Tags {
+			users = append(users, map[string]any{"username": tag, "password": o.clashSecret})
+			rules = append(rules, map[string]any{"inbound": []string{"probe-in"}, "auth_user": []string{tag}, "outbound": tag})
+		}
+		rules = append(rules, map[string]any{"inbound": []string{"probe-in"}, "action": "reject"})
+		inbounds = append(inbounds, map[string]any{"type": "mixed", "tag": "probe-in", "listen": host, "listen_port": p, "users": users})
+	}
 	if o.tun {
 		inbounds = append(inbounds, map[string]any{
 			"type": "tun", "tag": "tun-in", "interface_name": "Azadrah",
@@ -566,11 +589,11 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		})
 	}
 	var ruleSets []any
-	rules := []any{
+	rules = append(rules,
 		map[string]any{"action": "sniff"},
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
 		map[string]any{"ip_is_private": true, "outbound": "direct"},
-	}
+	)
 	if o.tun {
 		// Our own app and the cores' test instances must not loop
 		// through the tunnel.
