@@ -33,6 +33,7 @@ type connection struct {
 	country     string // what the user asked for ("" = fastest anywhere)
 	home        string // country the group was built in; backups stay here
 	pinned      bool   // the user picked this one server
+	bypassIran  bool
 	mode        string
 	proxyAddr   string
 	running     *core.Running
@@ -365,6 +366,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		country:     country,
 		home:        home,
 		pinned:      pinned,
+		bypassIran:  set.BypassIran,
 		mode:        set.Mode,
 		proxyAddr:   "127.0.0.1:" + strconv.Itoa(proxyPort),
 		clashAddr:   "127.0.0.1:" + strconv.Itoa(ports[0]),
@@ -584,14 +586,17 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 	}
 	dnsRules := []any{}
 	if o.bypassIran {
-		ruleSets = append(ruleSets, localRuleSet("geosite-ir", o.rulesDir), localRuleSet("geoip-ir", o.rulesDir))
+		// learned-ir holds Iranian sites the domain list misses (irlearn.go);
+		// the core reloads it whenever the engine adds one.
+		ruleSets = append(ruleSets, localRuleSet("geosite-ir", o.rulesDir), localRuleSet("geoip-ir", o.rulesDir),
+			map[string]any{"type": "local", "tag": learnedTag, "format": "source", "path": filepath.Join(o.rulesDir, learnedFile)})
 		rules = append(rules, map[string]any{
 			"domain_suffix": []string{".ir", ".xn--mgba3a4f16a"},
-			"rule_set":      []string{"geosite-ir", "geoip-ir"},
+			"rule_set":      []string{"geosite-ir", learnedTag, "geoip-ir"},
 			"outbound":      "direct",
 		})
 		dnsRules = append(dnsRules, map[string]any{
-			"domain_suffix": []string{".ir", ".xn--mgba3a4f16a"}, "rule_set": []string{"geosite-ir"},
+			"domain_suffix": []string{".ir", ".xn--mgba3a4f16a"}, "rule_set": []string{"geosite-ir", learnedTag},
 			"action": "route", "server": "local",
 		})
 	}
