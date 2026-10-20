@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cezomagoanlace29861-jpg/vp/internal/account"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/antiblock"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
@@ -39,6 +40,9 @@ type Options struct {
 	// server names on systems whose resolver they cannot ask themselves
 	// (Android). Empty means the system's. SetLocalDNS changes it.
 	LocalDNS string
+	// AccountURLs replaces the build's account service addresses (tests use
+	// it); nil means AccountURL.
+	AccountURLs []string
 	// Mobile tunes defaults and pacing for phones: lighter scanning, no
 	// large lists by default, and "proxy" mode is the device-wide VPN.
 	Mobile bool
@@ -62,6 +66,7 @@ type Engine struct {
 	rt   *core.Runtime
 	pool *pool.Pool
 
+	acct     *account.Client // nil when this build has no accounts
 	fetcher  *sources.Fetcher
 	tester   *tester.Tester
 	resolver *antiblock.Resolver
@@ -153,6 +158,9 @@ func New(opt Options) (*Engine, error) {
 		IdleConnTimeout:     30 * time.Second,
 	}}
 	e.fetcher = &sources.Fetcher{Direct: direct, Proxy: e.proxyClient, CacheDir: filepath.Join(e.dir, "cache")}
+	if urls := accountURLs(opt); len(urls) > 0 {
+		e.acct = account.New(urls, account.SessionPath(e.dir), e.anyClient)
+	}
 	e.tester = &tester.Tester{Runtime: e.rt}
 	e.resolver = &antiblock.Resolver{Client: e.anyClient}
 	e.cf = &antiblock.Scanner{}

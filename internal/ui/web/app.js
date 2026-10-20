@@ -101,11 +101,73 @@ function render(s) {
     if (u.message) $("update-text").textContent = u.message;
   }
 
+  renderAccount(s.account);
   $("admin-chip").classList.toggle("hidden", !s.admin);
   if (!settingsBusy) fillSettings(s.settings);
   $("version").textContent = s.version ? "v" + s.version : "";
   if (sheetKind === "country") renderSheet();
 }
+
+const GB = 1024 ** 3;
+function fmtBytes(n) {
+  if (n >= GB) return (n / GB).toFixed(n >= 10 * GB ? 0 : 1) + " GB";
+  if (n >= 1024 ** 2) return (n / 1024 ** 2).toFixed(0) + " MB";
+  return Math.max(0, Math.round(n / 1024)) + " KB";
+}
+function fmtTime(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h ? (m ? `${h} h ${m} min` : `${h} h`) : `${m} min`;
+}
+const fmtDate = (unix) => new Date(unix * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
+function meter(id, used, limit, fmt) {
+  $(id).classList.toggle("hidden", !limit);
+  if (!limit) return;
+  const frac = Math.min(1, used / limit);
+  $(id + "-text").textContent = `${fmt(Math.min(used, limit))} of ${fmt(limit)}`;
+  const bar = $(id + "-bar");
+  bar.style.width = (frac * 100).toFixed(1) + "%";
+  bar.className = frac >= 1 ? "full" : frac >= 0.85 ? "warn" : "";
+}
+
+function renderAccount(a) {
+  const needLogin = a.enabled && !a.signed_in;
+  $("login").classList.toggle("hidden", !needLogin);
+  $("account-card").classList.toggle("hidden", !a.signed_in);
+  if (!a.signed_in) return;
+  $("acc-name").textContent = a.username;
+  $("acc-note").textContent = a.message || "";
+  meter("acc-data", a.used_bytes, a.quota_bytes, fmtBytes);
+  meter("acc-time", a.used_seconds, a.max_seconds, fmtTime);
+  const dates = [];
+  if (a.resets_at) dates.push("Renews " + fmtDate(a.resets_at));
+  if (a.expires_at) dates.push("Expires " + fmtDate(a.expires_at));
+  if (!a.quota_bytes && !a.max_seconds && !a.expires_at) dates.push("No limits on this account");
+  $("acc-dates").textContent = dates.join(" · ");
+}
+
+$("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("login-error").textContent = "";
+  $("login-btn").disabled = true;
+  try {
+    await api("POST", "/api/login", { username: $("login-user").value, password: $("login-pass").value });
+    $("login-pass").value = "";
+    await poll();
+  } catch (err) {
+    $("login-error").textContent = err.message;
+  } finally {
+    $("login-btn").disabled = false;
+  }
+});
+$("signup-link").addEventListener("click", () => {
+  const site = state && state.account.site_url;
+  if (site) api("POST", "/api/open", { url: site + "account.html#signup" }).catch((e) => toast(e.message));
+});
+$("logout-btn").addEventListener("click", async () => {
+  await api("POST", "/api/logout").catch((e) => toast(e.message));
+  poll();
+});
 
 async function poll() {
   try {
@@ -189,9 +251,9 @@ const privacyNotes = [
   ["Encrypted tunnel", "Your traffic is encrypted between your device and the server you connect to, so your network or provider cannot see what you open."],
   ["Secure sites stay private", "Pages, passwords and messages on sites that use HTTPS stay encrypted all the way to the site. The server carrying them cannot read them."],
   ["Unencrypted traffic is blocked", "Anything unencrypted can be read by whoever carries it, so plain HTTP, FTP, Telnet and unprotected mail ports are refused. You can turn this off in Settings."],
-  ["DNS stays inside the tunnel", "Name lookups go through the connection, not through your network."],
+  ["DNS stays inside the tunnel", "Name lookups for sites the VPN carries go through the connection, not through your network."],
   ["What a server can still see", "The server you connect through can see which sites you reach and how much data you send, as with any VPN. Do not rely on it to make you anonymous."],
-  ["Your account", "It records only your username, how much data you have used and how long you have been connected. The app does not send the sites you visit."],
+  ["Your account", "Your account records only your username, how much data you have used and how long you have been connected. The app does not send the sites you visit."],
 ];
 
 function countryItem(c) {

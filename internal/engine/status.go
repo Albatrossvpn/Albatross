@@ -26,6 +26,7 @@ type Snapshot struct {
 	Mobile     bool          `json:"mobile"` // the Android app: one VPN mode, no admin
 	Update     *UpdateInfo   `json:"update,omitempty"`
 	TotalGood  int           `json:"total_good"`
+	Account    AccountState  `json:"account"`
 }
 
 // ScanInfo is scan progress.
@@ -99,6 +100,7 @@ func (e *Engine) Snapshot() Snapshot {
 	snap.Scan.Downloaded = e.fetcher.BytesDownloaded()
 	snap.Admin = e.opt.IsAdmin()
 	snap.Conn = e.connInfo()
+	snap.Account = e.Account()
 	return snap
 }
 

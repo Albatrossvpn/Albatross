@@ -115,6 +115,13 @@ func (e *Engine) Connect(country string) error {
 	if e.updateRequired() {
 		return ErrUpdateRequired
 	}
+	if err := e.AllowConnect(); err != nil {
+		var limit *LimitError
+		if errors.As(err, &limit) {
+			e.setStatus(StatusIdle, limit.Message)
+		}
+		return err
+	}
 	country = strings.ToUpper(strings.TrimSpace(country))
 	e.mu.Lock()
 	e.target = country
@@ -137,6 +144,9 @@ func (e *Engine) Connect(country string) error {
 func (e *Engine) ConnectServer(key string) error {
 	if e.updateRequired() {
 		return ErrUpdateRequired
+	}
+	if err := e.AllowConnect(); err != nil {
+		return err
 	}
 	e.mu.Lock()
 	var s *Server

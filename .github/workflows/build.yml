@@ -20,6 +20,24 @@ env:
   WARPPLUS_VERSION: "1.2.6"
 
 jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: API tests (a local Worker with a local database)
+        run: npm run test:api
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -79,6 +97,8 @@ jobs:
       - name: Package
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          # The account service addresses (repository variable); empty builds an app without sign-in.
+          ACCOUNT_URL: ${{ vars.ACCOUNT_URL }}
         run: bash build/package.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -112,6 +132,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
       - name: Build APKs
         env:
+          ACCOUNT_URL: ${{ vars.ACCOUNT_URL }}
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           SKYROAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           SKYROAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
