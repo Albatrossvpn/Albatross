@@ -82,12 +82,12 @@ jobs:
         run: bash build/package.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: Azadrah-folder
-          path: dist/Azadrah
+          name: Skyroad-folder
+          path: dist/Skyroad
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
-          name: Azadrah-portable-${{ steps.version.outputs.version }}
+          name: Skyroad-portable-${{ steps.version.outputs.version }}
           path: dist/*.zip
 
   android:
@@ -113,20 +113,20 @@ jobs:
       - name: Build APKs
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          AZADRAH_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          AZADRAH_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          AZADRAH_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          SKYROAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SKYROAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SKYROAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           # Without a key in the repository secrets the APKs get a debug key.
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/azadrah.jks"
-            export AZADRAH_KEYSTORE="$RUNNER_TEMP/azadrah.jks"
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/skyroad.jks"
+            export SKYROAD_KEYSTORE="$RUNNER_TEMP/skyroad.jks"
           fi
           bash build/android/build.sh
           "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging dist/*arm64-v8a.apk | head -3
       - uses: actions/upload-artifact@v4
         with:
-          name: Azadrah-android-${{ env.VERSION }}
+          name: Skyroad-android-${{ env.VERSION }}
           path: dist/*.apk
 
   installer:
@@ -138,14 +138,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: Azadrah-folder
-          path: dist/Azadrah
+          name: Skyroad-folder
+          path: dist/Skyroad
       - name: Smoke test on Windows
         shell: pwsh
         run: |
-          $data = Join-Path $env:RUNNER_TEMP "azadrah-data"
-          $out = Join-Path $env:RUNNER_TEMP "azadrah-out.txt"
-          $p = Start-Process -FilePath "dist\Azadrah\Azadrah.exe" -ArgumentList "--headless","--ui-port","18080","--data",$data -RedirectStandardOutput $out -PassThru
+          $data = Join-Path $env:RUNNER_TEMP "skyroad-data"
+          $out = Join-Path $env:RUNNER_TEMP "skyroad-out.txt"
+          $p = Start-Process -FilePath "dist\Skyroad\Skyroad.exe" -ArgumentList "--headless","--ui-port","18080","--data",$data -RedirectStandardOutput $out -PassThru
           $url = $null
           for ($i = 0; $i -lt 30 -and -not $url; $i++) { Start-Sleep 1; $url = Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 1 }
           if (-not $url) { throw "the app did not start" }
@@ -156,8 +156,8 @@ jobs:
           if (-not ($state.cores.sing_box -and $state.cores.xray -and $state.cores.warp_plus)) { throw "a core is missing" }
           $page = Invoke-WebRequest -Uri "http://127.0.0.1:18080/" -UseBasicParsing
           if ($page.StatusCode -ne 200) { throw "UI not served" }
-          & dist\Azadrah\core\sing-box.exe version
-          & dist\Azadrah\core\xray.exe version
+          & dist\Skyroad\core\sing-box.exe version
+          & dist\Skyroad\core\xray.exe version
           Stop-Process -Id $p.Id -Force
       - name: Real-world connection test
         # Public free servers change by the minute; report but never block.
@@ -165,9 +165,9 @@ jobs:
         timeout-minutes: 12
         shell: pwsh
         run: |
-          $data = Join-Path $env:RUNNER_TEMP "azadrah-real"
-          $out = Join-Path $env:RUNNER_TEMP "azadrah-real.txt"
-          $p = Start-Process -FilePath "dist\Azadrah\Azadrah.exe" -ArgumentList "--headless","--ui-port","18081","--data",$data -RedirectStandardOutput $out -PassThru
+          $data = Join-Path $env:RUNNER_TEMP "skyroad-real"
+          $out = Join-Path $env:RUNNER_TEMP "skyroad-real.txt"
+          $p = Start-Process -FilePath "dist\Skyroad\Skyroad.exe" -ArgumentList "--headless","--ui-port","18081","--data",$data -RedirectStandardOutput $out -PassThru
           $url = $null
           for ($i = 0; $i -lt 30 -and -not $url; $i++) { Start-Sleep 1; $url = Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 1 }
           $h = @{ "X-Token" = $url.Split("#")[1] }
@@ -201,30 +201,30 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
-          & $iscc "/DAppVersion=$env:VERSION" "/DSourceDir=$pwd\dist\Azadrah" "/DOutputDir=$pwd\dist" "build\windows\installer.iss"
+          & $iscc "/DAppVersion=$env:VERSION" "/DSourceDir=$pwd\dist\Skyroad" "/DOutputDir=$pwd\dist" "build\windows\installer.iss"
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
           Get-ChildItem dist\*.exe
       - name: Test installer
         shell: pwsh
         run: |
-          $setup = Get-ChildItem dist\Azadrah-Setup-*.exe | Select-Object -First 1
-          $dir = Join-Path $env:RUNNER_TEMP "azadrah-installed"
+          $setup = Get-ChildItem dist\Skyroad-Setup-*.exe | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP "skyroad-installed"
           Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/CURRENTUSER","/DIR=`"$dir`"" -Wait
-          foreach ($f in "Azadrah.exe","core\sing-box.exe","core\xray.exe","core\warp-plus.exe") {
+          foreach ($f in "Skyroad.exe","core\sing-box.exe","core\xray.exe","core\warp-plus.exe") {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f after install" }
           }
           "installed OK: $dir"
       - uses: actions/upload-artifact@v4
         with:
-          name: Azadrah-Setup-${{ env.VERSION }}
-          path: dist/Azadrah-Setup-*.exe
+          name: Skyroad-Setup-${{ env.VERSION }}
+          path: dist/Skyroad-Setup-*.exe
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           target_commitish: ${{ github.sha }}
-          files: dist/Azadrah-Setup-*.exe
+          files: dist/Skyroad-Setup-*.exe
           generate_release_notes: true
 
   # The installer job creates the release; this adds the portable zip and
@@ -236,11 +236,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Azadrah-portable-${{ needs.build.outputs.version }}
+          name: Skyroad-portable-${{ needs.build.outputs.version }}
           path: dist
       - uses: actions/download-artifact@v4
         with:
-          name: Azadrah-android-${{ needs.build.outputs.version }}
+          name: Skyroad-android-${{ needs.build.outputs.version }}
           path: dist
       - uses: softprops/action-gh-release@v2
         with:

@@ -1,4 +1,4 @@
-package app.azadrah.vpn;
+package app.skyroad.vpn;
 
 import android.app.Notification;
 import android.app.PendingIntent;
@@ -11,17 +11,17 @@ import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
-import app.azadrah.mobile.Mobile;
+import app.skyroad.mobile.Mobile;
 
 /**
  * The device-wide VPN. Every app's traffic enters this tunnel; the Go side
  * hands it to the engine's local proxy, which sends it through the servers.
- * Azadrah itself is left out, so the cores reach the servers directly.
+ * Skyroad itself is left out, so the cores reach the servers directly.
  */
 public final class TunnelService extends VpnService {
-    private static final String TAG = "Azadrah";
-    private static final String ACTION_STOP = "app.azadrah.vpn.STOP";
-    private static final String ACTION_DISCONNECT = "app.azadrah.vpn.DISCONNECT";
+    private static final String TAG = "Skyroad";
+    private static final String ACTION_STOP = "app.skyroad.vpn.STOP";
+    private static final String ACTION_DISCONNECT = "app.skyroad.vpn.DISCONNECT";
 
     private ParcelFileDescriptor tun;
 

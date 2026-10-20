@@ -1,4 +1,4 @@
-package app.azadrah.vpn;
+package app.skyroad.vpn;
 
 import android.content.Intent;
 import android.net.Uri;
@@ -7,8 +7,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
 
-import app.azadrah.mobile.Mobile;
-import app.azadrah.mobile.Platform;
+import app.skyroad.mobile.Mobile;
+import app.skyroad.mobile.Platform;
 
 /** What the Go engine asks of Android. Calls arrive on Go's threads. */
 final class Bridge implements Platform {

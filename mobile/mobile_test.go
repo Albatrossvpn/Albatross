@@ -93,7 +93,7 @@ func TestAndroidPath(t *testing.T) {
 		fmt.Fprintf(w, "vless://%s@%s:%d?type=tcp&security=none#test\n", uuid, hostIP, port)
 	}))
 	defer sub.Close()
-	t.Setenv("AZADRAH_SOURCES", sub.URL)
+	t.Setenv("SKYROAD_SOURCES", sub.URL)
 
 	dnsAddr := fakeDNS(t)
 	p := &fakeVPN{t: t, up: make(chan struct{}, 1), down: make(chan struct{}, 1)}
@@ -143,7 +143,7 @@ func TestAndroidPath(t *testing.T) {
 	// Android denies apps the netlink socket that sing-box's
 	// auto_detect_interface needs, and sing-box then refuses to start, so
 	// no config written on a phone may ask for it.
-	configs, _ := filepath.Glob(filepath.Join(dir, "data", "azadrah", "run", "*sing-box.json"))
+	configs, _ := filepath.Glob(filepath.Join(dir, "data", "skyroad", "run", "*sing-box.json"))
 	if len(configs) == 0 {
 		t.Fatal("no core configs written")
 	}
@@ -180,11 +180,11 @@ func TestAndroidPath(t *testing.T) {
 	}}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	addrs, err := r.LookupHost(ctx, "azadrah-test.ir")
+	addrs, err := r.LookupHost(ctx, "skyroad-test.ir")
 	if err != nil || len(addrs) == 0 || addrs[0] != testIP {
 		t.Fatalf("DNS through the tunnel: %v %v", addrs, err)
 	}
-	t.Logf("DNS through the tunnel: azadrah-test.ir = %v", addrs)
+	t.Logf("DNS through the tunnel: skyroad-test.ir = %v", addrs)
 
 	call("POST", "/api/disconnect", "", nil)
 	select {

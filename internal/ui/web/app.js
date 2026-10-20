@@ -432,7 +432,7 @@ async function loadLogs() {
 
 // The Android back button: close what is open, then go home; false lets
 // the app go to the background.
-window.azadrahBack = () => {
+window.skyroadBack = () => {
   if (!$("sheet").classList.contains("hidden")) { closeSheet(); return true; }
   if (!$("admin-modal").classList.contains("hidden")) { $("admin-modal").classList.add("hidden"); return true; }
   if (view !== "home") { show("home"); return true; }
