@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Administration — {name}</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/site.css">
+<script type="module" src="/admin.js"></script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="/admin"><img src="/icon.svg" alt="" width="28" height="28"><span data-name>Skyroad</span> <span class="muted">Admin</span></a>
+    <span class="spacer"></span>
+    <button class="btn hidden" id="logout">Sign out</button>
+  </div>
+</header>
+
+<main class="center">
+  <div class="panel" id="auth">
+    <h1>Administration</h1>
+    <p class="muted">Sign in with the administrator account.</p>
+    <form id="login-form" class="stack mt" autocomplete="on">
+      <label class="field"><span>Username</span><input id="a-user" autocomplete="username" autocapitalize="none" required></label>
+      <label class="field"><span>Password</span><input id="a-pass" type="password" autocomplete="current-password" required></label>
+      <div class="error" id="a-error" role="alert"></div>
+      <button class="btn primary big full">Sign in</button>
+    </form>
+  </div>
+
+  <div class="panel wide hidden" id="panel">
+    <div class="stats" id="stats"></div>
+    <div class="toolbar">
+      <input id="q" type="search" placeholder="Search by username or note">
+      <button class="btn primary" id="new">New user</button>
+      <button class="btn" id="bulk">Create many</button>
+      <button class="btn" id="settings">Settings</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>User</th><th>Status</th><th>Data</th><th>Time</th><th>Ends</th><th>Last seen</th><th></th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="pager"><span id="count"></span><span><button class="btn small" id="prev">Previous</button> <button class="btn small" id="next">Next</button></span></div>
+  </div>
+</main>
+
+<!-- Create or edit one user -->
+<dialog id="user-dialog">
+  <form method="dialog" id="user-form">
+    <h2 id="u-title">New user</h2>
+    <label class="field" id="u-name-field"><span>Username</span><input id="u-name" autocapitalize="none" spellcheck="false" maxlength="32"></label>
+    <label class="field" id="u-pass-field"><span>Password</span><input id="u-pass" autocomplete="off" placeholder="Leave empty to generate one"></label>
+    <div class="two">
+      <label class="field"><span>Data per period (GB)</span><input id="u-quota" type="number" min="0" step="any" placeholder="0 = no limit"></label>
+      <label class="field"><span>Time per period (hours)</span><input id="u-hours" type="number" min="0" step="any" placeholder="0 = no limit"></label>
+      <label class="field"><span>Allowance renews every (days)</span><input id="u-reset" type="number" min="0" step="1" placeholder="0 = never"></label>
+      <label class="field"><span>Account ends on</span><input id="u-expires" type="date"></label>
+    </div>
+    <label class="field"><span>Note</span><input id="u-note" maxlength="200" placeholder="Visible to you only"></label>
+    <div class="error" id="u-error" role="alert"></div>
+    <div id="u-extra" class="hidden">
+      <div class="row wrap-row">
+        <button type="button" class="btn small" id="u-reset-usage">Reset usage</button>
+        <button type="button" class="btn small" id="u-reset-pass">New password</button>
+        <button type="button" class="btn small" id="u-signout">Sign out devices</button>
+        <button type="button" class="btn small" id="u-toggle">Turn off</button>
+        <button type="button" class="btn small danger" id="u-delete">Delete</button>
+      </div>
+    </div>
+    <div class="actions"><button type="button" class="btn" id="u-cancel">Close</button><button class="btn primary" id="u-save">Save</button></div>
+  </form>
+</dialog>
+
+<!-- Create many -->
+<dialog id="bulk-dialog">
+  <form method="dialog" id="bulk-form">
+    <h2>Create many users</h2>
+    <div id="b-fields">
+      <div class="two">
+        <label class="field"><span>Username prefix</span><input id="b-prefix" value="user" maxlength="21"></label>
+        <label class="field"><span>How many (1–200)</span><input id="b-count" type="number" min="1" max="200" value="10"></label>
+        <label class="field"><span>Data per period (GB)</span><input id="b-quota" type="number" min="0" step="any" placeholder="0 = no limit"></label>
+        <label class="field"><span>Time per period (hours)</span><input id="b-hours" type="number" min="0" step="any" placeholder="0 = no limit"></label>
+        <label class="field"><span>Renews every (days)</span><input id="b-reset" type="number" min="0" step="1" value="30"></label>
+        <label class="field"><span>Accounts end on</span><input id="b-expires" type="date"></label>
+      </div>
+      <label class="field"><span>Note</span><input id="b-note" maxlength="200"></label>
+    </div>
+    <div id="b-result" class="hidden">
+      <p class="notice ok">Passwords are shown only now. Copy or download the list before closing.</p>
+      <textarea class="out" id="b-out" readonly></textarea>
+    </div>
+    <div class="error" id="b-error" role="alert"></div>
+    <div class="actions">
+      <button type="button" class="btn" id="b-cancel">Close</button>
+      <button type="button" class="btn hidden" id="b-copy">Copy</button>
+      <button type="button" class="btn hidden" id="b-download">Download CSV</button>
+      <button class="btn primary" id="b-create">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- A password to hand over -->
+<dialog id="secret-dialog">
+  <h2 id="x-title">Password</h2>
+  <p class="muted">Shown only now. It cannot be read again.</p>
+  <div class="secret mt" id="x-secret"></div>
+  <div class="actions"><button class="btn" id="x-copy">Copy</button><button class="btn primary" id="x-close">Done</button></div>
+</dialog>
+
+<!-- Site settings -->
+<dialog id="settings-dialog">
+  <form method="dialog" id="settings-form">
+    <h2>Settings</h2>
+    <label class="check"><input type="checkbox" id="t-signup"> Let people create their own accounts</label>
+    <p class="muted small">New accounts get these limits:</p>
+    <div class="two mt">
+      <label class="field"><span>Data per period (GB)</span><input id="t-quota" type="number" min="0" step="any"></label>
+      <label class="field"><span>Time per period (hours)</span><input id="t-hours" type="number" min="0" step="any"></label>
+      <label class="field"><span>Renews every (days)</span><input id="t-reset" type="number" min="0" step="1"></label>
+      <label class="field"><span>Valid for (days, 0 = no end)</span><input id="t-valid" type="number" min="0" step="1"></label>
+    </div>
+    <label class="field"><span>Windows download link</span><input id="t-win" type="url" placeholder="https://"></label>
+    <label class="field"><span>Android download link</span><input id="t-and" type="url" placeholder="https://"></label>
+    <div class="error" id="t-error" role="alert"></div>
+    <div class="actions"><button type="button" class="btn" id="t-cancel">Close</button><button class="btn primary">Save</button></div>
+  </form>
+</dialog>
+
+<footer class="footer" id="footer"></footer>
+</body>
+</html>
