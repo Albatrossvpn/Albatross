@@ -5,6 +5,7 @@ import android.net.Uri;
 import android.net.VpnService;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.Settings;
 import android.widget.Toast;
 
 import app.skyroad.mobile.Mobile;
@@ -59,6 +60,16 @@ final class Bridge implements Platform {
         main.post(() -> {
             try {
                 app.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (Exception ignored) {
+            }
+        });
+    }
+
+    @Override
+    public void openVPNSettings() {
+        main.post(() -> {
+            try {
+                app.startActivity(new Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             } catch (Exception ignored) {
             }
         });

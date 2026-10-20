@@ -41,6 +41,7 @@ type publicSettings struct {
 	Bypass          string `json:"bypass"`
 	Protocol        string `json:"protocol"`
 	BlockAds        bool   `json:"block_ads"`
+	SecureOnly      bool   `json:"secure_only"`
 	AutoConnect     bool   `json:"auto_connect"`
 	StartWithSystem bool   `json:"start_with_system"`
 }
@@ -48,7 +49,7 @@ type publicSettings struct {
 func publicSettingsOf(s engine.Settings) publicSettings {
 	return publicSettings{
 		Mode: s.Mode, Bypass: s.Bypass, Protocol: s.Protocol, BlockAds: s.BlockAds,
-		AutoConnect: s.AutoConnect, StartWithSystem: s.StartWithSystem,
+		SecureOnly: s.SecureOnly, AutoConnect: s.AutoConnect, StartWithSystem: s.StartWithSystem,
 	}
 }
 

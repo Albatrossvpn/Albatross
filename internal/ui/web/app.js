@@ -136,7 +136,7 @@ let sheetKind = null;
 
 function openSheet(kind) {
   sheetKind = kind;
-  const titles = { country: "Choose a location", protocol: "Protocol", bypass: "Bypass local sites" };
+  const titles = { country: "Choose a location", protocol: "Protocol", bypass: "Bypass local sites", privacy: "Privacy" };
   $("sheet-title").textContent = titles[kind];
   $("country-search").classList.toggle("hidden", kind !== "country");
   $("country-search").value = "";
@@ -174,12 +174,25 @@ function renderSheet() {
   } else if (sheetKind === "protocol") {
     html = state.protocols.map((p) => optionItem(p.value, p.label, p.value === state.settings.protocol,
       p.value === "" ? "Picks the best one for you" : "")).join("");
+  } else if (sheetKind === "privacy") {
+    html = privacyNotes.map(([t, d]) => `<div class="note"><b>${esc(t)}</b>${esc(d)}</div>`).join("");
   } else if (sheetKind === "bypass") {
     html = optionItem("", "Off", !state.settings.bypass, "Open every site through Skyroad") +
       state.regions.map((r) => optionItem(r.code, r.name, r.code === state.settings.bypass, `Open ${r.name} sites directly`)).join("");
   }
   $("sheet-list").innerHTML = html;
 }
+
+// What the app protects and what it cannot: stated plainly, without promises
+// that no VPN can keep.
+const privacyNotes = [
+  ["Encrypted tunnel", "Your traffic is encrypted between your device and the server you connect to, so your network or provider cannot see what you open."],
+  ["Secure sites stay private", "Pages, passwords and messages on sites that use HTTPS stay encrypted all the way to the site. The server carrying them cannot read them."],
+  ["Unencrypted traffic is blocked", "Anything unencrypted can be read by whoever carries it, so plain HTTP, FTP, Telnet and unprotected mail ports are refused. You can turn this off in Settings."],
+  ["DNS stays inside the tunnel", "Name lookups go through the connection, not through your network."],
+  ["What a server can still see", "The server you connect through can see which sites you reach and how much data you send, as with any VPN. Do not rely on it to make you anonymous."],
+  ["Your account", "It records only your username, how much data you have used and how long you have been connected. The app does not send the sites you visit."],
+];
 
 function countryItem(c) {
   const sel = (state.target || "") === c.code ? " selected" : "";
@@ -192,6 +205,8 @@ function countryItem(c) {
 $("country-btn").addEventListener("click", () => openSheet("country"));
 $("row-protocol").addEventListener("click", () => openSheet("protocol"));
 $("row-bypass").addEventListener("click", () => openSheet("bypass"));
+$("row-privacy").addEventListener("click", () => openSheet("privacy"));
+$("row-killswitch").addEventListener("click", () => api("POST", "/api/vpn-settings").catch((e) => toast(e.message)));
 $("sheet-backdrop").addEventListener("click", closeSheet);
 $("country-search").addEventListener("input", renderSheet);
 document.addEventListener("keydown", (e) => {
@@ -203,6 +218,7 @@ $("sheet-list").addEventListener("click", async (e) => {
   if (!item) return;
   const value = item.dataset.value;
   const kind = sheetKind;
+  if (kind === "privacy") return;
   closeSheet();
   if (kind === "protocol") return saveSettings({ protocol: value });
   if (kind === "bypass") return saveSettings({ bypass: value });
@@ -231,7 +247,7 @@ document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("cli
 // ---------- Settings ----------
 
 let settingsBusy = false;
-const toggles = ["block_ads", "auto_connect", "start_with_system"];
+const toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system"];
 
 function fillSettings(st) {
   for (const k of toggles) $("set-" + k).checked = !!st[k];

@@ -32,6 +32,9 @@ type Platform interface {
 	StopVPN()
 	// OpenURL shows a link in the browser.
 	OpenURL(url string)
+	// OpenVPNSettings shows the system VPN settings, where the user can
+	// turn on Always-on VPN and "Block connections without VPN".
+	OpenVPNSettings()
 	// Quit closes the app.
 	Quit()
 }
@@ -85,8 +88,9 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 	}
 	e.Start()
 	s, u, err := ui.Start(e, ui.Hooks{
-		Quit:    func() { go p.Quit() },
-		OpenURL: func(link string) error { p.OpenURL(link); return nil },
+		Quit:            func() { go p.Quit() },
+		OpenURL:         func(link string) error { p.OpenURL(link); return nil },
+		OpenVPNSettings: func() error { p.OpenVPNSettings(); return nil },
 	}, 0)
 	if err != nil {
 		e.Close()

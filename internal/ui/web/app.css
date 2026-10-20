@@ -48,6 +48,10 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 .mobile .desktop-only { display: none !important; }
+:not(.mobile) .mobile-only { display: none !important; }
+.note { padding: 10px 2px; color: var(--text); font-size: 14px; line-height: 1.45; }
+.note + .note { border-top: 1px solid var(--line); }
+.note b { display: block; margin-bottom: 2px; }
 .update-banner {
   display: block; width: 100%; margin: 0 0 14px; padding: 10px 14px; border: 0; border-radius: 12px;
   background: #22c55e22; color: inherit; font: inherit; text-align: center; cursor: pointer;
