@@ -1,34 +1,34 @@
-; Azadrah VPN installer. Everything the app needs ships inside: the app,
+; Skyroad VPN installer. Everything the app needs ships inside: the app,
 ; sing-box, Xray, warp-plus and the WebView2 bootstrapper (run only when
 ; WebView2 is missing). Build with:
-;   iscc /DAppVersion=0.1.0 /DSourceDir=..\..\dist\Azadrah /DOutputDir=..\..\dist build\windows\installer.iss
+;   iscc /DAppVersion=0.1.0 /DSourceDir=..\..\dist\Skyroad /DOutputDir=..\..\dist build\windows\installer.iss
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
 #ifndef SourceDir
-  #define SourceDir "..\..\dist\Azadrah"
+  #define SourceDir "..\..\dist\Skyroad"
 #endif
 #ifndef OutputDir
   #define OutputDir "..\..\dist"
 #endif
 
 [Setup]
-AppId={{6E3C2B1A-8F4D-4B5E-9C7A-A2D5E8F1B3C4}
-AppName=Azadrah VPN
+AppId={{3D7A91C2-5B48-4E6F-A0D3-7C12E9B84F65}
+AppName=Skyroad VPN
 AppVersion={#AppVersion}
-AppVerName=Azadrah VPN {#AppVersion}
-AppPublisher=Azadrah
-DefaultDirName={autopf}\Azadrah
-DefaultGroupName=Azadrah VPN
+AppVerName=Skyroad VPN {#AppVersion}
+AppPublisher=Skyroad
+DefaultDirName={autopf}\Skyroad
+DefaultGroupName=Skyroad VPN
 DisableProgramGroupPage=yes
 ; Install for the current user by default so no UAC prompt is needed.
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#OutputDir}
-OutputBaseFilename=Azadrah-Setup-{#AppVersion}
+OutputBaseFilename=Skyroad-Setup-{#AppVersion}
 SetupIconFile=icon.ico
-UninstallDisplayIcon={app}\Azadrah.exe
+UninstallDisplayIcon={app}\Skyroad.exe
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -45,25 +45,25 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "{#SourceDir}\Azadrah.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\Skyroad.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\core\*"; DestDir: "{app}\core"; Flags: ignoreversion recursesubdirs
 Source: "{#SourceDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs
 Source: "{#SourceDir}\README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
 
 [Icons]
-Name: "{group}\Azadrah VPN"; Filename: "{app}\Azadrah.exe"
-Name: "{group}\{cm:UninstallProgram,Azadrah VPN}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Azadrah VPN"; Filename: "{app}\Azadrah.exe"; Tasks: desktopicon
+Name: "{group}\Skyroad VPN"; Filename: "{app}\Skyroad.exe"
+Name: "{group}\{cm:UninstallProgram,Skyroad VPN}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\Skyroad VPN"; Filename: "{app}\Skyroad.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing Microsoft Edge WebView2..."; Check: NeedsWebView2; Flags: waituntilterminated
-Filename: "{app}\Azadrah.exe"; Description: "{cm:LaunchProgram,Azadrah VPN}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Skyroad.exe"; Description: "{cm:LaunchProgram,Skyroad VPN}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\Azadrah\cache"
-Type: filesandordirs; Name: "{localappdata}\Azadrah\run"
-Type: files; Name: "{localappdata}\Azadrah\pool.dat"
+Type: filesandordirs; Name: "{localappdata}\Skyroad\cache"
+Type: filesandordirs; Name: "{localappdata}\Skyroad\run"
+Type: files; Name: "{localappdata}\Skyroad\pool.dat"
 
 [Code]
 const
@@ -93,6 +93,6 @@ begin
   begin
     if RegQueryStringValue(HKCU, ProxyKey, 'ProxyServer', Server) and (Pos('127.0.0.1:', Server) = 1) then
       RegWriteDWordValue(HKCU, ProxyKey, 'ProxyEnable', 0);
-    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Azadrah');
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Skyroad');
   end;
 end;

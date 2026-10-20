@@ -6,11 +6,11 @@
 
 ## دانلود و نصب
 
-از بخش [Releases](../../releases) یا از خروجی‌های [Actions](../../actions) (artifact با نام `Azadrah-Setup-…`) فایل نصبی را بگیرید و اجرا کنید. **همه پیش‌نیازها داخل همین یک فایل است**: خود برنامه، هسته‌های sing-box و Xray، warp-plus (برای WARP و سایفون)، فهرست سایت‌های ایرانی و فونت‌ها. اگر WebView2 روی ویندوز نباشد، نصب‌کننده خودش نصبش می‌کند. نسخهٔ پرتابل (zip) هم هست که نصب نمی‌خواهد.
+از بخش [Releases](../../releases) یا از خروجی‌های [Actions](../../actions) (artifact با نام `Skyroad-Setup-…`) فایل نصبی را بگیرید و اجرا کنید. **همه پیش‌نیازها داخل همین یک فایل است**: خود برنامه، هسته‌های sing-box و Xray، warp-plus (برای WARP و سایفون)، فهرست سایت‌های ایرانی و فونت‌ها. اگر WebView2 روی ویندوز نباشد، نصب‌کننده خودش نصبش می‌کند. نسخهٔ پرتابل (zip) هم هست که نصب نمی‌خواهد.
 
 نیازمندی: ویندوز ۱۰ یا ۱۱ (۶۴ بیتی).
 
-**اندروید:** فایل `Azadrah-…-android-arm64-v8a.apk` را از همان‌جا بگیرید و نصب کنید (برای نصب، اجازهٔ «نصب از منابع ناشناس» را بدهید). اندروید ۷ به بالا، گوشی‌های ۶۴ بیتی. نسخهٔ `x86_64` برای شبیه‌سازها و کروم‌بوک است. بار اول اندروید یک بار اجازهٔ ساختن VPN را می‌پرسد؛ بعد از اتصال، همهٔ برنامه‌های گوشی از آزادراه عبور می‌کنند.
+**اندروید:** فایل `Skyroad-…-android-arm64-v8a.apk` را از همان‌جا بگیرید و نصب کنید (برای نصب، اجازهٔ «نصب از منابع ناشناس» را بدهید). اندروید ۷ به بالا، گوشی‌های ۶۴ بیتی. نسخهٔ `x86_64` برای شبیه‌سازها و کروم‌بوک است. بار اول اندروید یک بار اجازهٔ ساختن VPN را می‌پرسد؛ بعد از اتصال، همهٔ برنامه‌های گوشی از آزادراه عبور می‌کنند.
 
 ## استفاده
 
@@ -40,7 +40,7 @@
 
 ## English
 
-Azadrah is a VPN client for Windows and Android that collects free public servers from hundreds of sources, tests them continuously, and connects to the lowest-latency working server in the country you pick. It is built for networks with heavy censorship (Iran in particular).
+Skyroad is a VPN client for Windows and Android that collects free public servers from hundreds of sources, tests them continuously, and connects to the lowest-latency working server in the country you pick. It is built for networks with heavy censorship (Iran in particular).
 
 ### How it works
 
@@ -63,14 +63,14 @@ Every server runs through sing-box. Servers only Xray supports (xhttp, mKCP, VLE
 
 ```sh
 go test ./...
-VERSION=0.1.0 bash build/package.sh      # dist/Azadrah + portable zip (needs curl, unzip, zip)
+VERSION=0.1.0 bash build/package.sh      # dist/Skyroad + portable zip (needs curl, unzip, zip)
 iscc /DAppVersion=0.1.0 build/windows/installer.iss   # on Windows, needs Inno Setup 6
 ```
 
 Android (needs Go, Java 17 and an Android SDK with the NDK):
 
 ```sh
-ANDROID_HOME=/path/to/sdk VERSION=0.1.0 bash build/android/build.sh   # dist/Azadrah-0.1.0-android-<abi>.apk
+ANDROID_HOME=/path/to/sdk VERSION=0.1.0 bash build/android/build.sh   # dist/Skyroad-0.1.0-android-<abi>.apk
 ```
 
 On Android the engine runs in the app process (gomobile) and the cores run as executables shipped as native libraries. Where Windows sets the system proxy, Android starts a `VpnService`; tun2socks carries the tunnel's packets to the local proxy. Set the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` repository secrets so CI signs APKs with one key (otherwise each build is signed with a throwaway debug key and cannot update the previous install).
@@ -84,7 +84,7 @@ CI (`.github/workflows/build.yml`) runs the tests including end-to-end runs agai
 Opt-in validation against real data:
 
 ```sh
-AZADRAH_LINKS=links.txt SING_BOX=/path/sing-box XRAY=/path/xray go test -run RealData ./internal/node
+SKYROAD_LINKS=links.txt SING_BOX=/path/sing-box XRAY=/path/xray go test -run RealData ./internal/node
 ```
 
 Bundled third-party components keep their own licenses: sing-box (GPL-3.0-or-later), Xray-core (MPL-2.0), warp-plus (MIT), Vazirmatn (OFL-1.1), Twemoji flags (CC-BY 4.0), Iran rule sets by Chocolate4U.

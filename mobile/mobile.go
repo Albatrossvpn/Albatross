@@ -1,6 +1,6 @@
 //go:build linux
 
-// Package mobile runs Azadrah inside the Android app. It is built with
+// Package mobile runs Skyroad inside the Android app. It is built with
 // gomobile bind into an Android library; the app shows the same web UI in
 // a WebView and owns the VpnService.
 //
@@ -63,9 +63,9 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 		return "", err
 	}
 	vpn.platform = p
-	// AZADRAH_SOURCES replaces the built-in sources, as on the desktop.
+	// SKYROAD_SOURCES replaces the built-in sources, as on the desktop.
 	var only []sources.Source
-	for _, s := range strings.Split(os.Getenv("AZADRAH_SOURCES"), ",") {
+	for _, s := range strings.Split(os.Getenv("SKYROAD_SOURCES"), ",") {
 		if src, ok := sources.User(s); ok {
 			src.Builtin = true
 			only = append(only, src)
@@ -73,7 +73,7 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 	}
 	e, err := engine.New(engine.Options{
 		Sources:  only,
-		DataDir:  filepath.Join(dataDir, "azadrah"),
+		DataDir:  filepath.Join(dataDir, "skyroad"),
 		AppDirs:  []string{libDir},
 		SysProxy: vpn,
 		Version:  Version,
