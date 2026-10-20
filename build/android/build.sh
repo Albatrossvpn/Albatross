@@ -55,7 +55,6 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
 }
 cores arm64-v8a arm64 Xray-android-arm64-v8a.zip warp-plus_android-arm64.zip
 cores x86_64 amd64 Xray-android-amd64.zip warp-plus_linux-amd64.zip
-cp internal/ui/web/fonts/Vazirmatn-OFL.txt "$app/src/main/assets/licenses/"
 
 # The engine, UI and tun2socks as one Android library.
 go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind

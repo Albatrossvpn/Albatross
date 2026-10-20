@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">آزادراه</string>
-    <string name="channel_name">وضعیت اتصال</string>
-    <string name="connected">وصل هستید</string>
-    <string name="connected_text">همه برنامه‌ها از آزادراه عبور می‌کنند</string>
-    <string name="disconnect">قطع اتصال</string>
-    <string name="start_failed">اجرای برنامه ممکن نشد</string>
-    <string name="vpn_denied">بدون اجازه VPN، آزادراه نمی‌تواند وصل شود.</string>
+    <string name="app_name">Skyroad</string>
+    <string name="channel_name">Connection status</string>
+    <string name="connected">Connected</string>
+    <string name="connected_text">All apps on this device are using Skyroad</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="start_failed">The app could not start</string>
+    <string name="vpn_denied">Skyroad cannot connect without VPN permission.</string>
 </resources>

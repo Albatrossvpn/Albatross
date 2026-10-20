@@ -64,23 +64,15 @@ func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/", noCache(files))
 	api := map[string]http.HandlerFunc{
-		"GET /api/state":           s.state,
-		"GET /api/servers":         s.servers,
-		"GET /api/logs":            s.logs,
-		"GET /api/sources":         s.sourcesList,
-		"POST /api/connect":        s.connect,
-		"POST /api/connect-server": s.connectServer,
-		"POST /api/disconnect":     s.disconnect,
-		"POST /api/target":         s.target,
-		"POST /api/settings":       s.settings,
-		"POST /api/refresh":        s.refresh,
-		"POST /api/import":         s.importText,
-		"POST /api/sources/add":    s.sourceAdd,
-		"POST /api/sources/remove": s.sourceRemove,
-		"POST /api/sources/enable": s.sourceEnable,
-		"POST /api/admin":          s.admin,
-		"POST /api/open":           s.open,
-		"POST /api/quit":           s.quit,
+		"GET /api/state":       s.state,
+		"GET /api/logs":        s.logs,
+		"POST /api/connect":    s.connect,
+		"POST /api/disconnect": s.disconnect,
+		"POST /api/target":     s.target,
+		"POST /api/settings":   s.settings,
+		"POST /api/admin":      s.admin,
+		"POST /api/open":       s.open,
+		"POST /api/quit":       s.quit,
 	}
 	for pattern, h := range api {
 		mux.Handle(pattern, s.guard(h))
@@ -149,19 +141,11 @@ func fail(w http.ResponseWriter, err error) {
 
 func ok(w http.ResponseWriter) { writeJSON(w, map[string]bool{"ok": true}) }
 
-func (s *Server) state(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.eng.Snapshot()) }
-
-func (s *Server) servers(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-	writeJSON(w, s.eng.Servers(strings.ToUpper(r.URL.Query().Get("country")), limit))
+func (s *Server) state(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, publicState(s.eng.Snapshot()))
 }
 
 func (s *Server) logs(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.eng.Logs()) }
-
-func (s *Server) sourcesList(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.eng.Sources()) }
 
 func (s *Server) connect(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -177,18 +161,6 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request) {
 	}
 	// Connecting can take a while (searching); report progress via state.
 	go s.eng.Connect(req.Country)
-	ok(w)
-}
-
-func (s *Server) connectServer(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Key string `json:"key"`
-	}
-	if err := readJSON(r, &req); err != nil {
-		fail(w, err)
-		return
-	}
-	go s.eng.ConnectServer(req.Key)
 	ok(w)
 }
 
@@ -219,82 +191,7 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
-	writeJSON(w, s.eng.Settings())
-}
-
-func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
-	s.eng.Refresh()
-	ok(w)
-}
-
-func (s *Server) importText(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Text string `json:"text"`
-	}
-	if err := readJSON(r, &req); err != nil {
-		fail(w, err)
-		return
-	}
-	text := strings.TrimSpace(req.Text)
-	if strings.HasPrefix(text, "http://") || strings.HasPrefix(text, "https://") || strings.HasPrefix(text, "@") || strings.Contains(text, "t.me/") {
-		if !strings.ContainsAny(text, "\n ") {
-			src, err := s.eng.AddSource(text)
-			if err != nil {
-				fail(w, err)
-				return
-			}
-			s.eng.Refresh()
-			writeJSON(w, map[string]any{"source": src.Label()})
-			return
-		}
-	}
-	n, err := s.eng.Import(text)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	writeJSON(w, map[string]int{"added": n})
-}
-
-func (s *Server) sourceAdd(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Input string `json:"input"`
-	}
-	if err := readJSON(r, &req); err != nil {
-		fail(w, err)
-		return
-	}
-	src, err := s.eng.AddSource(req.Input)
-	if err != nil {
-		fail(w, err)
-		return
-	}
-	s.eng.Refresh()
-	writeJSON(w, src)
-}
-
-func (s *Server) sourceRemove(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ID string `json:"id"`
-	}
-	if err := readJSON(r, &req); err != nil {
-		fail(w, err)
-		return
-	}
-	s.eng.RemoveSource(req.ID)
-	ok(w)
-}
-
-func (s *Server) sourceEnable(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ID string `json:"id"`
-	}
-	if err := readJSON(r, &req); err != nil {
-		fail(w, err)
-		return
-	}
-	s.eng.EnableSource(req.ID)
-	ok(w)
+	writeJSON(w, publicSettingsOf(s.eng.Settings()))
 }
 
 func (s *Server) admin(w http.ResponseWriter, r *http.Request) {

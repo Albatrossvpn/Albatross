@@ -65,12 +65,13 @@ func (e *Engine) refreshLoop() {
 		}
 		e.refreshDue()
 		e.mu.Lock()
-		warp, clean := e.settings.Warp, e.settings.CleanIP
+		// The WARP methods are their own protocol; a chosen one excludes them.
+		warp, clean := e.settings.Warp && e.settings.Protocol == "", e.settings.CleanIP
 		e.mu.Unlock()
 		if clean && e.cf.Age() > 2*time.Hour {
 			found := e.cf.Scan(e.ctx, 400, 8)
 			if len(found) > 0 {
-				e.logf("info", "%d آی‌پی تمیز کلودفلر پیدا شد (بهترین: %s، %d میلی‌ثانیه).", len(found), found[0].IP, found[0].Latency/time.Millisecond)
+				e.logf("info", "%d clean edge addresses found (best: %s, %d ms).", len(found), found[0].IP, found[0].Latency/time.Millisecond)
 			}
 		}
 		if warp {
@@ -229,7 +230,7 @@ func (e *Engine) refreshDue() {
 	e.pool.NextCycle()
 	e.pool.Compact(6)
 	releaseMemory()
-	e.logf("info", "به‌روزرسانی منابع تمام شد: %d منبع در دسترس، %d سرور در صف آزمایش.", total, e.pool.Len())
+	e.logf("info", "Server list updated: %d lists reachable, %d servers queued for testing.", total, e.pool.Len())
 }
 
 func (e *Engine) cachedText(s sources.Source) (string, bool) {
@@ -380,10 +381,15 @@ func (e *Engine) pickBatch(size int) []candidate {
 	e.mu.Lock()
 	target := e.target
 	allowPlain := e.settings.AllowPlain
+	protocol := e.settings.Protocol
+	wantProto := protoCodes[protocol] // 0 = any
 	haveXray := e.bin.Xray != ""
 	targetHasServers := false
 	var recheck []*Server
 	for _, s := range e.good {
+		if !s.matches(protocol) {
+			continue
+		}
 		if target != "" && s.Country == target && s.usable(now) {
 			targetHasServers = true
 		}
@@ -428,6 +434,9 @@ func (e *Engine) pickBatch(size int) []candidate {
 			}
 		}
 		if en.Flags&pool.FlagPlain != 0 && !allowPlain {
+			return
+		}
+		if wantProto != 0 && en.Proto != wantProto {
 			return
 		}
 		if en.Engine == 2 && !haveXray {
@@ -492,7 +501,7 @@ func (e *Engine) scanPace() (size, chunk int, pause time.Duration) {
 	}
 	ready := 0
 	for _, s := range e.good {
-		if s.Country != "IR" && s.usable(now) && (e.target == "" || s.Country == e.target) {
+		if s.Country != "IR" && s.usable(now) && s.matches(e.settings.Protocol) && (e.target == "" || s.Country == e.target) {
 			ready++
 		}
 	}
@@ -718,7 +727,7 @@ func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidat
 			}
 		})
 		if err != nil && e.ctx.Err() == nil {
-			e.logf("warn", "آزمایش گروهی ناموفق بود: %v", err)
+			e.logf("warn", "Batch test failed: %v", err)
 		}
 	}
 	return failed
@@ -843,12 +852,9 @@ func (e *Engine) statsLoop() {
 		if !watched && n%12 != 0 {
 			continue
 		}
-		// Only untested servers are "possible": tested ones already count
-		// under their real exit country.
-		total, untested, dead, okN, counts := e.pool.Census()
+		total, untested, dead, okN := e.pool.Stats()
 		e.mu.Lock()
 		e.poolStats = [4]int{total, untested, dead, okN}
-		e.hintCounts = counts
 		cut := time.Now().Add(-time.Minute)
 		i := 0
 		for i < len(e.scan.recent) && e.scan.recent[i].Before(cut) {

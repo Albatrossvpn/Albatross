@@ -62,7 +62,17 @@ func TestBatchEndToEnd(t *testing.T) {
 	}
 	startServer(t, sb, dir, "server-sb.json", serverSB, "run", "-c")
 	startServer(t, xr, dir, "server-xray.json", serverXray, "run", "-c")
-	time.Sleep(700 * time.Millisecond)
+	// Wait for every server to listen; Xray can take longer than a fixed
+	// pause when the machine is busy. ports[4] is deliberately dead.
+	for _, p := range ports[:4] {
+		for i := 0; i < 100; i++ {
+			if c, err := net.Dial("tcp", "127.0.0.1:"+strconv.Itoa(p)); err == nil {
+				c.Close()
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 
 	links := map[string]bool{
 		"vless://" + uuid + "@" + hostIP + ":" + strconv.Itoa(ports[0]) + "?type=tcp&security=none#vless":                                    true,

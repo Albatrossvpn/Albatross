@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="fa" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>آزادراه</title>
+<title>Skyroad</title>
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="app.css">
 </head>
@@ -12,191 +12,107 @@
   <header class="top">
     <div class="brand">
       <img src="icon.svg" alt="" width="28" height="28">
-      <span class="brand-name">آزادراه</span>
-      <span class="brand-tag">VPN</span>
+      <span class="brand-name">Skyroad</span>
     </div>
     <div class="top-actions">
-      <span id="admin-chip" class="chip hidden" title="برنامه با دسترسی مدیر اجرا شده">مدیر</span>
-      <button class="icon-btn" id="btn-logs" title="گزارش فعالیت" aria-label="گزارش فعالیت">
-        <svg viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/></svg>
-      </button>
+      <span id="admin-chip" class="chip hidden" title="Running as administrator">Admin</span>
     </div>
   </header>
 
   <main>
-    <!-- Home -->
+    <!-- Connect -->
     <section class="view active" id="view-home">
       <button class="update-banner hidden" id="update-banner"></button>
       <div class="hero">
-        <button id="power" class="power" aria-label="اتصال">
+        <button id="power" class="power" aria-label="Connect">
           <span class="halo"></span>
           <span class="ring"></span>
           <svg viewBox="0 0 24 24" class="power-icon"><path d="M12 3v8"/><path d="M6.3 6.9a8 8 0 1 0 11.4 0"/></svg>
         </button>
-        <div class="status-title" id="status-title">متصل نیستید</div>
-        <div class="status-sub" id="status-sub">کشور را انتخاب کنید و دکمه را بزنید</div>
+        <div class="status-title" id="status-title">Not connected</div>
+        <div class="status-sub" id="status-sub">Getting ready…</div>
       </div>
 
       <div class="stats hidden" id="conn-stats">
-        <div class="stat"><span class="k">پینگ</span><span class="v" id="st-ping">—</span></div>
-        <div class="stat"><span class="k">دانلود</span><span class="v" id="st-down">—</span></div>
-        <div class="stat"><span class="k">آپلود</span><span class="v" id="st-up">—</span></div>
-        <div class="stat"><span class="k">زمان</span><span class="v" id="st-time">—</span></div>
+        <div class="stat"><span class="k">Ping</span><span class="v" id="st-ping">—</span></div>
       </div>
 
       <button class="country-card" id="country-btn">
         <span class="flag big" id="cc-flag">⚡</span>
         <span class="cc-text">
-          <span class="cc-label">کشور</span>
-          <span class="cc-name" id="cc-name">سریع‌ترین کشور</span>
+          <span class="cc-label">Location</span>
+          <span class="cc-name" id="cc-name">Fastest location</span>
           <span class="cc-meta" id="cc-meta">—</span>
         </span>
-        <svg class="chev" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+        <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
       </button>
 
-      <div class="exit-line hidden" id="exit-line"></div>
-
-      <div class="scan-card">
-        <div class="scan-row">
-          <span class="pulse-dot" id="scan-dot"></span>
-          <span id="scan-text">در حال آماده‌سازی…</span>
-        </div>
-        <div class="scan-numbers">
-          <div><b id="n-working">۰</b><span>سرور سالم</span></div>
-          <div><b id="n-countries">۰</b><span>کشور</span></div>
-          <div><b id="n-candidates">۰</b><span>در صف بررسی</span></div>
-          <div><b id="n-rate">۰</b><span>آزمایش در دقیقه</span></div>
-        </div>
+      <div class="avail-card">
+        <div><b id="n-servers">0</b><span>Servers available</span></div>
+        <div><b id="n-countries">0</b><span>Locations</span></div>
       </div>
-    </section>
-
-    <!-- Servers -->
-    <section class="view" id="view-servers">
-      <div class="view-head">
-        <h2>سرورهای <span id="servers-country">سریع‌ترین کشور</span></h2>
-        <p class="hint">مرتب‌شده بر اساس پینگ. روی هر سرور بزنید تا فقط به همان وصل شوید.</p>
-      </div>
-      <div class="list" id="servers-list"></div>
-    </section>
-
-    <!-- Sources -->
-    <section class="view" id="view-sources">
-      <div class="view-head">
-        <h2>منابع سرور</h2>
-        <p class="hint" id="sources-summary">—</p>
-      </div>
-      <div class="card">
-        <label class="field-label" for="import-text">افزودن لینک اشتراک، کانال تلگرام یا خود کانفیگ‌ها</label>
-        <textarea id="import-text" rows="3" dir="ltr" placeholder="https://… یا @channel یا vless://… vmess://… ss://…"></textarea>
-        <div class="row-end"><button class="btn primary" id="import-btn">افزودن</button></div>
-      </div>
-      <div class="row-between">
-        <button class="btn" id="refresh-btn">به‌روزرسانی همه منابع</button>
-        <input class="search" id="sources-search" placeholder="جستجو در منابع">
-      </div>
-      <div class="list" id="sources-list"></div>
     </section>
 
     <!-- Settings -->
     <section class="view" id="view-settings">
-      <div class="view-head"><h2>تنظیمات</h2></div>
+      <div class="view-head"><h2>Settings</h2></div>
 
-      <div class="card group desktop-only">
-        <div class="group-title">نوع اتصال</div>
-        <div class="segmented" id="set-mode">
-          <button data-v="proxy">پروکسی سیستم</button>
-          <button data-v="tun">تونل کامل (همه برنامه‌ها)</button>
-        </div>
-        <p class="hint" id="mode-hint">پروکسی سیستم برای مرورگرها و بیشتر برنامه‌ها کافی است و به دسترسی مدیر نیاز ندارد. تونل کامل همه برنامه‌ها و بازی‌ها را از VPN عبور می‌دهد.</p>
+      <div class="card group">
+        <button class="row" id="row-protocol">
+          <span class="t-body"><b>Protocol</b><small id="protocol-value">Automatic</small></span>
+          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+        <button class="row" id="row-bypass">
+          <span class="t-body"><b>Bypass local sites</b><small id="bypass-value">Off</small></span>
+          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
       </div>
 
       <div class="card group">
-        <div class="group-title">مسیریابی</div>
-        <label class="toggle"><input type="checkbox" id="set-bypass_iran"><span class="t-body"><b>سایت‌های ایرانی بدون VPN</b><small>سایت‌ها و آی‌پی‌های ایران مستقیم باز می‌شوند (بیش از ۵۷ هزار دامنه)</small></span><span class="switch"></span></label>
-        <label class="toggle"><input type="checkbox" id="set-block_ads"><span class="t-body"><b>مسدود کردن تبلیغات</b><small>تبلیغات و ردیاب‌ها بارگذاری نمی‌شوند</small></span><span class="switch"></span></label>
-        <label class="toggle"><input type="checkbox" id="set-auto_switch"><span class="t-body"><b>جابه‌جایی به سرور سریع‌تر</b><small>اگر در همین کشور سرور خیلی سریع‌تری پیدا شد، خودکار به آن برود. قطع شدن سرور همیشه فوراً با سرورهای پشتیبان همین کشور جبران می‌شود.</small></span><span class="switch"></span></label>
-      </div>
-
-      <div class="card group">
-        <div class="group-title">عبور از فیلترینگ</div>
-        <div class="field">
-          <span class="t-body"><b>تکه‌تکه کردن TLS</b><small>برای عبور از فیلتر SNI</small></span>
-          <div class="segmented small" id="set-fragment">
-            <button data-v="auto">خودکار</button><button data-v="on">همیشه</button><button data-v="off">خاموش</button>
-          </div>
-        </div>
-        <label class="toggle"><input type="checkbox" id="set-clean_ip"><span class="t-body"><b>آی‌پی تمیز کلودفلر</b><small>برای سرورهای پشت CDN، آی‌پی‌هایی را که روی اینترنت شما باز هستند پیدا می‌کند</small></span><span class="switch"></span></label>
-        <label class="toggle"><input type="checkbox" id="set-warp"><span class="t-body"><b>WARP و سایفون</b><small>روش‌های پشتیبان: Cloudflare WARP، WARP در WARP و Psiphon در ۳۲ کشور</small></span><span class="switch"></span></label>
-        <label class="toggle"><input type="checkbox" id="set-allow_plain"><span class="t-body"><b>سرورهای بدون رمزنگاری</b><small>برخی تونل‌های داخلی؛ سایت‌های HTTPS همچنان رمزنگاری می‌شوند</small></span><span class="switch"></span></label>
-        <div class="field column desktop-only">
-          <span class="t-body"><b>جعل SNI (TLS Spoof)</b><small>یک دامنه مجاز بنویسید تا قبل از اتصال واقعی، دست‌دهی جعلی با آن فرستاده شود. فقط با دسترسی مدیر. برای اینترنت ملی/لیست سفید.</small></span>
-          <input id="set-spoof_sni" dir="ltr" placeholder="مثلاً www.aparat.com">
-        </div>
-      </div>
-
-      <div class="card group">
-        <div class="group-title">جستجوی سرور</div>
-        <div class="field">
-          <span class="t-body"><b>شدت جستجو</b><small>بیشتر یعنی سرورهای بیشتر، مصرف اینترنت بیشتر</small></span>
-          <div class="segmented small" id="set-intensity">
-            <button data-v="low">کم</button><button data-v="normal">معمولی</button><button data-v="max">حداکثر</button>
-          </div>
-        </div>
-        <label class="toggle"><input type="checkbox" id="set-deep_sources"><span class="t-body"><b>همه منابع (جستجوی عمیق)</b><small>صدها فهرست بزرگ دیگر؛ پوشش کامل ولی دانلود بیشتر</small></span><span class="switch"></span></label>
-      </div>
-
-      <div class="card group">
-        <div class="group-title">برنامه</div>
-        <label class="toggle"><input type="checkbox" id="set-auto_connect"><span class="t-body"><b>اتصال خودکار هنگام اجرا</b><small>به آخرین کشور انتخاب‌شده وصل شود</small></span><span class="switch"></span></label>
-        <label class="toggle desktop-only"><input type="checkbox" id="set-start_with_windows"><span class="t-body"><b>اجرا همراه ویندوز</b><small>بعد از روشن شدن کامپیوتر خودکار باز شود</small></span><span class="switch"></span></label>
-        <label class="toggle"><input type="checkbox" id="set-allow_lan"><span class="t-body"><b>اشتراک در شبکه محلی</b><small>گوشی و دستگاه‌های دیگر هم با آی‌پی این کامپیوتر از پروکسی استفاده کنند</small></span><span class="switch"></span></label>
-        <div class="field">
-          <span class="t-body"><b>پورت پروکسی</b><small>HTTP و SOCKS روی یک پورت</small></span>
-          <input id="set-proxy_port" type="number" min="1" max="65535" dir="ltr" class="num">
-        </div>
+        <label class="toggle"><input type="checkbox" id="set-block_ads"><span class="t-body"><b>Ad &amp; tracker blocker</b><small>Blocks known ad and tracking domains</small></span><span class="switch"></span></label>
+        <label class="toggle"><input type="checkbox" id="set-auto_connect"><span class="t-body"><b>Auto-connect</b><small>Connect when the app starts</small></span><span class="switch"></span></label>
+        <label class="toggle desktop-only"><input type="checkbox" id="set-start_with_system"><span class="t-body"><b>Start with system</b><small>Open the app when you sign in</small></span><span class="switch"></span></label>
+        <label class="toggle desktop-only"><input type="checkbox" id="set-tun"><span class="t-body"><b>Protect the whole device</b><small>Covers every app and game; needs administrator rights</small></span><span class="switch"></span></label>
       </div>
 
       <div class="card about">
-        <div><b>آزادراه</b> <span id="version"></span></div>
-        <div class="hint" id="cores-line"></div>
-        <div class="hint">سرورها رایگان و عمومی هستند و توسط افراد ناشناس اداره می‌شوند؛ اطلاعات حساس را فقط روی سایت‌های HTTPS وارد کنید.</div>
-        <button class="btn danger" id="quit-btn">خروج کامل از برنامه</button>
+        <div><b>Skyroad</b> <span id="version"></span></div>
+        <div class="hint">Connections pass through servers operated by third parties. Avoid entering passwords or payment details on sites that do not use HTTPS.</div>
+        <button class="btn danger" id="quit-btn">Quit Skyroad</button>
       </div>
     </section>
 
-    <!-- Logs -->
+    <!-- Diagnostics: opened by tapping the version number seven times -->
     <section class="view" id="view-logs">
-      <div class="view-head"><h2>گزارش فعالیت</h2></div>
+      <div class="view-head"><h2>Diagnostics</h2></div>
       <div class="logs" id="logs"></div>
     </section>
   </main>
 
   <nav class="tabs">
-    <button data-view="home" class="active"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.9a8 8 0 1 0 11.4 0"/></svg><span>اتصال</span></button>
-    <button data-view="servers"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6" rx="1.5"/><rect x="4" y="14" width="16" height="6" rx="1.5"/><path d="M8 7h.01M8 17h.01"/></svg><span>سرورها</span></button>
-    <button data-view="sources"><svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>منابع</span></button>
-    <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>تنظیمات</span></button>
+    <button data-view="home" class="active"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.9a8 8 0 1 0 11.4 0"/></svg><span>Connect</span></button>
+    <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg><span>Settings</span></button>
   </nav>
 
-  <!-- Country picker -->
+  <!-- Location and option picker -->
   <div class="sheet-backdrop hidden" id="sheet-backdrop"></div>
-  <div class="sheet hidden" id="sheet" role="dialog" aria-label="انتخاب کشور">
+  <div class="sheet hidden" id="sheet" role="dialog" aria-label="Choose">
     <div class="sheet-handle"></div>
     <div class="sheet-head">
-      <h3>انتخاب کشور</h3>
-      <input class="search" id="country-search" placeholder="جستجوی کشور…">
+      <h3 id="sheet-title">Choose a location</h3>
+      <input class="search hidden" id="country-search" placeholder="Search locations">
     </div>
-    <div class="list countries" id="country-list"></div>
+    <div class="list" id="sheet-list"></div>
   </div>
 
-  <!-- Admin prompt -->
+  <!-- Administrator prompt -->
   <div class="modal-backdrop hidden" id="admin-modal">
     <div class="modal">
-      <h3>نیاز به دسترسی مدیر</h3>
-      <p>برای «تونل کامل» که همه برنامه‌ها را از VPN عبور می‌دهد، ویندوز اجازه مدیر می‌خواهد. برنامه یک بار دوباره با دسترسی مدیر باز می‌شود.</p>
+      <h3>Administrator rights needed</h3>
+      <p>Protecting the whole device needs administrator rights. The app restarts once with them.</p>
       <div class="row-end">
-        <button class="btn" id="admin-cancel">فعلاً نه</button>
-        <button class="btn primary" id="admin-ok">اجرای دوباره با دسترسی مدیر</button>
+        <button class="btn" id="admin-cancel">Not now</button>
+        <button class="btn primary" id="admin-ok">Restart as administrator</button>
       </div>
     </div>
   </div>
@@ -204,10 +120,10 @@
   <!-- This version may no longer connect -->
   <div class="modal-backdrop hidden" id="update-modal">
     <div class="modal">
-      <h3>نسخهٔ جدید لازم است</h3>
-      <p id="update-text">این نسخه دیگر پشتیبانی نمی‌شود. برای ادامهٔ استفاده، نسخهٔ جدید را نصب کنید.</p>
+      <h3>Update required</h3>
+      <p id="update-text">This version is no longer supported. Install the latest version to keep using the app.</p>
       <div class="row-end">
-        <button class="btn primary" id="update-get">دریافت نسخهٔ جدید</button>
+        <button class="btn primary" id="update-get">Get the update</button>
       </div>
     </div>
   </div>

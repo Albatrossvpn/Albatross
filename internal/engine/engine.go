@@ -82,7 +82,6 @@ type Engine struct {
 	connGen      int    // bumped by every user connect/disconnect; stale loops exit
 	poolStats    [4]int // total, untested, dead, ok; refreshed by statsLoop
 	scan         scanState
-	hintCounts   map[string]int
 	logs         []LogLine
 	localDNS     string
 	update       *UpdateInfo   // a newer version, from update.json
@@ -135,7 +134,6 @@ func New(opt Options) (*Engine, error) {
 		status:       StatusIdle,
 		wake:         make(chan struct{}, 1),
 		refill:       make(chan struct{}, 1),
-		hintCounts:   map[string]int{},
 		localDNS:     opt.LocalDNS,
 	}
 	e.settings = loadSettings(e.dir, opt.Mobile)
@@ -160,7 +158,7 @@ func New(opt Options) (*Engine, error) {
 	e.cf = &antiblock.Scanner{}
 	e.applyIntensity()
 	if err := installRules(filepath.Join(e.dir, "rules")); err != nil {
-		e.logf("warn", "نصب فهرست سایت‌های ایرانی ناموفق بود: %v", err)
+		e.logf("warn", "Could not install the local-site lists: %v", err)
 	}
 	e.loadServers()
 	e.loadSourceStats()
@@ -177,12 +175,12 @@ func (e *Engine) Start() {
 		e.opt.SysProxy.Clear()
 	}
 	if e.bin.SingBox == "" {
-		e.logf("error", "هسته sing-box پیدا نشد؛ برنامه را دوباره نصب کنید.")
+		e.logf("error", "Connection core not found; please reinstall the app.")
 	}
 	if e.bin.Xray == "" {
-		e.logf("warn", "هسته Xray پیدا نشد؛ سرورهای xhttp و چند نوع دیگر آزمایش نمی‌شوند.")
+		e.logf("warn", "Secondary core not found; some connection types cannot be used.")
 	}
-	e.logf("info", "%d سرور سالم از دفعه قبل بارگذاری شد.", len(e.good))
+	e.logf("info", "%d servers loaded from the last session.", len(e.good))
 	e.loadUpdate()
 	e.wg.Add(3)
 	go e.refreshLoop()
@@ -323,10 +321,12 @@ func (e *Engine) UpdateSettings(s Settings) error {
 		s.ProxyPort = old.ProxyPort
 	}
 	s.Country = e.target
+	s.normalize()
 	if e.opt.Mobile {
 		s.Mode = "proxy"
 	}
 	e.settings = s
+	e.countriesAt = time.Time{} // the list depends on the protocol
 	e.applyIntensity()
 	connected := e.conn != nil
 	e.mu.Unlock()
@@ -341,14 +341,14 @@ func (e *Engine) UpdateSettings(s Settings) error {
 		e.buildSources()
 		e.triggerRefill()
 	}
-	routing := old.Mode != s.Mode || old.BypassIran != s.BypassIran || old.BlockAds != s.BlockAds ||
+	routing := old.Mode != s.Mode || old.Bypass != s.Bypass || old.Protocol != s.Protocol || old.BlockAds != s.BlockAds ||
 		old.ProxyPort != s.ProxyPort || old.AllowLAN != s.AllowLAN || old.Fragment != s.Fragment || old.AllowPlain != s.AllowPlain
 	if connected && routing {
 		go e.Connect(e.target)
 	}
-	if e.opt.Autostart != nil && old.StartWithWindows != s.StartWithWindows {
-		if err := e.opt.Autostart(s.StartWithWindows); err != nil {
-			e.logf("warn", "تنظیم اجرای خودکار ناموفق بود: %v", err)
+	if e.opt.Autostart != nil && old.StartWithSystem != s.StartWithSystem {
+		if err := e.opt.Autostart(s.StartWithSystem); err != nil {
+			e.logf("warn", "Could not change the start-with-system setting: %v", err)
 		}
 	}
 	return nil
@@ -414,96 +414,17 @@ func (e *Engine) buildSources() {
 	}
 }
 
-// SourceInfo describes a source for the UI.
-type SourceInfo struct {
-	sources.Source
-	Label string `json:"label"`
-	SourceStat
-}
-
-// Sources lists every source with its statistics.
-func (e *Engine) Sources() []SourceInfo {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	out := make([]SourceInfo, 0, len(e.srcs))
-	for i, s := range e.srcs {
-		if !s.Builtin && !containsSource(e.settings.UserSources, s.ID) {
-			continue
-		}
-		out = append(out, SourceInfo{Source: s, Label: s.Label(), SourceStat: e.srcStats[i]})
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].OK > out[j].OK })
-	return out
-}
-
-func containsSource(list []sources.Source, id string) bool {
-	for _, s := range list {
-		if s.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
-// AddSource adds a user subscription URL or Telegram channel.
-func (e *Engine) AddSource(input string) (sources.Source, error) {
-	s, ok := sources.User(input)
-	if !ok {
-		return s, fmt.Errorf("invalid source")
-	}
-	set := e.Settings()
-	if containsSource(set.UserSources, s.ID) {
-		return s, nil
-	}
-	set.UserSources = append(set.UserSources, s)
-	if err := e.UpdateSettings(set); err != nil {
-		return s, err
-	}
-	return s, nil
-}
-
-// RemoveSource deletes a user source or disables a built-in one.
-func (e *Engine) RemoveSource(id string) {
-	set := e.Settings()
-	var keep []sources.Source
-	for _, s := range set.UserSources {
-		if s.ID != id {
-			keep = append(keep, s)
-		}
-	}
-	if len(keep) == len(set.UserSources) {
-		set.DisabledSources = append(set.DisabledSources, id)
-	}
-	set.UserSources = keep
-	e.UpdateSettings(set)
-}
-
-// EnableSource re-enables a built-in source.
-func (e *Engine) EnableSource(id string) {
-	set := e.Settings()
-	var keep []string
-	for _, d := range set.DisabledSources {
-		if d != id {
-			keep = append(keep, d)
-		}
-	}
-	set.DisabledSources = keep
-	e.UpdateSettings(set)
-}
-
 // CountryInfo summarizes servers in one country.
 type CountryInfo struct {
-	Code       string `json:"code"`
-	Name       string `json:"name"`
-	NameEN     string `json:"name_en"`
-	Flag       string `json:"flag"`
-	Servers    int    `json:"servers"`
-	BestDelay  int    `json:"best_delay"`
-	Candidates int    `json:"candidates"`
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	Flag      string `json:"flag"`
+	Servers   int    `json:"servers"`
+	BestDelay int    `json:"best_delay"`
 }
 
-// Countries lists countries with working servers first, then countries
-// that only have untested candidates.
+// Countries lists the countries that have usable servers for the chosen
+// protocol, the best supplied first.
 func (e *Engine) Countries() []CountryInfo {
 	now := time.Now()
 	e.mu.Lock()
@@ -513,33 +434,20 @@ func (e *Engine) Countries() []CountryInfo {
 		return out
 	}
 	m := map[string]*CountryInfo{}
-	get := func(code string) *CountryInfo {
-		ci, ok := m[code]
-		if !ok {
-			c, _ := geo.Lookup(code)
-			ci = &CountryInfo{Code: code, Name: c.FA, NameEN: c.EN, Flag: geo.Flag(code)}
-			m[code] = ci
-		}
-		return ci
-	}
 	for _, s := range e.good {
-		if s.Country == "" || s.Country == "IR" || !s.usable(now) {
+		if s.Country == "" || s.Country == "IR" || !s.usable(now) || !s.matches(e.settings.Protocol) {
 			continue
 		}
-		ci := get(s.Country)
+		ci, ok := m[s.Country]
+		if !ok {
+			c, _ := geo.Lookup(s.Country)
+			ci = &CountryInfo{Code: s.Country, Name: c.EN, Flag: geo.Flag(s.Country)}
+			m[s.Country] = ci
+		}
 		ci.Servers++
 		if ci.BestDelay == 0 || s.Delay < ci.BestDelay {
 			ci.BestDelay = s.Delay
 		}
-	}
-	for code, n := range e.hintCounts {
-		if code == "IR" || len(code) != 2 {
-			continue
-		}
-		if _, known := geo.Lookup(code); !known {
-			continue
-		}
-		get(code).Candidates = n
 	}
 	e.mu.Unlock()
 	out := make([]CountryInfo, 0, len(m))
@@ -547,13 +455,10 @@ func (e *Engine) Countries() []CountryInfo {
 		out = append(out, *c)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if (out[i].Servers > 0) != (out[j].Servers > 0) {
-			return out[i].Servers > 0
-		}
 		if out[i].Servers != out[j].Servers {
 			return out[i].Servers > out[j].Servers
 		}
-		return out[i].Candidates > out[j].Candidates
+		return out[i].Code < out[j].Code
 	})
 	e.mu.Lock()
 	e.countries, e.countriesAt = out, now
