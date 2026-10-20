@@ -341,8 +341,8 @@ func (e *Engine) race(ctx context.Context, c *connection, list []*member, timeou
 // and of its backups, and whether the group should be refreshed.
 func (e *Engine) monitor(ctx context.Context, c *connection) {
 	go c.streamTraffic(ctx)
-	if c.bypassIran {
-		go e.learnIran(ctx, c)
+	if r, ok := findRegion(c.bypass); ok {
+		go e.learnLocal(ctx, c, r)
 	}
 	check := time.NewTimer(checkBusy)
 	defer check.Stop()
@@ -383,7 +383,7 @@ func (e *Engine) monitor(ctx context.Context, c *connection) {
 // false once the connection has been replaced.
 func (e *Engine) checkActive(ctx context.Context, c *connection, urgent bool) bool {
 	if !c.running.Alive() {
-		e.logf("warn", "هسته متوقف شد؛ اتصال دوباره…")
+		e.logf("warn", "The connection core stopped; reconnecting…")
 		e.rebuild(c, nil)
 		return false
 	}
@@ -461,7 +461,7 @@ func (e *Engine) failover(ctx context.Context, c *connection, dead *member) bool
 	if e.offline(ctx, c) && ctx.Err() == nil {
 		// Every server looks dead when this device has no internet; keep
 		// the group and carry on once it is back.
-		e.setStatus(StatusReconnecting, "اینترنت دستگاه قطع است؛ با برگشتن آن، اتصال خودکار ادامه پیدا می‌کند.")
+		e.setStatus(StatusReconnecting, "No internet on this device; the connection resumes when it is back.")
 		for e.offline(ctx, c) {
 			select {
 			case <-ctx.Done():
@@ -476,7 +476,7 @@ func (e *Engine) failover(ctx context.Context, c *connection, dead *member) bool
 		c.poke()
 		return true
 	}
-	e.logf("warn", "هیچ‌کدام از سرورهای آماده جواب ندادند؛ گروه تازه‌ای در %s آماده می‌شود…", countryName(c.home))
+	e.logf("warn", "No ready server answered; preparing a new group in %s…", countryName(c.home))
 	e.rebuild(c, c.members)
 	return false
 }
@@ -490,7 +490,7 @@ func (e *Engine) switched(ctx context.Context, c *connection, from, to *member) 
 		return
 	}
 	e.setStatus(StatusConnected, connectedMessage(c))
-	e.logf("info", "سرور «%s» قطع شد؛ بلافاصله به سرور آماده «%s» در همان کشور منتقل شدید.", from.server.Name, to.server.Name)
+	e.logf("info", "Server %q dropped; switched at once to ready server %q in the same location.", from.server.Name, to.server.Name)
 	go e.refreshExit(ctx, c)
 }
 
@@ -546,12 +546,12 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 		c.mu.Lock()
 		d := b.delay
 		c.mu.Unlock()
-		e.logf("info", "سرور سریع‌تری در همین گروه پیدا شد: «%s» (%d میلی‌ثانیه).", b.server.Name, d)
+		e.logf("info", "A faster server was found in this group: %q (%d ms).", b.server.Name, d)
 	}
 	// A group younger than refreshAfter is left alone, so a country whose
 	// servers keep failing does not restart the core over and over.
 	if c.idle() && time.Since(c.started) > refreshAfter && e.groupStale(c) {
-		e.logf("info", "سرورهای پشتیبان در %s تازه می‌شوند…", countryName(c.home))
+		e.logf("info", "Refreshing backup servers in %s…", countryName(c.home))
 		e.rebuild(c, nil)
 		return false
 	}
@@ -613,7 +613,7 @@ func (e *Engine) groupStale(c *connection) bool {
 // rebuild replaces the connection with a fresh group in the same country,
 // avoiding the members that just failed.
 func (e *Engine) rebuild(c *connection, failed []*member) {
-	e.setStatus(StatusReconnecting, fmt.Sprintf("در حال آماده کردن سرورهای تازه در %s…", countryName(c.home)))
+	e.setStatus(StatusReconnecting, fmt.Sprintf("Preparing fresh servers in %s…", countryName(c.home)))
 	var avoid []string
 	for _, m := range failed {
 		avoid = append(avoid, m.server.Key)
@@ -833,14 +833,14 @@ func (e *Engine) speedRound(ctx context.Context, c *connection) {
 	if !swap || c.use(ctx, best) != nil {
 		return
 	}
-	e.logf("info", "سرعت سرور «%s» پایین بود (%s)؛ به «%s» (%s) در همان کشور منتقل شدید.",
+	e.logf("info", "Server %q was slow (%s); switched to %q (%s) in the same location.",
 		active.server.Name, rate(cur), best.server.Name, rate(bestSpeed))
 }
 
 // rate formats a speed in bytes per second for the log.
 func rate(bps float64) string {
 	if bps >= 1<<20 {
-		return fmt.Sprintf("%.1f مگابایت بر ثانیه", bps/(1<<20))
+		return fmt.Sprintf("%.1f MB/s", bps/(1<<20))
 	}
-	return fmt.Sprintf("%.0f کیلوبایت بر ثانیه", bps/(1<<10))
+	return fmt.Sprintf("%.0f KB/s", bps/(1<<10))
 }

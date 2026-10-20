@@ -19,18 +19,17 @@ import (
 	"time"
 )
 
-// Iranian sites missing from the domain list go through the VPN in proxy
-// mode, where the core is handed names rather than addresses, so the list of
-// Iranian addresses never applies to them; many of those sites refuse
-// foreign visitors. While connected, the names the VPN carries are looked up
-// through the VPN, and those that resolve to Iranian addresses are added to
-// a list of their own. The core reloads that list by itself, so from the
-// next connection on they go direct. The local resolver is never asked (it
-// would see every site the user opens), and a failed lookup changes nothing.
+// Sites of the bypassed region that are missing from its domain list go
+// through the VPN in proxy mode, where the core is handed names rather than
+// addresses, so the list of the region's addresses never applies to them;
+// many of those sites refuse foreign visitors. While connected, the names
+// the VPN carries are looked up through the VPN, and those that resolve to
+// addresses of the region are added to a list of their own. The core reloads
+// that list by itself, so from the next connection on they go direct. The
+// local resolver is never asked (it would see every site the user opens),
+// and a failed lookup changes nothing.
 const (
-	learnedTag  = "learned-ir"
-	learnedFile = learnedTag + ".json"
-	maxLearned  = 5000
+	maxLearned = 5000
 	// learnEvery is how often the connection list is read while traffic
 	// flows; nothing is read while idle.
 	learnEvery = 5 * time.Second
@@ -43,8 +42,9 @@ const (
 var dohServers = []string{"https://cloudflare-dns.com/dns-query", "https://dns.google/resolve"}
 
 type learner struct {
-	path   string
-	ranges []ipRange
+	path     string
+	suffixes []string
+	ranges   []ipRange
 
 	mu      sync.Mutex
 	learned map[string]bool
@@ -87,19 +87,20 @@ func readLearned(path string) []string {
 	return out
 }
 
-// newLearner loads the learned list and the Iranian address ranges. It
-// returns nil when the ranges cannot be read.
-func newLearner(rulesDir string) *learner {
-	ranges, err := readIPRuleSet(filepath.Join(rulesDir, "geoip-ir.srs"))
+// newLearner loads the region's learned list and address ranges. It returns
+// nil when the ranges cannot be read.
+func newLearner(rulesDir string, r region) *learner {
+	ranges, err := readIPRuleSet(r.geoIPFile(rulesDir))
 	if err != nil || len(ranges) == 0 {
 		return nil
 	}
 	l := &learner{
-		path:    filepath.Join(rulesDir, learnedFile),
-		ranges:  ranges,
-		learned: map[string]bool{},
-		checked: map[string]time.Time{},
-		queue:   make(chan string, 64),
+		path:     r.learnedFile(rulesDir),
+		suffixes: r.Suffixes,
+		ranges:   ranges,
+		learned:  map[string]bool{},
+		checked:  map[string]time.Time{},
+		queue:    make(chan string, 64),
 	}
 	for _, n := range readLearned(l.path) {
 		l.learned[n] = true
@@ -109,8 +110,13 @@ func newLearner(rulesDir string) *learner {
 
 // want reports whether host should be looked up now, and marks it.
 func (l *learner) want(host string) bool {
-	if host == "" || strings.HasSuffix(host, ".ir") || strings.Contains(host, ":") {
+	if host == "" || strings.Contains(host, ":") {
 		return false
+	}
+	for _, s := range l.suffixes {
+		if strings.HasSuffix(host, s) {
+			return false
+		}
 	}
 	if _, err := netip.ParseAddr(host); err == nil {
 		return false
@@ -127,8 +133,8 @@ func (l *learner) want(host string) bool {
 	return true
 }
 
-// iranian reports whether any of addrs is in Iran.
-func (l *learner) iranian(addrs []netip.Addr) bool {
+// local reports whether any of addrs is in the region.
+func (l *learner) local(addrs []netip.Addr) bool {
 	for _, a := range addrs {
 		if ipIn(l.ranges, a) {
 			return true
@@ -137,7 +143,7 @@ func (l *learner) iranian(addrs []netip.Addr) bool {
 	return false
 }
 
-// add records host as Iranian and rewrites the list.
+// add records host as local and rewrites the list.
 func (l *learner) add(host string) error {
 	l.mu.Lock()
 	l.learned[host] = true
@@ -149,10 +155,10 @@ func (l *learner) add(host string) error {
 	return writeLearned(l.path, names)
 }
 
-// learnIran follows the names a connection carries through the VPN and
-// learns which of them are Iranian.
-func (e *Engine) learnIran(ctx context.Context, c *connection) {
-	l := newLearner(filepath.Join(e.dir, "rules"))
+// learnLocal follows the names a connection carries through the VPN and
+// learns which of them belong to the bypassed region.
+func (e *Engine) learnLocal(ctx context.Context, c *connection, r region) {
+	l := newLearner(filepath.Join(e.dir, "rules"), r)
 	if l == nil {
 		return
 	}
@@ -164,11 +170,11 @@ func (e *Engine) learnIran(ctx context.Context, c *connection) {
 					return
 				case host := <-l.queue:
 					addrs, err := lookupThrough(ctx, e.proxyClient(), host)
-					if err != nil || !l.iranian(addrs) {
+					if err != nil || !l.local(addrs) {
 						continue
 					}
 					if l.add(host) == nil {
-						e.logf("info", "«%s» سایت ایرانی است؛ از این به بعد بدون VPN باز می‌شود.", host)
+						e.logf("info", "%q is a local site; it will open directly from now on.", host)
 					}
 				}
 			}
@@ -290,7 +296,7 @@ func ipIn(ranges []ipRange, a netip.Addr) bool {
 }
 
 // readIPRuleSet reads the address ranges of a binary sing-box rule set that
-// holds only ip_cidr rules, such as geoip-ir.srs. The format is sing-box's
+// holds only ip_cidr rules, such as geoip-cn.srs. The format is sing-box's
 // common/srs: "SRS", a version byte, then zlib holding a count of rules, each
 // a type byte (0 = default), items (6 = an IP set) and 0xFF, then an invert
 // flag.

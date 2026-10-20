@@ -89,6 +89,7 @@ func TestFailoverStaysInCountry(t *testing.T) {
 	s := e.Settings()
 	s.ProxyPort = ports[3]
 	s.Warp = false
+	s.AllowPlain = true // the test servers are not encrypted
 	e.settings = s
 	e.Start()
 	defer e.Close()

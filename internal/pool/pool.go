@@ -206,34 +206,6 @@ func (p *Pool) Stats() (total, untested, dead, ok int) {
 	return len(p.entries), untested, dead, ok
 }
 
-// Census counts entries by state and, for untested ones, by country hint,
-// in one pass.
-func (p *Pool) Census() (total, untested, dead, ok int, hints map[string]int) {
-	byHint := map[[2]byte]int{}
-	p.mu.RLock()
-	for i := range p.entries {
-		e := &p.entries[i]
-		switch e.State {
-		case StateNew:
-			untested++
-			if e.Hint[0] != 0 {
-				byHint[e.Hint]++
-			}
-		case StateOK:
-			ok++
-		default:
-			dead++
-		}
-	}
-	total = len(p.entries)
-	p.mu.RUnlock()
-	hints = make(map[string]int, len(byHint))
-	for h, n := range byHint {
-		hints[string(h[:])] = n
-	}
-	return total, untested, dead, ok, hints
-}
-
 // Compact drops candidates that no source has listed for keepCycles
 // cycles (unless they are known to work) and rewrites the file.
 func (p *Pool) Compact(keepCycles uint32) error {

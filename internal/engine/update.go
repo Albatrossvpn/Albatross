@@ -88,9 +88,9 @@ func (e *Engine) applyUpdate(m UpdateManifest) {
 	e.update = info
 	e.mu.Unlock()
 	if info != nil && info.Required && (was == nil || !was.Required) {
-		e.logf("warn", "این نسخه دیگر پشتیبانی نمی‌شود؛ برای اتصال، نسخهٔ جدید را نصب کنید.")
+		e.logf("warn", "This version is no longer supported; install the new version to connect.")
 		e.Disconnect()
-		e.setStatus(StatusIdle, "برای اتصال، نسخهٔ جدید را نصب کنید.")
+		e.setStatus(StatusIdle, "Install the new version to connect.")
 	}
 }
 

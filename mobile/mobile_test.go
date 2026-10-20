@@ -95,6 +95,11 @@ func TestAndroidPath(t *testing.T) {
 	defer sub.Close()
 	t.Setenv("SKYROAD_SOURCES", sub.URL)
 
+	// The test server is not encrypted, which the app leaves out by default.
+	// Bypassing China's sites makes names under .cn resolve through the
+	// network's resolver (fakeDNS) instead of through the VPN.
+	os.MkdirAll(filepath.Join(dir, "data", "skyroad"), 0o755)
+	os.WriteFile(filepath.Join(dir, "data", "skyroad", "settings.json"), []byte(`{"allow_plain": true, "bypass": "CN"}`), 0o644)
 	dnsAddr := fakeDNS(t)
 	p := &fakeVPN{t: t, up: make(chan struct{}, 1), down: make(chan struct{}, 1)}
 	defer p.close()
@@ -117,18 +122,18 @@ func TestAndroidPath(t *testing.T) {
 		}
 	}
 	var state struct {
-		Status     string `json:"status"`
-		Mobile     bool   `json:"mobile"`
-		WorkingNow int    `json:"working_now"`
-		Settings   struct {
+		Status   string `json:"status"`
+		Mobile   bool   `json:"mobile"`
+		Servers  int    `json:"servers"`
+		Settings struct {
 			Mode string `json:"mode"`
 		} `json:"settings"`
 	}
 	deadline := time.Now().Add(60 * time.Second)
-	for call("GET", "/api/state", "", &state); state.WorkingNow == 0 && time.Now().Before(deadline); call("GET", "/api/state", "", &state) {
+	for call("GET", "/api/state", "", &state); state.Servers == 0 && time.Now().Before(deadline); call("GET", "/api/state", "", &state) {
 		time.Sleep(300 * time.Millisecond)
 	}
-	if state.WorkingNow == 0 || !state.Mobile || state.Settings.Mode != "proxy" {
+	if state.Servers == 0 || !state.Mobile || state.Settings.Mode != "proxy" {
 		for _, l := range eng.Logs() {
 			t.Logf("%s %s", l.Level, l.Text)
 		}
@@ -173,18 +178,19 @@ func TestAndroidPath(t *testing.T) {
 	}
 	t.Logf("HTTP through the tunnel: %q", body)
 
-	// UDP DNS to the tunnel's resolver address, as Android apps send it. An
-	// Iranian name is answered by the network's resolver (fakeDNS).
+	// UDP DNS to the tunnel's resolver address, as Android apps send it. A
+	// name of the bypassed region is answered by the network's resolver
+	// (fakeDNS).
 	r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "udp", "172.19.0.2:53")
 	}}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	addrs, err := r.LookupHost(ctx, "skyroad-test.ir")
+	addrs, err := r.LookupHost(ctx, "skyroad-test.cn")
 	if err != nil || len(addrs) == 0 || addrs[0] != testIP {
 		t.Fatalf("DNS through the tunnel: %v %v", addrs, err)
 	}
-	t.Logf("DNS through the tunnel: skyroad-test.ir = %v", addrs)
+	t.Logf("DNS through the tunnel: skyroad-test.cn = %v", addrs)
 
 	call("POST", "/api/disconnect", "", nil)
 	select {
