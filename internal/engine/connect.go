@@ -383,7 +383,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		wake:        make(chan struct{}, 1),
 	}
 	opts := connOptions{
-		listen: listen, port: proxyPort, tun: set.Mode == "tun", bypass: set.Bypass,
+		listen: listen, port: proxyPort, tun: set.Mode == "tun", bypass: set.Bypass, secureOnly: set.SecureOnly,
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
 		clashSecret: c.clashSecret, probeAddr: c.probeAddr, exe: e.opt.ExeName, localDNS: e.dns(), mobile: e.opt.Mobile,
 	}
@@ -546,6 +546,7 @@ type connOptions struct {
 	port        int
 	tun         bool
 	bypass      string
+	secureOnly  bool
 	blockAds    bool
 	rulesDir    string
 	clashAddr   string
@@ -624,6 +625,16 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 			"domain_suffix": r.Suffixes, "rule_set": []string{r.geoSiteTag(), r.learnedTag()},
 			"action": "route", "server": "local",
 		})
+	}
+	if o.secureOnly {
+		// Last among the rules that send traffic elsewhere, so local sites
+		// and the local network (which never reach a server) are untouched.
+		// HTTP is recognised by its content on any port, the rest by the
+		// ports of plaintext protocols: FTP, telnet, SMTP, HTTP, POP3, IMAP.
+		rules = append(rules,
+			map[string]any{"protocol": []string{"http"}, "action": "reject"},
+			map[string]any{"network": "tcp", "port": []int{21, 23, 25, 80, 110, 143}, "action": "reject"},
+		)
 	}
 	route := map[string]any{
 		"rules": rules,

@@ -28,6 +28,9 @@ type Hooks struct {
 	Quit          func()
 	RelaunchAdmin func() error
 	OpenURL       func(string) error
+	// OpenVPNSettings opens the system's VPN settings (Android), where
+	// "Always-on VPN" and "Block connections without VPN" live.
+	OpenVPNSettings func() error
 }
 
 // Server is the local UI server. It listens on 127.0.0.1 only and every
@@ -64,15 +67,16 @@ func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/", noCache(files))
 	api := map[string]http.HandlerFunc{
-		"GET /api/state":       s.state,
-		"GET /api/logs":        s.logs,
-		"POST /api/connect":    s.connect,
-		"POST /api/disconnect": s.disconnect,
-		"POST /api/target":     s.target,
-		"POST /api/settings":   s.settings,
-		"POST /api/admin":      s.admin,
-		"POST /api/open":       s.open,
-		"POST /api/quit":       s.quit,
+		"GET /api/state":         s.state,
+		"GET /api/logs":          s.logs,
+		"POST /api/connect":      s.connect,
+		"POST /api/disconnect":   s.disconnect,
+		"POST /api/target":       s.target,
+		"POST /api/settings":     s.settings,
+		"POST /api/admin":        s.admin,
+		"POST /api/open":         s.open,
+		"POST /api/vpn-settings": s.vpnSettings,
+		"POST /api/quit":         s.quit,
 	}
 	for pattern, h := range api {
 		mux.Handle(pattern, s.guard(h))
@@ -216,6 +220,18 @@ func (s *Server) open(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.hooks.OpenURL != nil {
 		s.hooks.OpenURL(req.URL)
+	}
+	ok(w)
+}
+
+func (s *Server) vpnSettings(w http.ResponseWriter, r *http.Request) {
+	if s.hooks.OpenVPNSettings == nil {
+		fail(w, errors.New("not supported"))
+		return
+	}
+	if err := s.hooks.OpenVPNSettings(); err != nil {
+		fail(w, err)
+		return
 	}
 	ok(w)
 }
