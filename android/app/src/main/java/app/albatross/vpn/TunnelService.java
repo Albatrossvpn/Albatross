@@ -1,4 +1,4 @@
-package app.skyroad.vpn;
+package app.albatross.vpn;
 
 import android.app.Notification;
 import android.app.PendingIntent;
@@ -11,17 +11,17 @@ import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
-import app.skyroad.mobile.Mobile;
+import app.albatross.mobile.Mobile;
 
 /**
  * The device-wide VPN. Every app's traffic enters this tunnel; the Go side
  * hands it to the engine's local proxy, which sends it through the servers.
- * Skyroad itself is left out, so the cores reach the servers directly.
+ * Albatross itself is left out, so the cores reach the servers directly.
  */
 public final class TunnelService extends VpnService {
-    private static final String TAG = "Skyroad";
-    private static final String ACTION_STOP = "app.skyroad.vpn.STOP";
-    private static final String ACTION_DISCONNECT = "app.skyroad.vpn.DISCONNECT";
+    private static final String TAG = "Albatross";
+    private static final String ACTION_STOP = "app.albatross.vpn.STOP";
+    private static final String ACTION_DISCONNECT = "app.albatross.vpn.DISCONNECT";
 
     private ParcelFileDescriptor tun;
 

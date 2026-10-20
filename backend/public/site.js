@@ -21,7 +21,7 @@ export async function api(method, path, { token, body } = {}) {
 }
 
 let infoPromise;
-export const publicInfo = () => (infoPromise ||= api("GET", "public").catch(() => ({ name: "Skyroad", downloads: {}, signup_open: false })));
+export const publicInfo = () => (infoPromise ||= api("GET", "public").catch(() => ({ name: "Albatross", downloads: {}, signup_open: false })));
 
 const GB = 1024 ** 3;
 export const gb = (n) => n / GB;

@@ -8,10 +8,10 @@
     "#1": {
       "0409": {
         "identity": {
-          "name": "Skyroad.VPN",
+          "name": "Albatross.VPN",
           "version": "0.0.0.0"
         },
-        "description": "Skyroad VPN",
+        "description": "Albatross VPN",
         "minimum-os": "win10",
         "execution-level": "as invoker",
         "ui-access": false,
@@ -38,12 +38,12 @@
         },
         "info": {
           "0409": {
-            "CompanyName": "Skyroad",
-            "FileDescription": "Skyroad VPN",
-            "InternalName": "Skyroad",
+            "CompanyName": "Albatross",
+            "FileDescription": "Albatross VPN",
+            "InternalName": "Albatross",
             "LegalCopyright": "GPL-3.0",
-            "OriginalFilename": "Skyroad.exe",
-            "ProductName": "Skyroad VPN"
+            "OriginalFilename": "Albatross.exe",
+            "ProductName": "Albatross VPN"
           }
         }
       }

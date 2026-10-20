@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "Skyroad"
+rootProject.name = "Albatross"
 include(":app")

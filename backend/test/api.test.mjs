@@ -11,7 +11,7 @@ import test, { after, before } from "node:test";
 const PORT = Number(process.env.PORT || 8799);
 const BASE = `http://127.0.0.1:${PORT}`;
 const ADMIN = { username: "root", password: "admin-pass-for-tests" };
-const dir = mkdtempSync(join(tmpdir(), "skyroad-api-"));
+const dir = mkdtempSync(join(tmpdir(), "albatross-api-"));
 let proc;
 
 async function call(method, path, { token, body } = {}) {
@@ -55,7 +55,7 @@ const GB = 1024 ** 3;
 test("public information; sign-ups are closed until the administrator opens them", async () => {
   const r = await call("GET", "public");
   assert.equal(r.status, 200);
-  assert.equal(r.body.name, "Skyroad");
+  assert.equal(r.body.name, "Albatross");
   assert.equal(r.body.company, "Example Co");
   assert.equal(r.body.signup_open, false);
   assert.equal(r.headers.get("cache-control"), "no-store");
@@ -209,7 +209,7 @@ test("bulk creation gives working accounts; search and delete", async () => {
 test("pages are served; unknown API paths are 404", async () => {
   const home = await fetch(BASE + "/");
   assert.equal(home.status, 200);
-  assert.match(await home.text(), /<html/i);
+  assert.match(await home.text(), /url=\/account/, "the root sends visitors to the account page");
   for (const p of ["/account", "/admin", "/privacy", "/terms"]) assert.equal((await fetch(BASE + p)).status, 200, p);
   assert.equal((await call("GET", "nope")).status, 404);
 });

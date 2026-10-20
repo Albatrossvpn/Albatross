@@ -38,10 +38,10 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
       - name: Find or create the database
         run: |
-          id="$(npx wrangler d1 list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s).find(x=>x.name==="skyroad");if(d)console.log(d.uuid)})')"
+          id="$(npx wrangler d1 list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const d=JSON.parse(s).find(x=>x.name==="albatross");if(d)console.log(d.uuid)})')"
           if [ -z "$id" ]; then
-            npx wrangler d1 create skyroad
-            id="$(npx wrangler d1 list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).find(x=>x.name==="skyroad").uuid))')"
+            npx wrangler d1 create albatross
+            id="$(npx wrangler d1 list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).find(x=>x.name==="albatross").uuid))')"
           fi
           sed -i "s/^database_id = .*/database_id = \"$id\"/" wrangler.toml
       - name: Update the database

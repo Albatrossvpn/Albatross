@@ -12,9 +12,9 @@ import (
 
 func dataDir() string {
 	if d, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(d, "skyroad")
+		return filepath.Join(d, "albatross")
 	}
-	return filepath.Join(os.TempDir(), "skyroad")
+	return filepath.Join(os.TempDir(), "albatross")
 }
 
 // IsAdmin reports whether the process runs as root.

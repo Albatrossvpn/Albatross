@@ -1,6 +1,6 @@
 //go:build linux
 
-// Package mobile runs Skyroad inside the Android app. It is built with
+// Package mobile runs Albatross inside the Android app. It is built with
 // gomobile bind into an Android library; the app shows the same web UI in
 // a WebView and owns the VpnService.
 //
@@ -66,9 +66,9 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 		return "", err
 	}
 	vpn.platform = p
-	// SKYROAD_SOURCES replaces the built-in sources, as on the desktop.
+	// ALBATROSS_SOURCES replaces the built-in sources, as on the desktop.
 	var only []sources.Source
-	for _, s := range strings.Split(os.Getenv("SKYROAD_SOURCES"), ",") {
+	for _, s := range strings.Split(os.Getenv("ALBATROSS_SOURCES"), ",") {
 		if src, ok := sources.User(s); ok {
 			src.Builtin = true
 			only = append(only, src)
@@ -76,7 +76,7 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 	}
 	e, err := engine.New(engine.Options{
 		Sources:  only,
-		DataDir:  filepath.Join(dataDir, "skyroad"),
+		DataDir:  filepath.Join(dataDir, "albatross"),
 		AppDirs:  []string{libDir},
 		SysProxy: vpn,
 		Version:  Version,

@@ -1,13 +1,13 @@
-; Skyroad VPN installer. Everything the app needs ships inside: the app,
+; Albatross VPN installer. Everything the app needs ships inside: the app,
 ; sing-box, Xray, warp-plus and the WebView2 bootstrapper (run only when
 ; WebView2 is missing). Build with:
-;   iscc /DAppVersion=0.1.0 /DSourceDir=..\..\dist\Skyroad /DOutputDir=..\..\dist build\windows\installer.iss
+;   iscc /DAppVersion=0.1.0 /DSourceDir=..\..\dist\Albatross /DOutputDir=..\..\dist build\windows\installer.iss
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
 #ifndef SourceDir
-  #define SourceDir "..\..\dist\Skyroad"
+  #define SourceDir "..\..\dist\Albatross"
 #endif
 #ifndef OutputDir
   #define OutputDir "..\..\dist"
@@ -15,20 +15,20 @@
 
 [Setup]
 AppId={{3D7A91C2-5B48-4E6F-A0D3-7C12E9B84F65}
-AppName=Skyroad VPN
+AppName=Albatross VPN
 AppVersion={#AppVersion}
-AppVerName=Skyroad VPN {#AppVersion}
-AppPublisher=Skyroad
-DefaultDirName={autopf}\Skyroad
-DefaultGroupName=Skyroad VPN
+AppVerName=Albatross VPN {#AppVersion}
+AppPublisher=Albatross
+DefaultDirName={autopf}\Albatross
+DefaultGroupName=Albatross VPN
 DisableProgramGroupPage=yes
 ; Install for the current user by default so no UAC prompt is needed.
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#OutputDir}
-OutputBaseFilename=Skyroad-Setup-{#AppVersion}
+OutputBaseFilename=Albatross-Setup-{#AppVersion}
 SetupIconFile=icon.ico
-UninstallDisplayIcon={app}\Skyroad.exe
+UninstallDisplayIcon={app}\Albatross.exe
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -45,25 +45,25 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-Source: "{#SourceDir}\Skyroad.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\Albatross.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\core\*"; DestDir: "{app}\core"; Flags: ignoreversion recursesubdirs
 Source: "{#SourceDir}\licenses\*"; DestDir: "{app}\licenses"; Flags: ignoreversion recursesubdirs
 Source: "{#SourceDir}\README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall; Check: NeedsWebView2
 
 [Icons]
-Name: "{group}\Skyroad VPN"; Filename: "{app}\Skyroad.exe"
-Name: "{group}\{cm:UninstallProgram,Skyroad VPN}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Skyroad VPN"; Filename: "{app}\Skyroad.exe"; Tasks: desktopicon
+Name: "{group}\Albatross VPN"; Filename: "{app}\Albatross.exe"
+Name: "{group}\{cm:UninstallProgram,Albatross VPN}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\Albatross VPN"; Filename: "{app}\Albatross.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "Installing Microsoft Edge WebView2..."; Check: NeedsWebView2; Flags: waituntilterminated
-Filename: "{app}\Skyroad.exe"; Description: "{cm:LaunchProgram,Skyroad VPN}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Albatross.exe"; Description: "{cm:LaunchProgram,Albatross VPN}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-Type: filesandordirs; Name: "{localappdata}\Skyroad\cache"
-Type: filesandordirs; Name: "{localappdata}\Skyroad\run"
-Type: files; Name: "{localappdata}\Skyroad\pool.dat"
+Type: filesandordirs; Name: "{localappdata}\Albatross\cache"
+Type: filesandordirs; Name: "{localappdata}\Albatross\run"
+Type: files; Name: "{localappdata}\Albatross\pool.dat"
 
 [Code]
 const
@@ -93,6 +93,6 @@ begin
   begin
     if RegQueryStringValue(HKCU, ProxyKey, 'ProxyServer', Server) and (Pos('127.0.0.1:', Server) = 1) then
       RegWriteDWordValue(HKCU, ProxyKey, 'ProxyEnable', 0);
-    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Skyroad');
+    RegDeleteValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Run', 'Albatross');
   end;
 end;

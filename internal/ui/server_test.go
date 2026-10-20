@@ -43,7 +43,7 @@ func TestAPIGuards(t *testing.T) {
 	r.Host = "127.0.0.1:1234"
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Skyroad") {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Albatross") {
 		t.Fatalf("index: %d", w.Code)
 	}
 }
