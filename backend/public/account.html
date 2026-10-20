@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your account — {name}</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/site.css">
+<script type="module" src="/account.js"></script>
+</head>
+<body>
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="/"><img src="/icon.svg" alt="" width="28" height="28"><span data-name>Skyroad</span></a>
+    <span class="spacer"></span>
+    <button class="btn hidden" id="logout">Sign out</button>
+  </div>
+</header>
+
+<main class="center">
+  <!-- Sign in / create account -->
+  <div class="panel" id="auth">
+    <h1>Your account</h1>
+    <p class="muted" id="auth-sub">Sign in to see your usage.</p>
+    <div class="tabs hidden mt" id="tabs"></div>
+    <form id="login-form" class="stack" autocomplete="on">
+      <label class="field"><span>Username</span><input id="l-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+      <label class="field"><span>Password</span><input id="l-pass" name="password" type="password" autocomplete="current-password" required></label>
+      <div class="error" id="l-error" role="alert"></div>
+      <button class="btn primary big full" id="l-btn">Sign in</button>
+    </form>
+    <form id="signup-form" class="stack hidden" autocomplete="on">
+      <label class="field"><span>Username</span><input id="s-user" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required minlength="3" maxlength="32"><small>3–32 letters, digits, dots, dashes or underscores.</small></label>
+      <label class="field"><span>Password</span><input id="s-pass" name="password" type="password" autocomplete="new-password" required minlength="8"><small>At least 8 characters. There is no email, so keep it safe: it cannot be recovered.</small></label>
+      <div id="turnstile"></div>
+      <div class="error" id="s-error" role="alert"></div>
+      <button class="btn primary big full" id="s-btn">Create account</button>
+    </form>
+  </div>
+
+  <!-- Dashboard -->
+  <div class="dash hidden" id="dash">
+    <div class="card">
+      <div class="row between wrap-row">
+        <div><h2 id="d-name" class="flush"></h2><span class="muted" id="d-sub"></span></div>
+        <span class="pill" id="d-status"></span>
+      </div>
+      <div id="notice" class="notice hidden mt"></div>
+      <div class="meter" id="m-data"></div>
+      <div class="meter" id="m-time"></div>
+      <dl class="kv" id="d-kv"></dl>
+    </div>
+    <div class="card">
+      <h2>Get the app</h2>
+      <div class="row wrap-row" id="d-dl"></div>
+      <p class="muted note mt">Sign in to the app with this username and password.</p>
+    </div>
+    <div class="card">
+      <h2>Change password</h2>
+      <form id="pw-form" class="stack" autocomplete="off">
+        <label class="field"><span>Current password</span><input id="p-old" type="password" autocomplete="current-password" required></label>
+        <label class="field"><span>New password</span><input id="p-new" type="password" autocomplete="new-password" required minlength="8"></label>
+        <div class="error" id="p-error" role="alert"></div>
+        <button class="btn">Change password</button>
+        <p class="muted small">Changing it signs you out on your other devices.</p>
+      </form>
+    </div>
+  </div>
+</main>
+
+<footer class="footer" id="footer"></footer>
+</body>
+</html>
