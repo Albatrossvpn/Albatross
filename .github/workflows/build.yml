@@ -173,8 +173,10 @@ jobs:
           $token = $url.Split("#")[1]
           $h = @{ "X-Token" = $token }
           $state = Invoke-RestMethod -Uri "http://127.0.0.1:18080/api/state" -Headers $h
-          "cores: sing-box=$($state.cores.sing_box) xray=$($state.cores.xray) warp-plus=$($state.cores.warp_plus)"
-          if (-not ($state.cores.sing_box -and $state.cores.xray -and $state.cores.warp_plus)) { throw "a core is missing" }
+          # The page is not told about cores; check the files and that the engine answers.
+          foreach ($c in "sing-box", "xray", "warp-plus") { if (-not (Test-Path "dist\Skyroad\core\$c.exe")) { throw "$c is missing" } }
+          if (-not $state.status) { throw "the engine did not answer" }
+          if ($state.PSObject.Properties.Name -contains "cores") { throw "the state still lists cores" }
           $page = Invoke-WebRequest -Uri "http://127.0.0.1:18080/" -UseBasicParsing
           if ($page.StatusCode -ne 200) { throw "UI not served" }
           & dist\Skyroad\core\sing-box.exe version
@@ -196,8 +198,8 @@ jobs:
           for ($i = 0; $i -lt 90; $i++) {
             Start-Sleep 5
             $s = Invoke-RestMethod -Uri "$api/state" -Headers $h
-            "t=$($i*5)s working=$($s.working_now) countries=$(@($s.countries | Where-Object { $_.servers -gt 0 }).Count) candidates=$($s.scan.candidates) tested/min=$($s.scan.per_minute)"
-            if ($s.working_now -ge 3) { break }
+            "t=$($i*5)s servers=$($s.servers) countries=$(@($s.countries | Where-Object { $_.servers -gt 0 }).Count)"
+            if ($s.servers -ge 3) { break }
           }
           Invoke-RestMethod -Method Post -Uri "$api/connect" -Headers $h -ContentType "application/json" -Body '{"country":""}' | Out-Null
           for ($i = 0; $i -lt 40; $i++) {
@@ -207,7 +209,7 @@ jobs:
             if ($s.status -eq "connected") { break }
           }
           if ($s.status -eq "connected") {
-            "connected via $($s.conn.server) ($($s.conn.proto)), exit $($s.conn.exit_ip) $($s.conn.country), $($s.conn.delay) ms"
+            "connected, exit $($s.conn.country), $($s.conn.delay) ms"
             curl.exe -s -x http://127.0.0.1:10808 https://www.cloudflare.com/cdn-cgi/trace
           }
           $s.countries | Where-Object { $_.servers -gt 0 } | Select-Object -First 20 code, servers, best_delay | Format-Table | Out-String
