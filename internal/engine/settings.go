@@ -13,8 +13,12 @@ type Settings struct {
 	// Mode is "proxy" (system proxy, no admin needed) or "tun" (every app,
 	// needs administrator rights).
 	Mode string `json:"mode"`
-	// BypassIran sends Iranian sites directly instead of through the VPN.
-	BypassIran bool `json:"bypass_iran"`
+	// Bypass is the code of a region (see regions.go) whose own sites are
+	// opened directly instead of through the VPN; "" turns it off.
+	Bypass string `json:"bypass"`
+	// Protocol limits connections to one protocol ("" = automatic); see
+	// ProtocolChoices.
+	Protocol string `json:"protocol"`
 	// BlockAds rejects connections to known ad and tracker domains.
 	BlockAds bool `json:"block_ads"`
 	// ProxyPort is the local HTTP+SOCKS port.
@@ -35,8 +39,8 @@ type Settings struct {
 	Country string `json:"country"`
 	// AutoConnect connects when the app starts.
 	AutoConnect bool `json:"auto_connect"`
-	// StartWithWindows launches the app at login.
-	StartWithWindows bool `json:"start_with_windows"`
+	// StartWithSystem launches the app at login.
+	StartWithSystem bool `json:"start_with_system"`
 	// Intensity is "low", "normal" or "max" scanning effort.
 	Intensity string `json:"intensity"`
 	// DeepSources also downloads the large lists needed for full coverage.
@@ -55,15 +59,31 @@ type Settings struct {
 	CleanIP bool `json:"clean_ip"`
 }
 
-// DefaultSettings favor reaching the internet over everything else.
+// ProtocolChoice is a connection protocol the user can pick.
+type ProtocolChoice struct {
+	Value string `json:"value"` // Settings.Protocol; "" is automatic
+	Label string `json:"label"`
+}
+
+// ProtocolChoices are the protocols offered, automatic first. They match
+// Server.Proto.
+func ProtocolChoices() []ProtocolChoice {
+	return []ProtocolChoice{
+		{"", "Automatic"}, {"vless", "VLESS"}, {"vmess", "VMess"}, {"trojan", "Trojan"},
+		{"shadowsocks", "Shadowsocks"}, {"hysteria2", "Hysteria 2"}, {"tuic", "TUIC"},
+		{"anytls", "AnyTLS"}, {"wireguard", "WireGuard"}, {"openvpn", "OpenVPN"},
+	}
+}
+
+// DefaultSettings favor reaching the internet while keeping traffic
+// encrypted: servers without transport encryption are left out.
 func DefaultSettings() Settings {
 	return Settings{
 		Mode:        "proxy",
-		BypassIran:  true,
 		ProxyPort:   10808,
 		AutoSwitch:  true,
 		Fragment:    "auto",
-		AllowPlain:  true,
+		AllowPlain:  false,
 		Intensity:   "normal",
 		DeepSources: true,
 		Warp:        true,
@@ -105,6 +125,7 @@ func loadSettings(dir string, mobile bool) Settings {
 	default:
 		s.Intensity = "normal"
 	}
+	s.normalize()
 	return s
 }
 
@@ -118,4 +139,18 @@ func saveJSON(path string, v any) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// normalize drops values that are not choices.
+func (s *Settings) normalize() {
+	if _, ok := findRegion(s.Bypass); !ok {
+		s.Bypass = ""
+	}
+	known := false
+	for _, c := range ProtocolChoices() {
+		known = known || c.Value == s.Protocol
+	}
+	if !known {
+		s.Protocol = ""
+	}
 }

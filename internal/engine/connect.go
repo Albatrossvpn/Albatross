@@ -33,7 +33,7 @@ type connection struct {
 	country     string // what the user asked for ("" = fastest anywhere)
 	home        string // country the group was built in; backups stay here
 	pinned      bool   // the user picked this one server
-	bypassIran  bool
+	bypass      string // region whose sites go direct ("" = none)
 	mode        string
 	proxyAddr   string
 	running     *core.Running
@@ -159,7 +159,7 @@ func (e *Engine) ConnectServer(key string) error {
 
 func countryName(code string) string {
 	if code == "" {
-		return "سریع‌ترین کشور"
+		return "Fastest location"
 	}
 	c, _ := geo.Lookup(code)
 	return c.FA
@@ -192,9 +192,9 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 				// pause. Servers that keep failing drop out on their own.
 				exclude = map[string]bool{}
 			}
-			e.setStatus(StatusSearching, fmt.Sprintf("در حال جستجوی سرور سالم برای %s…", name))
+			e.setStatus(StatusSearching, fmt.Sprintf("Looking for a server in %s…", name))
 			if time.Now().After(deadline) {
-				e.setStatus(StatusSearching, fmt.Sprintf("هنوز سروری برای %s پیدا نشده؛ جستجو ادامه دارد و به محض پیدا شدن وصل می‌شوید.", name))
+				e.setStatus(StatusSearching, fmt.Sprintf("No server in %s yet. Still looking; you will be connected as soon as one is found.", name))
 			}
 			select {
 			case <-e.ctx.Done():
@@ -203,7 +203,7 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 			}
 			continue
 		}
-		e.setStatus(StatusConnecting, fmt.Sprintf("در حال اتصال به %s…", name))
+		e.setStatus(StatusConnecting, fmt.Sprintf("Connecting to %s…", name))
 		err := e.start(gen, country, picks, pinned != nil)
 		if err == nil {
 			return nil
@@ -211,12 +211,12 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 		if errors.Is(err, errStale) {
 			return err
 		}
-		e.logf("warn", "اتصال ناموفق: %v", err)
+		e.logf("warn", "Connection attempt failed: %v", err)
 		for _, s := range picks {
 			exclude[s.Key] = true
 		}
 		if pinned != nil {
-			e.setStatus(StatusIdle, "این سرور الان کار نمی‌کند.")
+			e.setStatus(StatusIdle, "This server is not available right now.")
 			e.mu.Lock()
 			e.wantConnect = false
 			e.mu.Unlock()
@@ -264,7 +264,7 @@ func (e *Engine) bestServers(country string, n int, exclude map[string]bool) []*
 	defer e.mu.Unlock()
 	var list []*Server
 	for _, s := range e.good {
-		if exclude[s.Key] || !s.usable(now) || s.Country == "IR" {
+		if exclude[s.Key] || !s.usable(now) || s.Country == "IR" || !s.matches(e.settings.Protocol) {
 			continue
 		}
 		if country != "" && s.Country != country {
@@ -357,7 +357,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	if !portFree(listen, proxyPort) {
 		// Another program (often another VPN client) holds the port.
 		if p, err := core.FreePorts(1); err == nil {
-			e.logf("warn", "پورت %d در اختیار برنامه دیگری است؛ از پورت %d استفاده شد.", proxyPort, p[0])
+			e.logf("warn", "Port %d is used by another program; using port %d instead.", proxyPort, p[0])
 			proxyPort = p[0]
 		}
 	}
@@ -373,7 +373,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		country:     country,
 		home:        home,
 		pinned:      pinned,
-		bypassIran:  set.BypassIran,
+		bypass:      set.Bypass,
 		mode:        set.Mode,
 		proxyAddr:   "127.0.0.1:" + strconv.Itoa(proxyPort),
 		clashAddr:   "127.0.0.1:" + strconv.Itoa(ports[0]),
@@ -383,7 +383,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		wake:        make(chan struct{}, 1),
 	}
 	opts := connOptions{
-		listen: listen, port: proxyPort, tun: set.Mode == "tun", bypassIran: set.BypassIran,
+		listen: listen, port: proxyPort, tun: set.Mode == "tun", bypass: set.Bypass,
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
 		clashSecret: c.clashSecret, probeAddr: c.probeAddr, exe: e.opt.ExeName, localDNS: e.dns(), mobile: e.opt.Mobile,
 	}
@@ -473,11 +473,13 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	c.exitIP, c.exitCC, c.delay, c.healthy = r.ExitIP, r.Country, int(r.Delay/time.Millisecond), true
 	if set.Mode == "proxy" {
 		bypass := []string{"localhost", "127.*", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*", "172.30.*", "172.31.*", "192.168.*", "<local>"}
-		if set.BypassIran {
-			bypass = append(bypass, "*.ir")
+		if r, ok := findRegion(set.Bypass); ok {
+			for _, s := range r.Suffixes {
+				bypass = append(bypass, "*"+s)
+			}
 		}
 		if err := e.opt.SysProxy.Set(c.proxyAddr, bypass); err != nil {
-			e.logf("warn", "تنظیم پروکسی سیستم ناموفق بود: %v", err)
+			e.logf("warn", "Could not set the system proxy: %v", err)
 		} else {
 			c.sysProxy = true
 		}
@@ -488,7 +490,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	e.conn = c
 	e.mu.Unlock()
 	e.setStatus(StatusConnected, connectedMessage(c))
-	e.logf("info", "وصل شد به %s با %d سرور در یک گروه (تأخیر %d میلی‌ثانیه).", exitName(c), len(c.members), c.delay)
+	e.logf("info", "Connected to %s with %d servers in the group (latency %d ms).", exitName(c), len(c.members), c.delay)
 	go e.monitor(mctx, c)
 	// Sources blocked on the direct path (Telegram, GitHub) can now be
 	// read through the VPN.
@@ -508,7 +510,7 @@ func exitName(c *connection) string {
 }
 
 func connectedMessage(c *connection) string {
-	return fmt.Sprintf("وصل هستید — %s", exitName(c))
+	return fmt.Sprintf("Connected — %s", exitName(c))
 }
 
 // Disconnect stops the VPN and restores system settings.
@@ -543,7 +545,7 @@ type connOptions struct {
 	listen      string
 	port        int
 	tun         bool
-	bypassIran  bool
+	bypass      string
 	blockAds    bool
 	rulesDir    string
 	clashAddr   string
@@ -608,18 +610,18 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		rules = append(rules, map[string]any{"rule_set": []string{"geosite-ads"}, "action": "reject"})
 	}
 	dnsRules := []any{}
-	if o.bypassIran {
-		// learned-ir holds Iranian sites the domain list misses (irlearn.go);
-		// the core reloads it whenever the engine adds one.
-		ruleSets = append(ruleSets, localRuleSet("geosite-ir", o.rulesDir), localRuleSet("geoip-ir", o.rulesDir),
-			map[string]any{"type": "local", "tag": learnedTag, "format": "source", "path": filepath.Join(o.rulesDir, learnedFile)})
+	if r, ok := findRegion(o.bypass); ok {
+		// The learned list holds the region's sites the domain list misses
+		// (learn.go); the core reloads it whenever the engine adds one.
+		ruleSets = append(ruleSets, localRuleSet(r.geoSiteTag(), o.rulesDir), localRuleSet(r.geoIPTag(), o.rulesDir),
+			map[string]any{"type": "local", "tag": r.learnedTag(), "format": "source", "path": r.learnedFile(o.rulesDir)})
 		rules = append(rules, map[string]any{
-			"domain_suffix": []string{".ir", ".xn--mgba3a4f16a"},
-			"rule_set":      []string{"geosite-ir", learnedTag, "geoip-ir"},
+			"domain_suffix": r.Suffixes,
+			"rule_set":      []string{r.geoSiteTag(), r.learnedTag(), r.geoIPTag()},
 			"outbound":      "direct",
 		})
 		dnsRules = append(dnsRules, map[string]any{
-			"domain_suffix": []string{".ir", ".xn--mgba3a4f16a"}, "rule_set": []string{"geosite-ir", learnedTag},
+			"domain_suffix": r.Suffixes, "rule_set": []string{r.geoSiteTag(), r.learnedTag()},
 			"action": "route", "server": "local",
 		})
 	}

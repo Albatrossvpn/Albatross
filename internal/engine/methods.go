@@ -83,7 +83,7 @@ func (e *Engine) refreshWarp() {
 				s.Source = "warp-plus"
 			}
 			e.mu.Unlock()
-			e.logf("info", "روش %s کار می‌کند (%d میلی‌ثانیه).", r.Node.Name, r.Delay/time.Millisecond)
+			e.logf("info", "Method %s works (%d ms).", r.Node.Name, r.Delay/time.Millisecond)
 		} else {
 			e.recordFail(c, r.Err)
 		}

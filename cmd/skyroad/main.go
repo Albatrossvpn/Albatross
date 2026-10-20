@@ -24,7 +24,7 @@ import (
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
-const windowTitle = "آزادراه VPN"
+const windowTitle = "Skyroad VPN"
 
 func main() {
 	headless := flag.Bool("headless", false, "serve the UI without opening a window")
@@ -72,7 +72,7 @@ func main() {
 		Autostart: platform.SetAutostart,
 	})
 	if err != nil {
-		platform.Alert(windowTitle, "اجرای برنامه ممکن نشد:\n"+err.Error())
+		platform.Alert(windowTitle, "The app could not start:\n"+err.Error())
 		os.Exit(1)
 	}
 	eng.Start()
@@ -98,7 +98,7 @@ func main() {
 		OpenURL: platform.OpenURL,
 	}, *uiPort)
 	if err != nil {
-		platform.Alert(windowTitle, "رابط کاربری اجرا نشد:\n"+err.Error())
+		platform.Alert(windowTitle, "The window could not open:\n"+err.Error())
 		eng.Close()
 		os.Exit(1)
 	}

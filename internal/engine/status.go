@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
 )
 
 // Snapshot is everything the main screen shows.
@@ -124,28 +123,6 @@ func (e *Engine) Refresh() {
 	methodsMu.Unlock()
 	e.triggerRefill()
 }
-
-// Import adds servers the user pasted (links, a subscription body, or a
-// Clash profile) and tests them first.
-func (e *Engine) Import(text string) (int, error) {
-	e.mu.Lock()
-	idx, ok := e.srcIndex["__import__"]
-	if !ok {
-		idx = len(e.srcs)
-		e.srcIndex["__import__"] = idx
-		e.srcs = append(e.srcs, importSource)
-		e.srcStats = append(e.srcStats, SourceStat{})
-	}
-	e.mu.Unlock()
-	added := e.ingest(idx, importSource, text, nil)
-	if len(text) > 1<<20 {
-		releaseMemory()
-	}
-	e.poke()
-	return added, nil
-}
-
-var importSource = sources.Source{ID: "__import__", Kind: sources.KindSubscription, URL: "imported", Tier: sources.TierUser}
 
 func randomToken() string {
 	b := make([]byte, 16)
