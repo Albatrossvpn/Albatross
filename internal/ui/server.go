@@ -136,8 +136,14 @@ type apiError struct {
 
 func fail(w http.ResponseWriter, err error) {
 	code := ""
-	if errors.Is(err, engine.ErrNeedAdmin) {
+	var limit *engine.LimitError
+	switch {
+	case errors.Is(err, engine.ErrNeedAdmin):
 		code = "need_admin"
+	case errors.Is(err, engine.ErrLoginRequired):
+		code = "login_required"
+	case errors.As(err, &limit):
+		code = "limit"
 	}
 	w.WriteHeader(http.StatusBadRequest)
 	writeJSON(w, apiError{Error: err.Error(), Code: code})
@@ -163,8 +169,35 @@ func (s *Server) connect(w http.ResponseWriter, r *http.Request) {
 		fail(w, engine.ErrNeedAdmin)
 		return
 	}
+	// The answer for a user who may not connect is given here; the rest of
+	// connecting goes on in the background.
+	if err := s.eng.AllowConnect(); err != nil {
+		fail(w, err)
+		return
+	}
 	// Connecting can take a while (searching); report progress via state.
 	go s.eng.Connect(req.Country)
+	ok(w)
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		fail(w, err)
+		return
+	}
+	if err := s.eng.Login(req.Username, req.Password); err != nil {
+		fail(w, err)
+		return
+	}
+	ok(w)
+}
+
+func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
+	s.eng.Logout()
 	ok(w)
 }
 

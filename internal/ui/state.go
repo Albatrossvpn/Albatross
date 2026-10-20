@@ -21,6 +21,7 @@ type state struct {
 	Mobile     bool                    `json:"mobile"`
 	Version    string                  `json:"version"`
 	Update     *engine.UpdateInfo      `json:"update,omitempty"`
+	Account    engine.AccountState     `json:"account"`
 }
 
 type conn struct {
@@ -57,7 +58,7 @@ func publicState(s engine.Snapshot) state {
 	out := state{
 		Status: s.Status, Message: s.Message, Target: s.Target, TargetName: s.TargetName, TargetFlag: s.TargetFlag,
 		Countries: s.Countries, Settings: publicSettingsOf(s.Settings), Protocols: engine.ProtocolChoices(),
-		Admin: s.Admin, Mobile: s.Mobile, Version: s.Version, Update: s.Update,
+		Admin: s.Admin, Mobile: s.Mobile, Version: s.Version, Update: s.Update, Account: s.Account,
 	}
 	for _, c := range s.Countries {
 		out.Servers += c.Servers

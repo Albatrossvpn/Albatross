@@ -22,7 +22,7 @@ numeric="$(echo "$VERSION" | sed -E 's/^([0-9]+)\.([0-9]+)\.([0-9]+).*/\1.\2.\3.
 go run github.com/tc-hib/go-winres@v0.3.3 make --in build/windows/winres.json --out cmd/skyroad/rsrc \
   --arch amd64 --product-version "$numeric" --file-version "$numeric"
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -H windowsgui -X main.version=$VERSION" -o "$out/Skyroad.exe" ./cmd/skyroad
+  -ldflags "-s -w -H windowsgui -X main.version=$VERSION -X github.com/cezomagoanlace29861-jpg/vp/internal/engine.AccountURL=${ACCOUNT_URL:-}" -o "$out/Skyroad.exe" ./cmd/skyroad
 
 fetch() {
   [ -s "$2" ] || curl -fsSL --retry 4 --retry-delay 3 -o "$2" "$1"

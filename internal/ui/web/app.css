@@ -239,3 +239,26 @@ textarea:focus, .search:focus, .field input:focus { border-color: var(--accent);
 .group .row:first-child { border-top: 0; }
 .row .chev { width: 18px; height: 18px; color: var(--muted); }
 .check { width: 20px; height: 20px; color: var(--accent); flex: none; stroke-width: 2.6; }
+
+/* Account */
+.account .acc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.account .acc-head b { display: block; }
+.account .acc-head small { display: block; color: var(--muted); font-size: 12px; }
+.meter { margin-top: 12px; }
+.meter-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.meter-top span:last-child { color: var(--text); font-weight: 600; }
+.bar { height: 7px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .4s; }
+.bar i.warn { background: var(--warn); }
+.bar i.full { background: var(--bad); }
+.login { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 24px; background: var(--bg); background-image: var(--bg-grad); }
+.login.hidden { display: none; }
+.login-card { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 10px; text-align: center; }
+.login-card img { align-self: center; }
+.login-card h1 { margin: 6px 0 0; font-size: 24px; }
+.login-card p { margin: 0 0 6px; color: var(--muted); }
+.login-card input { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; }
+.login-card input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+.login-card .wide { width: 100%; padding: 12px; }
+.form-error { min-height: 18px; color: var(--bad); font-size: 13px; }
+.link { background: none; border: 0; color: var(--accent); font: inherit; cursor: pointer; padding: 6px; }

@@ -57,6 +57,13 @@
     <section class="view" id="view-settings">
       <div class="view-head"><h2>Settings</h2></div>
 
+      <div class="card account hidden" id="account-card">
+        <div class="acc-head"><div><b id="acc-name"></b><small id="acc-note"></small></div><button class="btn" id="logout-btn">Sign out</button></div>
+        <div class="meter hidden" id="acc-data"><div class="meter-top"><span>Data</span><span id="acc-data-text"></span></div><div class="bar"><i id="acc-data-bar"></i></div></div>
+        <div class="meter hidden" id="acc-time"><div class="meter-top"><span>Time</span><span id="acc-time-text"></span></div><div class="bar"><i id="acc-time-bar"></i></div></div>
+        <div class="hint" id="acc-dates"></div>
+      </div>
+
       <div class="card group">
         <button class="row" id="row-protocol">
           <span class="t-body"><b>Protocol</b><small id="protocol-value">Automatic</small></span>
@@ -134,6 +141,20 @@
         <button class="btn primary" id="update-get">Get the update</button>
       </div>
     </div>
+  </div>
+
+  <!-- Sign in: shown while this build asks for an account and nobody is signed in -->
+  <div class="login hidden" id="login">
+    <form class="login-card" id="login-form">
+      <img src="icon.svg" alt="" width="44" height="44">
+      <h1>Sign in</h1>
+      <p>Use your account to connect.</p>
+      <input id="login-user" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Username" required>
+      <input id="login-pass" type="password" autocomplete="current-password" placeholder="Password" required>
+      <div class="form-error" id="login-error" role="alert"></div>
+      <button class="btn primary wide" type="submit" id="login-btn">Sign in</button>
+      <button class="link" type="button" id="signup-link">Create an account</button>
+    </form>
   </div>
 
   <div class="toast hidden" id="toast"></div>
