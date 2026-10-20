@@ -231,7 +231,8 @@ func TestAddWhenSignedOutIsIgnored(t *testing.T) {
 
 // Against a real service (backend/ run with `wrangler dev`), with an account
 // that has a small allowance:
-//   ACCOUNT_TEST_URL=http://127.0.0.1:8787 ACCOUNT_TEST_USER=u ACCOUNT_TEST_PASS=p go test -run RealService ./internal/account
+//
+//	ACCOUNT_TEST_URL=http://127.0.0.1:8787 ACCOUNT_TEST_USER=u ACCOUNT_TEST_PASS=p go test -run RealService ./internal/account
 func TestRealService(t *testing.T) {
 	url, user, pass := os.Getenv("ACCOUNT_TEST_URL"), os.Getenv("ACCOUNT_TEST_USER"), os.Getenv("ACCOUNT_TEST_PASS")
 	if url == "" {
