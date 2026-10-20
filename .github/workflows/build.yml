@@ -102,12 +102,12 @@ jobs:
         run: bash build/package.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: Skyroad-folder
-          path: dist/Skyroad
+          name: Albatross-folder
+          path: dist/Albatross
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
-          name: Skyroad-portable-${{ steps.version.outputs.version }}
+          name: Albatross-portable-${{ steps.version.outputs.version }}
           path: dist/*.zip
 
   android:
@@ -134,20 +134,20 @@ jobs:
         env:
           ACCOUNT_URL: ${{ vars.ACCOUNT_URL }}
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          SKYROAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          SKYROAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          SKYROAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ALBATROSS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ALBATROSS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ALBATROSS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           # Without a key in the repository secrets the APKs get a debug key.
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/skyroad.jks"
-            export SKYROAD_KEYSTORE="$RUNNER_TEMP/skyroad.jks"
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/albatross.jks"
+            export ALBATROSS_KEYSTORE="$RUNNER_TEMP/albatross.jks"
           fi
           bash build/android/build.sh
           "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging dist/*arm64-v8a.apk | head -3
       - uses: actions/upload-artifact@v4
         with:
-          name: Skyroad-android-${{ env.VERSION }}
+          name: Albatross-android-${{ env.VERSION }}
           path: dist/*.apk
 
   installer:
@@ -159,14 +159,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: Skyroad-folder
-          path: dist/Skyroad
+          name: Albatross-folder
+          path: dist/Albatross
       - name: Smoke test on Windows
         shell: pwsh
         run: |
-          $data = Join-Path $env:RUNNER_TEMP "skyroad-data"
-          $out = Join-Path $env:RUNNER_TEMP "skyroad-out.txt"
-          $p = Start-Process -FilePath "dist\Skyroad\Skyroad.exe" -ArgumentList "--headless","--ui-port","18080","--data",$data -RedirectStandardOutput $out -PassThru
+          $data = Join-Path $env:RUNNER_TEMP "albatross-data"
+          $out = Join-Path $env:RUNNER_TEMP "albatross-out.txt"
+          $p = Start-Process -FilePath "dist\Albatross\Albatross.exe" -ArgumentList "--headless","--ui-port","18080","--data",$data -RedirectStandardOutput $out -PassThru
           $url = $null
           for ($i = 0; $i -lt 30 -and -not $url; $i++) { Start-Sleep 1; $url = Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 1 }
           if (-not $url) { throw "the app did not start" }
@@ -174,13 +174,13 @@ jobs:
           $h = @{ "X-Token" = $token }
           $state = Invoke-RestMethod -Uri "http://127.0.0.1:18080/api/state" -Headers $h
           # The page is not told about cores; check the files and that the engine answers.
-          foreach ($c in "sing-box", "xray", "warp-plus") { if (-not (Test-Path "dist\Skyroad\core\$c.exe")) { throw "$c is missing" } }
+          foreach ($c in "sing-box", "xray", "warp-plus") { if (-not (Test-Path "dist\Albatross\core\$c.exe")) { throw "$c is missing" } }
           if (-not $state.status) { throw "the engine did not answer" }
           if ($state.PSObject.Properties.Name -contains "cores") { throw "the state still lists cores" }
           $page = Invoke-WebRequest -Uri "http://127.0.0.1:18080/" -UseBasicParsing
           if ($page.StatusCode -ne 200) { throw "UI not served" }
-          & dist\Skyroad\core\sing-box.exe version
-          & dist\Skyroad\core\xray.exe version
+          & dist\Albatross\core\sing-box.exe version
+          & dist\Albatross\core\xray.exe version
           Stop-Process -Id $p.Id -Force
       - name: Real-world connection test
         # Public free servers change by the minute; report but never block.
@@ -188,9 +188,9 @@ jobs:
         timeout-minutes: 12
         shell: pwsh
         run: |
-          $data = Join-Path $env:RUNNER_TEMP "skyroad-real"
-          $out = Join-Path $env:RUNNER_TEMP "skyroad-real.txt"
-          $p = Start-Process -FilePath "dist\Skyroad\Skyroad.exe" -ArgumentList "--headless","--ui-port","18081","--data",$data -RedirectStandardOutput $out -PassThru
+          $data = Join-Path $env:RUNNER_TEMP "albatross-real"
+          $out = Join-Path $env:RUNNER_TEMP "albatross-real.txt"
+          $p = Start-Process -FilePath "dist\Albatross\Albatross.exe" -ArgumentList "--headless","--ui-port","18081","--data",$data -RedirectStandardOutput $out -PassThru
           $url = $null
           for ($i = 0; $i -lt 30 -and -not $url; $i++) { Start-Sleep 1; $url = Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 1 }
           $h = @{ "X-Token" = $url.Split("#")[1] }
@@ -224,30 +224,30 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
-          & $iscc "/DAppVersion=$env:VERSION" "/DSourceDir=$pwd\dist\Skyroad" "/DOutputDir=$pwd\dist" "build\windows\installer.iss"
+          & $iscc "/DAppVersion=$env:VERSION" "/DSourceDir=$pwd\dist\Albatross" "/DOutputDir=$pwd\dist" "build\windows\installer.iss"
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
           Get-ChildItem dist\*.exe
       - name: Test installer
         shell: pwsh
         run: |
-          $setup = Get-ChildItem dist\Skyroad-Setup-*.exe | Select-Object -First 1
-          $dir = Join-Path $env:RUNNER_TEMP "skyroad-installed"
+          $setup = Get-ChildItem dist\Albatross-Setup-*.exe | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP "albatross-installed"
           Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/CURRENTUSER","/DIR=`"$dir`"" -Wait
-          foreach ($f in "Skyroad.exe","core\sing-box.exe","core\xray.exe","core\warp-plus.exe") {
+          foreach ($f in "Albatross.exe","core\sing-box.exe","core\xray.exe","core\warp-plus.exe") {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f after install" }
           }
           "installed OK: $dir"
       - uses: actions/upload-artifact@v4
         with:
-          name: Skyroad-Setup-${{ env.VERSION }}
-          path: dist/Skyroad-Setup-*.exe
+          name: Albatross-Setup-${{ env.VERSION }}
+          path: dist/Albatross-Setup-*.exe
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
           target_commitish: ${{ github.sha }}
-          files: dist/Skyroad-Setup-*.exe
+          files: dist/Albatross-Setup-*.exe
           generate_release_notes: true
 
   # The installer job creates the release; this adds the portable zip and
@@ -259,11 +259,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Skyroad-portable-${{ needs.build.outputs.version }}
+          name: Albatross-portable-${{ needs.build.outputs.version }}
           path: dist
       - uses: actions/download-artifact@v4
         with:
-          name: Skyroad-android-${{ needs.build.outputs.version }}
+          name: Albatross-android-${{ needs.build.outputs.version }}
           path: dist
       - uses: softprops/action-gh-release@v2
         with:

@@ -1,6 +1,6 @@
 # Account service for the apps and the website (Cloudflare Worker + D1 database).
 # Deployment steps are in README.md.
-name = "skyroad-accounts"
+name = "albatross-accounts"
 main = "src/index.js"
 compatibility_date = "2025-09-01"
 
@@ -12,14 +12,14 @@ run_worker_first = ["/api/*"]
 
 [[d1_databases]]
 binding = "DB"
-database_name = "skyroad"
-# Printed by `npx wrangler d1 create skyroad`; paste it here.
+database_name = "albatross"
+# Printed by `npx wrangler d1 create albatross`; paste it here.
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
 
 [vars]
 # Shown on the site and in its footer. Leave a field empty to hide it.
-SITE_NAME = "Skyroad"
+SITE_NAME = "Albatross"
 COMPANY_NAME = ""
 COMPANY_ADDRESS = ""
 CONTACT_EMAIL = ""

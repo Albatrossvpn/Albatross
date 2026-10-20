@@ -176,7 +176,7 @@ func ParseLink(link string) (*Node, error) {
 		n, err = parseWireGuard(link)
 	case "socks", "socks5":
 		n, err = parseSocks(link)
-	case "skyroad":
+	case "albatross":
 		return parseInternal(link)
 	case "ssr", "socks4":
 		return nil, ErrUnsupported
@@ -966,17 +966,17 @@ func EachText(text string, fn func(*Node)) (seen int) {
 
 // Link returns a string that ParseLink turns back into this node: the
 // original share link when there is one, otherwise an internal
-// "skyroad://" encoding (used for VPN Gate and generated WARP nodes).
+// "albatross://" encoding (used for VPN Gate and generated WARP nodes).
 func (n *Node) Link() string {
 	if n.Source != "" && schemeRe.MatchString(head(n.Source, 16)) {
 		return n.Source
 	}
 	b, _ := json.Marshal(n)
-	return "skyroad://" + base64.RawURLEncoding.EncodeToString(b)
+	return "albatross://" + base64.RawURLEncoding.EncodeToString(b)
 }
 
 func parseInternal(link string) (*Node, error) {
-	b, err := base64.RawURLEncoding.DecodeString(link[len("skyroad://"):])
+	b, err := base64.RawURLEncoding.DecodeString(link[len("albatross://"):])
 	if err != nil {
 		return nil, err
 	}

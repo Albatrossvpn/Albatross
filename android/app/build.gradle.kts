@@ -1,4 +1,4 @@
-// The Go engine comes in as app/libs/skyroad.aar (gomobile bind) and the
+// The Go engine comes in as app/libs/albatross.aar (gomobile bind) and the
 // cores as app/src/main/jniLibs/<abi>/lib*.so; build/android/build.sh puts
 // both there and then runs this build.
 plugins {
@@ -11,11 +11,11 @@ val appVersionCode = Regex("""^(\d+)\.(\d+)\.(\d+)""").find(appVersion)?.destruc
     ?.let { (a, b, c) -> a.toInt() * 10000 + b.toInt() * 100 + c.toInt() } ?: 1
 
 android {
-    namespace = "app.skyroad.vpn"
+    namespace = "app.albatross.vpn"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.skyroad.vpn"
+        applicationId = "app.albatross.vpn"
         minSdk = 24
         targetSdk = 35
         versionCode = maxOf(appVersionCode, 1)
@@ -24,14 +24,14 @@ android {
 
     // A stable key lets new versions install over old ones. CI passes it
     // through these variables; without them the debug key is used.
-    val keystore = System.getenv("SKYROAD_KEYSTORE")
+    val keystore = System.getenv("ALBATROSS_KEYSTORE")
     signingConfigs {
         if (keystore != null && file(keystore).exists()) {
             create("release") {
                 storeFile = file(keystore)
-                storePassword = System.getenv("SKYROAD_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("SKYROAD_KEY_ALIAS")
-                keyPassword = System.getenv("SKYROAD_KEY_PASSWORD")
+                storePassword = System.getenv("ALBATROSS_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ALBATROSS_KEY_ALIAS")
+                keyPassword = System.getenv("ALBATROSS_KEY_PASSWORD")
             }
         }
     }
@@ -67,5 +67,5 @@ android {
 }
 
 dependencies {
-    implementation(files("libs/skyroad.aar"))
+    implementation(files("libs/albatross.aar"))
 }

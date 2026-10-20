@@ -152,7 +152,7 @@ const DUMMY = "pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAA
 async function publicInfo(env) {
   const s = await settings(env);
   return json({
-    name: env.SITE_NAME || "Skyroad",
+    name: env.SITE_NAME || "Albatross",
     company: env.COMPANY_NAME || "",
     address: env.COMPANY_ADDRESS || "",
     contact: env.CONTACT_EMAIL || "",

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds dist/Skyroad (the app plus every core it runs) and a portable zip.
-# The Windows installer is made from dist/Skyroad by build/windows/installer.iss.
+# Builds dist/Albatross (the app plus every core it runs) and a portable zip.
+# The Windows installer is made from dist/Albatross by build/windows/installer.iss.
 set -euo pipefail
 
 VERSION="${VERSION:-0.0.0-dev}"
@@ -11,7 +11,7 @@ WARPPLUS_VERSION="${WARPPLUS_VERSION:-1.2.6}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 dist="$root/dist"
-out="$dist/Skyroad"
+out="$dist/Albatross"
 dl="$dist/downloads"
 rm -rf "$out"
 mkdir -p "$out/core" "$out/licenses" "$dl"
@@ -19,10 +19,10 @@ mkdir -p "$out/core" "$out/licenses" "$dl"
 # Windows resources (icon, manifest, version info) need a numeric version.
 numeric="$(echo "$VERSION" | sed -E 's/^([0-9]+)\.([0-9]+)\.([0-9]+).*/\1.\2.\3.0/')"
 [[ "$numeric" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.0$ ]] || numeric="0.0.0.0"
-go run github.com/tc-hib/go-winres@v0.3.3 make --in build/windows/winres.json --out cmd/skyroad/rsrc \
+go run github.com/tc-hib/go-winres@v0.3.3 make --in build/windows/winres.json --out cmd/albatross/rsrc \
   --arch amd64 --product-version "$numeric" --file-version "$numeric"
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -H windowsgui -X main.version=$VERSION -X github.com/cezomagoanlace29861-jpg/vp/internal/engine.AccountURL=${ACCOUNT_URL:-}" -o "$out/Skyroad.exe" ./cmd/skyroad
+  -ldflags "-s -w -H windowsgui -X main.version=$VERSION -X github.com/cezomagoanlace29861-jpg/vp/internal/engine.AccountURL=${ACCOUNT_URL:-}" -o "$out/Albatross.exe" ./cmd/albatross
 
 fetch() {
   [ -s "$2" ] || curl -fsSL --retry 4 --retry-delay 3 -o "$2" "$1"
@@ -45,9 +45,9 @@ cp "$(find "$tmp/wp" -iname 'warp-plus*.exe' | head -1)" "$out/core/warp-plus.ex
 cp "$(find "$tmp/wp" -iname 'LICENSE*' | head -1)" "$out/licenses/warp-plus-LICENSE.txt"
 
 cat > "$out/README.txt" <<TXT
-Skyroad VPN $VERSION
+Albatross VPN $VERSION
 
-Run Skyroad.exe, pick a location and press the button.
+Run Albatross.exe, pick a location and press the button.
 
 Bundled components (see the licenses folder):
   sing-box $SINGBOX_VERSION  https://github.com/SagerNet/sing-box  (GPL-3.0-or-later; source at that address)
@@ -59,8 +59,8 @@ Bundled components (see the licenses folder):
 TXT
 sed -i 's/$/\r/' "$out/README.txt"
 
-zip_name="Skyroad-$VERSION-windows-amd64-portable.zip"
+zip_name="Albatross-$VERSION-windows-amd64-portable.zip"
 rm -f "$dist/$zip_name"
-(cd "$dist" && zip -q -r -9 "$zip_name" Skyroad)
+(cd "$dist" && zip -q -r -9 "$zip_name" Albatross)
 echo "built $dist/$zip_name"
 ls -la "$out" "$out/core"

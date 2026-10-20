@@ -1,4 +1,4 @@
-package app.skyroad.vpn;
+package app.albatross.vpn;
 
 import android.app.Application;
 import android.app.NotificationChannel;
@@ -11,7 +11,7 @@ import android.os.Build;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 
-import app.skyroad.mobile.Mobile;
+import app.albatross.mobile.Mobile;
 
 /** Starts the Go engine once per process and keeps it told about the network's resolver. */
 public final class App extends Application {

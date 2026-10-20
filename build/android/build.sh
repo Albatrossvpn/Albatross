@@ -59,15 +59,15 @@ cores x86_64 amd64 Xray-android-amd64.zip warp-plus_linux-amd64.zip
 # The engine, UI and tun2socks as one Android library.
 go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target=android/arm64,android/amd64 -androidapi 24 \
-  -javapkg app.skyroad -trimpath \
+  -javapkg app.albatross -trimpath \
   -ldflags "-s -w -X github.com/cezomagoanlace29861-jpg/vp/mobile.Version=$VERSION -X github.com/cezomagoanlace29861-jpg/vp/internal/engine.AccountURL=${ACCOUNT_URL:-}" \
-  -o "$app/libs/skyroad.aar" ./mobile
+  -o "$app/libs/albatross.aar" ./mobile
 
 cd "$root/android"
 VERSION="$VERSION" ./gradlew --no-daemon -q assembleRelease
 mkdir -p "$dist"
 for apk in app/build/outputs/apk/release/*.apk; do
   abi="$(basename "$apk" .apk | sed -E 's/^app-(.*)-release$/\1/')"
-  cp "$apk" "$dist/Skyroad-$VERSION-android-$abi.apk"
+  cp "$apk" "$dist/Albatross-$VERSION-android-$abi.apk"
 done
 ls -la "$dist"/*.apk

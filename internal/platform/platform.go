@@ -9,11 +9,11 @@ import (
 )
 
 // AppName is used for folders, registry keys and the window title.
-const AppName = "Skyroad"
+const AppName = "Albatross"
 
 // DataDir is where settings and caches live.
 func DataDir() string {
-	if d := os.Getenv("SKYROAD_DATA"); d != "" {
+	if d := os.Getenv("ALBATROSS_DATA"); d != "" {
 		return d
 	}
 	return dataDir()

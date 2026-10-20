@@ -1,4 +1,4 @@
-# Skyroad
+# Albatross
 
 A VPN client for Windows and Android. Pick a location, press the button, and it connects to the lowest-latency server there. It keeps a group of ready backups in the same location, so if the server in use drops, traffic moves to a backup within a second and the location does not change.
 
@@ -49,14 +49,14 @@ Every server runs through sing-box. Servers only Xray supports are served by an 
 
 ```sh
 go test ./...
-VERSION=0.1.0 bash build/package.sh      # dist/Skyroad + portable zip (needs curl, unzip, zip)
+VERSION=0.1.0 bash build/package.sh      # dist/Albatross + portable zip (needs curl, unzip, zip)
 iscc /DAppVersion=0.1.0 build/windows/installer.iss   # on Windows, needs Inno Setup 6
 ```
 
 Android (needs Go, Java 17 and an Android SDK with the NDK):
 
 ```sh
-ANDROID_HOME=/path/to/sdk VERSION=0.1.0 bash build/android/build.sh   # dist/Skyroad-0.1.0-android-<abi>.apk
+ANDROID_HOME=/path/to/sdk VERSION=0.1.0 bash build/android/build.sh   # dist/Albatross-0.1.0-android-<abi>.apk
 ```
 
 On Android the engine runs in the app process (gomobile) and the cores run as executables shipped as native libraries. Where Windows sets the system proxy, Android starts a `VpnService`; tun2socks carries the tunnel's packets to the local proxy. Set the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` repository secrets so CI signs APKs with one key (otherwise each build is signed with a throwaway debug key and cannot update the previous install).
@@ -72,7 +72,7 @@ CI (`.github/workflows/build.yml`) runs the tests including end-to-end runs agai
 Opt-in validation against real data:
 
 ```sh
-SKYROAD_LINKS=links.txt SING_BOX=/path/sing-box XRAY=/path/xray go test -run RealData ./internal/node
+ALBATROSS_LINKS=links.txt SING_BOX=/path/sing-box XRAY=/path/xray go test -run RealData ./internal/node
 ```
 
 ## Licenses

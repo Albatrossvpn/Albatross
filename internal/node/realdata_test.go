@@ -16,11 +16,11 @@ import (
 // TestRealData parses a large dump of real share links and has the real
 // cores validate every generated outbound. It is opt-in:
 //
-//	SKYROAD_LINKS=links.txt SING_BOX=/path/sing-box XRAY=/path/xray go test -run RealData ./internal/node
+//	ALBATROSS_LINKS=links.txt SING_BOX=/path/sing-box XRAY=/path/xray go test -run RealData ./internal/node
 func TestRealData(t *testing.T) {
-	path := os.Getenv("SKYROAD_LINKS")
+	path := os.Getenv("ALBATROSS_LINKS")
 	if path == "" {
-		t.Skip("SKYROAD_LINKS not set")
+		t.Skip("ALBATROSS_LINKS not set")
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

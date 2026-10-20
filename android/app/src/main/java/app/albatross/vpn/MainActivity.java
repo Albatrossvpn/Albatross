@@ -1,4 +1,4 @@
-package app.skyroad.vpn;
+package app.albatross.vpn;
 
 import android.Manifest;
 import android.app.Activity;
@@ -20,7 +20,7 @@ import android.widget.Toast;
 
 import java.lang.ref.WeakReference;
 
-import app.skyroad.mobile.Mobile;
+import app.albatross.mobile.Mobile;
 
 /** Shows the engine's web UI, the same page the Windows app shows. */
 public final class MainActivity extends Activity {
@@ -142,7 +142,7 @@ public final class MainActivity extends Activity {
     @SuppressWarnings("deprecation")
     public void onBackPressed() {
         // The page closes its own sheets and returns to the home tab first.
-        web.evaluateJavascript("window.skyroadBack ? skyroadBack() : false", handled -> {
+        web.evaluateJavascript("window.albatrossBack ? albatrossBack() : false", handled -> {
             if (!"true".equals(handled)) moveTaskToBack(true);
         });
     }
