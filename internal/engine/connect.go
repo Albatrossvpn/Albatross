@@ -583,7 +583,7 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 	}
 	if o.tun {
 		inbounds = append(inbounds, map[string]any{
-			"type": "tun", "tag": "tun-in", "interface_name": "Azadrah",
+			"type": "tun", "tag": "tun-in", "interface_name": "Skyroad",
 			"address": []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"},
 			"mtu":     9000, "auto_route": true, "strict_route": true, "stack": "mixed",
 		})

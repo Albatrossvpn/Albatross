@@ -1,4 +1,4 @@
-// Azadrah is a free VPN client that gathers public servers from hundreds
+// Skyroad is a free VPN client that gathers public servers from hundreds
 // of sources, keeps testing them, and connects to the fastest one in the
 // country the user picks.
 package main
@@ -53,9 +53,9 @@ func main() {
 
 	sysProxy := &platform.SystemProxy{}
 	var only []sources.Source
-	// AZADRAH_SOURCES replaces the built-in sources (comma separated), for
+	// SKYROAD_SOURCES replaces the built-in sources (comma separated), for
 	// testing against a private list.
-	for _, s := range strings.Split(os.Getenv("AZADRAH_SOURCES"), ",") {
+	for _, s := range strings.Split(os.Getenv("SKYROAD_SOURCES"), ",") {
 		if src, ok := sources.User(s); ok {
 			src.Builtin = true
 			only = append(only, src)

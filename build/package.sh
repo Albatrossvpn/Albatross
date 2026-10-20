@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds dist/Azadrah (the app plus every core it runs) and a portable zip.
-# The Windows installer is made from dist/Azadrah by build/windows/installer.iss.
+# Builds dist/Skyroad (the app plus every core it runs) and a portable zip.
+# The Windows installer is made from dist/Skyroad by build/windows/installer.iss.
 set -euo pipefail
 
 VERSION="${VERSION:-0.0.0-dev}"
@@ -11,7 +11,7 @@ WARPPLUS_VERSION="${WARPPLUS_VERSION:-1.2.6}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 dist="$root/dist"
-out="$dist/Azadrah"
+out="$dist/Skyroad"
 dl="$dist/downloads"
 rm -rf "$out"
 mkdir -p "$out/core" "$out/licenses" "$dl"
@@ -19,10 +19,10 @@ mkdir -p "$out/core" "$out/licenses" "$dl"
 # Windows resources (icon, manifest, version info) need a numeric version.
 numeric="$(echo "$VERSION" | sed -E 's/^([0-9]+)\.([0-9]+)\.([0-9]+).*/\1.\2.\3.0/')"
 [[ "$numeric" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.0$ ]] || numeric="0.0.0.0"
-go run github.com/tc-hib/go-winres@v0.3.3 make --in build/windows/winres.json --out cmd/azadrah/rsrc \
+go run github.com/tc-hib/go-winres@v0.3.3 make --in build/windows/winres.json --out cmd/skyroad/rsrc \
   --arch amd64 --product-version "$numeric" --file-version "$numeric"
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -H windowsgui -X main.version=$VERSION" -o "$out/Azadrah.exe" ./cmd/azadrah
+  -ldflags "-s -w -H windowsgui -X main.version=$VERSION" -o "$out/Skyroad.exe" ./cmd/skyroad
 
 fetch() {
   [ -s "$2" ] || curl -fsSL --retry 4 --retry-delay 3 -o "$2" "$1"
@@ -46,9 +46,9 @@ cp "$(find "$tmp/wp" -iname 'LICENSE*' | head -1)" "$out/licenses/warp-plus-LICE
 cp internal/ui/web/fonts/Vazirmatn-OFL.txt "$out/licenses/Vazirmatn-OFL.txt"
 
 cat > "$out/README.txt" <<TXT
-Azadrah VPN $VERSION
+Skyroad VPN $VERSION
 
-Run Azadrah.exe. Pick a country and press the button; the app finds and
+Run Skyroad.exe. Pick a country and press the button; the app finds and
 tests free servers by itself and connects to the fastest one.
 
 Bundled components (see the licenses folder):
@@ -61,8 +61,8 @@ Bundled components (see the licenses folder):
 TXT
 sed -i 's/$/\r/' "$out/README.txt"
 
-zip_name="Azadrah-$VERSION-windows-amd64-portable.zip"
+zip_name="Skyroad-$VERSION-windows-amd64-portable.zip"
 rm -f "$dist/$zip_name"
-(cd "$dist" && zip -q -r -9 "$zip_name" Azadrah)
+(cd "$dist" && zip -q -r -9 "$zip_name" Skyroad)
 echo "built $dist/$zip_name"
 ls -la "$out" "$out/core"

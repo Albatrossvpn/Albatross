@@ -1,4 +1,4 @@
-// The Go engine comes in as app/libs/azadrah.aar (gomobile bind) and the
+// The Go engine comes in as app/libs/skyroad.aar (gomobile bind) and the
 // cores as app/src/main/jniLibs/<abi>/lib*.so; build/android/build.sh puts
 // both there and then runs this build.
 plugins {
@@ -11,11 +11,11 @@ val appVersionCode = Regex("""^(\d+)\.(\d+)\.(\d+)""").find(appVersion)?.destruc
     ?.let { (a, b, c) -> a.toInt() * 10000 + b.toInt() * 100 + c.toInt() } ?: 1
 
 android {
-    namespace = "app.azadrah.vpn"
+    namespace = "app.skyroad.vpn"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.azadrah.vpn"
+        applicationId = "app.skyroad.vpn"
         minSdk = 24
         targetSdk = 35
         versionCode = maxOf(appVersionCode, 1)
@@ -24,14 +24,14 @@ android {
 
     // A stable key lets new versions install over old ones. CI passes it
     // through these variables; without them the debug key is used.
-    val keystore = System.getenv("AZADRAH_KEYSTORE")
+    val keystore = System.getenv("SKYROAD_KEYSTORE")
     signingConfigs {
         if (keystore != null && file(keystore).exists()) {
             create("release") {
                 storeFile = file(keystore)
-                storePassword = System.getenv("AZADRAH_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("AZADRAH_KEY_ALIAS")
-                keyPassword = System.getenv("AZADRAH_KEY_PASSWORD")
+                storePassword = System.getenv("SKYROAD_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("SKYROAD_KEY_ALIAS")
+                keyPassword = System.getenv("SKYROAD_KEY_PASSWORD")
             }
         }
     }
@@ -67,5 +67,5 @@ android {
 }
 
 dependencies {
-    implementation(files("libs/azadrah.aar"))
+    implementation(files("libs/skyroad.aar"))
 }
