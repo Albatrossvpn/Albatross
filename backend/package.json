@@ -1,8 +1,8 @@
 {
-  "name": "skyroad-accounts",
+  "name": "albatross-accounts",
   "private": true,
   "type": "module",
-  "description": "Account service for the Skyroad apps: sign-up, sign-in, usage limits, user and admin panels (Cloudflare Worker + D1).",
+  "description": "Account service for the Albatross apps: sign-up, sign-in, usage limits, user and admin panels (Cloudflare Worker + D1).",
   "scripts": {
     "dev": "wrangler dev",
     "test": "node --test test/unit.test.mjs",

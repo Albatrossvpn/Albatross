@@ -1,12 +1,12 @@
-# Accounts and website
+# Accounts
 
-A Cloudflare Worker with a D1 database. It serves the website (landing page, user account page, administration panel, privacy and terms pages) and the API the apps use.
+A Cloudflare Worker with a D1 database. It serves the account pages (user account page, administration panel, privacy and terms pages) and the API the apps use. The public website is built elsewhere (GoDaddy); this service lives on its own subdomain, e.g. `account.albatrossvpn.online`, and `/` redirects to the account page. Link to it from the website.
 
 | What | Where |
 |---|---|
 | API | `src/index.js` (`/api/v1/...`), rules and crypto in `src/lib.js` |
 | Database | `migrations/0001_init.sql` |
-| Pages | `public/` (plain HTML, CSS and JavaScript; no build step) |
+| Pages | `public/` (plain HTML, CSS and JavaScript; no build step; `icon.svg` is the logo) |
 | Tests | `npm test` (rules, passwords, tokens), `npm run test:api` (a local Worker with a local database) |
 
 ## What it does
@@ -24,7 +24,9 @@ The service decides; the official app obeys. The servers that carry the traffic 
 
 ## Deploying
 
-You need a Cloudflare account and a domain whose DNS is on Cloudflare.
+You need a Cloudflare account and a domain whose DNS is on Cloudflare (a Worker can only answer on a custom domain of a zone Cloudflare serves). With the domain registered at GoDaddy: add it to Cloudflare, copy GoDaddy's DNS records into the Cloudflare zone (the website's `A` and `www` records, and any mail records), then set the domain's nameservers at GoDaddy to the two Cloudflare gives you. Use a subdomain for this service (`SITE_DOMAIN=account.albatrossvpn.online`); the website keeps the bare domain.
+
+Where a custom domain is blocked, the apps can also try the Worker's own `*.workers.dev` address: give `ACCOUNT_URL` both, comma separated, and they are tried in order.
 
 **From GitHub (no tools on your computer).** In the repository's *Settings → Secrets and variables → Actions*:
 
@@ -47,7 +49,7 @@ Then run *Actions → Deploy accounts and website → Run workflow*. It creates 
 
 ```sh
 cd backend && npm ci
-npx wrangler d1 create skyroad        # paste the id into wrangler.toml
+npx wrangler d1 create albatross        # paste the id into wrangler.toml
 npx wrangler d1 migrations apply DB --remote
 npx wrangler secret put TOKEN_SECRET  # also ADMIN_USER and ADMIN_PASSWORD
 npx wrangler deploy

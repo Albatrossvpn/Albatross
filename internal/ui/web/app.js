@@ -239,7 +239,7 @@ function renderSheet() {
   } else if (sheetKind === "privacy") {
     html = privacyNotes.map(([t, d]) => `<div class="note"><b>${esc(t)}</b>${esc(d)}</div>`).join("");
   } else if (sheetKind === "bypass") {
-    html = optionItem("", "Off", !state.settings.bypass, "Open every site through Skyroad") +
+    html = optionItem("", "Off", !state.settings.bypass, "Open every site through Albatross") +
       state.regions.map((r) => optionItem(r.code, r.name, r.code === state.settings.bypass, `Open ${r.name} sites directly`)).join("");
   }
   $("sheet-list").innerHTML = html;
@@ -377,7 +377,7 @@ async function loadLogs() {
 
 // The Android back button: close what is open, then go home; false lets the
 // app go to the background.
-window.skyroadBack = () => {
+window.albatrossBack = () => {
   if (!$("sheet").classList.contains("hidden")) { closeSheet(); return true; }
   if (!$("admin-modal").classList.contains("hidden")) { $("admin-modal").classList.add("hidden"); return true; }
   if (view === "logs") { show("settings"); return true; }

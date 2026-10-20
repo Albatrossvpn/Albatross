@@ -1,16 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="291 290 1350 1350">
   <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#4f8cff"/>
-      <stop offset="1" stop-color="#7c5cff"/>
-    </linearGradient>
-    <linearGradient id="r" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffffff" stop-opacity=".75"/>
-      <stop offset="1" stop-color="#ffffff"/>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="560" y1="1500" x2="1470" y2="520">
+      <stop offset="0" stop-color="#0b1b55"/><stop offset=".5" stop-color="#1f31b8"/><stop offset="1" stop-color="#6f2ff5"/>
     </linearGradient>
   </defs>
-  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#g)"/>
-  <circle cx="32" cy="17" r="6" fill="#1fc79e"/>
-  <path d="M18 56 L29.5 23 h5 L46 56 Z" fill="url(#r)"/>
-  <path d="M32 29 v5 M32 39 v6 M32 50 v6" stroke="#5b6cf4" stroke-width="2.8" stroke-linecap="round"/>
+  <g fill="url(#g)">
+    <path d="M449 503 L966 322 L546 1286 C482 1196 449 1096 449 990 Z"/>
+    <path d="M966 322 L1482 503 V990 C1482 1096 1450 1196 1387 1286 Z"/>
+    <path d="M966 683 L1086 990 Q966 950 846 990 Z"/>
+    <path d="M760 1197 Q966 1027 1172 1197 L1258 1435 Q1130 1550 966 1610 Q802 1550 674 1435 Z"/>
+  </g>
 </svg>
