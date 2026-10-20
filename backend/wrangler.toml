@@ -1,0 +1,34 @@
+# Account service for the apps and the website (Cloudflare Worker + D1 database).
+# Deployment steps are in README.md.
+name = "skyroad-accounts"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# Only the API runs code; pages are served as static files.
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "skyroad"
+# Printed by `npx wrangler d1 create skyroad`; paste it here.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[vars]
+# Shown on the site and in its footer. Leave a field empty to hide it.
+SITE_NAME = "Skyroad"
+COMPANY_NAME = ""
+COMPANY_ADDRESS = ""
+CONTACT_EMAIL = ""
+# Cloudflare Turnstile site key for the sign-up form (optional; the secret
+# key goes in the TURNSTILE_SECRET secret).
+TURNSTILE_SITEKEY = ""
+
+# Secrets (set with `npx wrangler secret put NAME`, never in this file):
+#   TOKEN_SECRET     long random string that signs sessions
+#   ADMIN_USER       administrator login name
+#   ADMIN_PASSWORD   administrator password
+#   TURNSTILE_SECRET optional, with TURNSTILE_SITEKEY
