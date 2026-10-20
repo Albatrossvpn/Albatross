@@ -35,6 +35,11 @@ type Settings struct {
 	Fragment string `json:"fragment"`
 	// AllowPlain includes servers without transport encryption.
 	AllowPlain bool `json:"allow_plain"`
+	// SecureOnly refuses to send unencrypted protocols (plain HTTP, FTP,
+	// telnet, mail without TLS) through the servers. Whoever runs a server
+	// can read such traffic and change it; HTTPS stays encrypted from the
+	// device to the site, whatever the server does.
+	SecureOnly bool `json:"secure_only"`
 	// Country is the last chosen country ("" means the fastest anywhere).
 	Country string `json:"country"`
 	// AutoConnect connects when the app starts.
@@ -84,6 +89,7 @@ func DefaultSettings() Settings {
 		AutoSwitch:  true,
 		Fragment:    "auto",
 		AllowPlain:  false,
+		SecureOnly:  true,
 		Intensity:   "normal",
 		DeepSources: true,
 		Warp:        true,

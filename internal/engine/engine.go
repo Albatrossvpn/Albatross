@@ -341,7 +341,7 @@ func (e *Engine) UpdateSettings(s Settings) error {
 		e.buildSources()
 		e.triggerRefill()
 	}
-	routing := old.Mode != s.Mode || old.Bypass != s.Bypass || old.Protocol != s.Protocol || old.BlockAds != s.BlockAds ||
+	routing := old.Mode != s.Mode || old.Bypass != s.Bypass || old.Protocol != s.Protocol || old.BlockAds != s.BlockAds || old.SecureOnly != s.SecureOnly ||
 		old.ProxyPort != s.ProxyPort || old.AllowLAN != s.AllowLAN || old.Fragment != s.Fragment || old.AllowPlain != s.AllowPlain
 	if connected && routing {
 		go e.Connect(e.target)

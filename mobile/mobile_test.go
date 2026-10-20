@@ -300,5 +300,6 @@ func (p *fakeVPN) close() {
 	exec.Command("ip", "link", "del", tunName).Run()
 }
 
-func (p *fakeVPN) OpenURL(string) {}
-func (p *fakeVPN) Quit()          {}
+func (p *fakeVPN) OpenURL(string)   {}
+func (p *fakeVPN) OpenVPNSettings() {}
+func (p *fakeVPN) Quit()            {}
