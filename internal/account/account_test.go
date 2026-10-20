@@ -228,3 +228,31 @@ func TestAddWhenSignedOutIsIgnored(t *testing.T) {
 		t.Fatal("use recorded with nobody signed in")
 	}
 }
+
+// Against a real service (backend/ run with `wrangler dev`), with an account
+// that has a small allowance:
+//   ACCOUNT_TEST_URL=http://127.0.0.1:8787 ACCOUNT_TEST_USER=u ACCOUNT_TEST_PASS=p go test -run RealService ./internal/account
+func TestRealService(t *testing.T) {
+	url, user, pass := os.Getenv("ACCOUNT_TEST_URL"), os.Getenv("ACCOUNT_TEST_USER"), os.Getenv("ACCOUNT_TEST_PASS")
+	if url == "" {
+		t.Skip("ACCOUNT_TEST_URL is not set")
+	}
+	c, _ := newTestClient(t, url)
+	ctx := context.Background()
+	if _, err := c.Login(ctx, user, "not the password"); err == nil {
+		t.Fatal("a wrong password signed in")
+	}
+	before, err := c.Login(ctx, user, pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Add(1000, 5)
+	after, err := c.Sync(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.UsedBytes != before.UsedBytes+1000 || after.UsedSeconds != before.UsedSeconds+5 {
+		t.Fatalf("before %+v, after %+v", before, after)
+	}
+	t.Logf("account %+v", after)
+}
