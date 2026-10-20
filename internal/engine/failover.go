@@ -341,6 +341,9 @@ func (e *Engine) race(ctx context.Context, c *connection, list []*member, timeou
 // and of its backups, and whether the group should be refreshed.
 func (e *Engine) monitor(ctx context.Context, c *connection) {
 	go c.streamTraffic(ctx)
+	if e.acct != nil {
+		go e.meter(ctx, c)
+	}
 	if r, ok := findRegion(c.bypass); ok {
 		go e.learnLocal(ctx, c, r)
 	}

@@ -99,7 +99,7 @@ func TestAndroidPath(t *testing.T) {
 	// Bypassing China's sites makes names under .cn resolve through the
 	// network's resolver (fakeDNS) instead of through the VPN.
 	os.MkdirAll(filepath.Join(dir, "data", "skyroad"), 0o755)
-	os.WriteFile(filepath.Join(dir, "data", "skyroad", "settings.json"), []byte(`{"allow_plain": true, "bypass": "CN"}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "data", "skyroad", "settings.json"), []byte(`{"allow_plain": true, "secure_only": false, "bypass": "CN"}`), 0o644)
 	dnsAddr := fakeDNS(t)
 	p := &fakeVPN{t: t, up: make(chan struct{}, 1), down: make(chan struct{}, 1)}
 	defer p.close()

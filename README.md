@@ -8,10 +8,23 @@ A VPN client for Windows and Android. Pick a location, press the button, and it 
 - **Instant failover:** a connection holds a group of servers in one location behind a selector. The server in use is watched continuously, backups are checked in the background, and a drop switches to the best backup without restarting anything.
 - **Protocols:** automatic, or a fixed choice of VLESS, VMess, Trojan, Shadowsocks, Hysteria 2, TUIC, AnyTLS, WireGuard or OpenVPN.
 - **Bypass local sites:** open the sites of one region (China or Iran) directly instead of through the VPN. Besides domain and address lists, names the VPN carries are looked up and added to a list of the region's sites as they are found.
+- **Secure by default:** plain HTTP, FTP, Telnet and unprotected mail ports are refused, because whoever carries them can read them (a setting turns this off). On Android a shortcut opens the system's *Always-on VPN* and *Block connections without VPN* switches.
+- **Accounts:** users sign in with a username and password; each account can have a data allowance, a time allowance, a renewal period and an end date, managed from a website (see [backend/README.md](backend/README.md)).
 - **Ad and tracker blocker, auto-connect, start with the system** (Windows), and whole-device protection on Windows.
 - **Light on the machine:** lists are parsed as a stream, scanning slows down once enough servers are ready, and the window only asks the engine for state while it is visible.
 
 The app shows only what a user needs: how many servers are available, where, and how fast. There is no server list.
+
+## Privacy and security
+
+What the app guarantees, and what it cannot:
+
+- Traffic is encrypted from the device to the server, and sites that use HTTPS stay encrypted to the site, so a server cannot read their content.
+- Unencrypted traffic is refused (after the region bypass, which is not carried by a server), so nothing the app carries can be read in plain text by whoever carries it.
+- Name lookups for carried sites go through the connection.
+- The account service receives a username, a password at sign-in, and counts of bytes and seconds. It never receives the sites visited.
+- **Not** guaranteed: a server operator can still see which sites a user connects to and how much data they move. The app says so in its Privacy sheet and does not claim anonymity or "no logs".
+- Account limits are enforced by the app (the servers belong to others), so they stop honest overuse, not someone who rebuilds the client.
 
 ## How it works
 
@@ -25,7 +38,9 @@ The app shows only what a user needs: how many servers are available, where, and
 | DNS unpoisoning over DoH, edge-address scanner, IP pinning | `internal/antiblock` |
 | Scheduler, connect, same-location failover, speed checks, local-site learning, update check | `internal/engine` |
 | Local API and the embedded page; it only receives the public view of the state | `internal/ui` |
+| Account session, usage reporting, limits | `internal/account`, `internal/engine/account.go` |
 | System proxy, elevation, autostart, single instance | `internal/platform` |
+| Account service and website (Cloudflare Worker + D1) | `backend/` |
 | Android bridge (gomobile): VpnService hooks and tun2socks into the local proxy | `mobile`, `android/` |
 
 Every server runs through sing-box. Servers only Xray supports are served by an Xray sidecar on a local SOCKS port that sing-box connects to, and warp-plus methods work the same way.
@@ -45,6 +60,8 @@ ANDROID_HOME=/path/to/sdk VERSION=0.1.0 bash build/android/build.sh   # dist/Sky
 ```
 
 On Android the engine runs in the app process (gomobile) and the cores run as executables shipped as native libraries. Where Windows sets the system proxy, Android starts a `VpnService`; tun2socks carries the tunnel's packets to the local proxy. Set the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` repository secrets so CI signs APKs with one key (otherwise each build is signed with a throwaway debug key and cannot update the previous install).
+
+Builds ask users to sign in only when the account service address is set: `ACCOUNT_URL=https://vpn.example.com bash build/package.sh` (CI reads the `ACCOUNT_URL` repository variable). Without it the app connects without an account.
 
 ### Forcing an update
 
