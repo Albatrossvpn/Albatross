@@ -1,5 +1,5 @@
 {
-  "min_version": "0.3.2",
+  "min_version": "0.3.0",
   "latest_version": "0.3.2",
   "message": "Version 0.3.2 fixes Iranian sites, hotspot sharing, Disconnect on Android and app updates. If you have 0.3.1 or older, uninstall it once, then install 0.3.2; later updates install in place from inside the app.",
   "download_url": "https://github.com/cezomagoanlace29861-jpg/vp/releases/latest",
@@ -9,12 +9,6 @@
         "https://github.com/cezomagoanlace29861-jpg/vp/releases/download/v0.3.2/Albatross-0.3.2-android-arm64-v8a.apk"
       ],
       "sha256": "c6dd032d99d9307f622c34c5704526eae794078ccec25c0fb13f5fe7dd58bf91"
-    },
-    "android-x86_64": {
-      "urls": [
-        "https://github.com/cezomagoanlace29861-jpg/vp/releases/download/v0.3.2/Albatross-0.3.2-android-x86_64.apk"
-      ],
-      "sha256": "3e016f477bcdb50aee077ba9b4a143ec0e79306459d03c405008629b14fd8488"
     },
     "windows": {
       "urls": [
