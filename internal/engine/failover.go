@@ -359,11 +359,21 @@ func (e *Engine) monitor(ctx context.Context, c *connection) {
 	sweep := time.NewTimer(20 * time.Second)
 	defer sweep.Stop()
 	var last time.Time
+	// A core that crashes is replaced at once, not at the next check.
+	var died <-chan struct{}
+	if c.running != nil && c.running.SingBox != nil {
+		died = c.running.SingBox.Done()
+	}
 	for {
 		urgent := false
 		select {
 		case <-ctx.Done():
 			return
+		case <-died:
+			if ctx.Err() != nil {
+				return // stopped on purpose
+			}
+			died = nil
 		case <-c.wake:
 			if time.Since(last) < 2*time.Second {
 				continue
