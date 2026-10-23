@@ -58,6 +58,32 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
 cores arm64-v8a arm64 Xray-android-arm64-v8a.zip warp-plus_android-arm64.zip
 cores x86_64 amd64 Xray-android-amd64.zip warp-plus_linux-amd64.zip
 
+# Tor, the last resort. Its Android bundle holds executables (libTor.so is
+# one, despite the name) that need only the system's libraries. They ship
+# as lib<name>.so like the cores; pt_config.json cannot ship beside them,
+# so it is built into the engine (internal/core/tor.go).
+readelf="$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf | head -1)"
+tor() { # abi bundle-platform
+  local out="$jni/$1" t="$tmp/tor-$1"
+  bash "$root/build/tor.sh" "$2" "$t" "$dl"
+  cp "$t/tor/libTor.so" "$out/libtor.so"
+  for f in "$t"/tor/pluggable_transports/*; do
+    [ -x "$f" ] && [ -f "$f" ] || continue
+    cp "$f" "$out/lib$(basename "$f" | tr -d -).so"
+  done
+  cp "$t/tor/pluggable_transports/pt_config.json" "$root/internal/core/torpt/pt_config.json"
+  chmod 755 "$out"/*.so
+  # Anything but the system's own libraries would be missing on the phone.
+  for so in "$out"/libtor.so "$out"/liblyrebird.so; do
+    bad="$("$readelf" -d "$so" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | grep -vxE 'lib(c|m|dl|log|z)\.so' || true)"
+    [ -z "$bad" ] || { echo "$so needs libraries Android does not have: $bad" >&2; exit 1; }
+  done
+}
+tor arm64-v8a android-aarch64
+tor x86_64 android-x86_64
+mkdir -p "$app/src/main/assets/licenses"
+printf 'Tor and its pluggable transports are from the Tor Project (https://www.torproject.org), under the 3-clause BSD license.\n' > "$app/src/main/assets/licenses/tor-LICENSE.txt"
+
 # The engine, UI and tun2socks as one Android library.
 go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target=android/arm64,android/amd64 -androidapi 24 \
