@@ -307,7 +307,7 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 			hint = geo.Hint(n.Name)
 		}
 		key := node.Key64(n.Key())
-		en := pool.Entry{Key: key, Source: uint16(idx), Proto: protoCodes[n.Proto], Engine: uint8(eng)}
+		en := pool.Entry{Key: key, Source: uint16(idx), Proto: protoCodes[n.Proto], Engine: uint8(eng), Style: n.Style()}
 		if len(hint) == 2 {
 			en.Hint = [2]byte{hint[0], hint[1]}
 		}
@@ -449,6 +449,7 @@ func (e *Engine) pickBatch(size int) []candidate {
 	}
 	e.mu.Unlock()
 	scores := e.sourceScores()
+	learned := e.net.snapshot()
 	var out []candidate
 	rand.Shuffle(len(recheck), func(i, j int) { recheck[i], recheck[j] = recheck[j], recheck[i] })
 	maxRecheck := size / 3
@@ -490,6 +491,7 @@ func (e *Engine) pickBatch(size int) []candidate {
 		}
 		sc += float64(min(en.Pop, 10)) * 3
 		sc += protoPrior[en.Proto]
+		sc += learned.bonus(en.Proto, en.Style)
 		if en.Flags&pool.FlagFresh != 0 {
 			sc += 15
 		}
@@ -539,7 +541,7 @@ func (e *Engine) scanPace() (size, chunk int, pause time.Duration) {
 		size = 120
 	}
 	if e.wantConnect && e.conn == nil {
-		return size, chunk, 0
+		return max(size, 300), chunk, 0
 	}
 	ready := 0
 	for _, s := range e.good {
@@ -807,6 +809,7 @@ func chunks(cands []candidate, size int) [][]candidate {
 func (e *Engine) recordOK(c candidate, r tester.Result) {
 	now := time.Now()
 	n := c.node
+	e.net.record(protoCodes[n.Proto], n.Style(), true)
 	e.pool.Update(c.key, func(p *pool.Entry) {
 		p.State = pool.StateOK
 		p.Fails = 0
@@ -847,6 +850,9 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 
 func (e *Engine) recordFail(c candidate, reason string) {
 	now := time.Now()
+	if en, ok := e.pool.Get(c.key); ok {
+		e.net.record(en.Proto, en.Style, false)
+	}
 	e.pool.Update(c.key, func(p *pool.Entry) {
 		p.State = pool.StateDead
 		if p.Fails < 255 {
