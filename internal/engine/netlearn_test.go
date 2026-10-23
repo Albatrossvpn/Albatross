@@ -1,6 +1,11 @@
 package engine
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+)
 
 // A kind of server that keeps passing moves ahead of one that keeps
 // failing, and a handful of tests does not swing the order much.
@@ -55,5 +60,30 @@ func TestNetLearnPerNetwork(t *testing.T) {
 	l.use("10.0.0.1")
 	if b := l.snapshot().bonus(2, reality); b != onA {
 		t.Fatalf("operator A's lesson changed: %.0f, was %.0f", b, onA)
+	}
+}
+
+func TestLearnPortAndLife(t *testing.T) {
+	var l netLearn
+	l.use("net")
+	n443 := &node.Node{Proto: "vless", Server: "a.example", Port: 443, Security: "tls", Transport: "ws"}
+	n2053 := *n443
+	n2053.Port = 2053
+	for range 300 {
+		l.record(1, n443.Style(), false)
+		l.record(1, n2053.Style(), true)
+	}
+	v := l.snapshot()
+	if v.bonus(1, n2053.Style()) <= v.bonus(1, n443.Style()) {
+		t.Fatal("port 2053 should rank above 443 here")
+	}
+	if _, ok := l.life(n443.Style()); ok {
+		t.Fatal("no lifetime known yet")
+	}
+	for _, d := range []time.Duration{10 * time.Second, 20 * time.Minute, 24 * time.Minute, 22 * time.Minute} {
+		l.recordLife(n443.Style(), d)
+	}
+	if d, ok := l.life(n443.Style()); !ok || d < 20*time.Minute || d > 24*time.Minute {
+		t.Fatalf("life = %v %v", d, ok)
 	}
 }
