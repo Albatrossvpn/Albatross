@@ -393,6 +393,10 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		listen = "0.0.0.0"
 	}
 	proxyPort := set.ProxyPort
+	// The old core can take a moment to release the port after it stops.
+	for i := 0; i < 30 && old != nil && !portFree(listen, proxyPort); i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
 	if !portFree(listen, proxyPort) {
 		// Another program (often another VPN client) holds the port.
 		if p, err := core.FreePorts(1); err == nil {
