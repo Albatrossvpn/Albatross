@@ -18,11 +18,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -38,6 +40,7 @@ type entry struct {
 	fresh    bool
 	pop      int
 	endpoint string // "" for UDP-based servers
+	proto    string
 }
 
 type meta struct {
@@ -47,7 +50,17 @@ type meta struct {
 	Found   int            `json:"found"`
 	Dead    int            `json:"dead"`
 	Files   map[string]int `json:"files"`
+	// Schemes counts every link scheme seen in the sources, usable or
+	// not, so protocols the apps cannot run yet show up here.
+	Schemes map[string]int `json:"schemes"`
+	// Protocols counts the usable servers by protocol.
+	Protocols map[string]int `json:"protocols"`
+	// Channels counts the usable servers each Telegram channel posted;
+	// channels that stay at zero can be dropped from the lists.
+	Channels map[string]int `json:"channels"`
 }
+
+var schemeRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]{1,20})://[^\s"'<>]{8,}`)
 
 func main() {
 	out := flag.String("out", "servers", "output directory")
@@ -75,6 +88,8 @@ func main() {
 	var mu sync.Mutex
 	byKey := map[uint64]*entry{}
 	reached := 0
+	schemes, channels := map[string]int{}, map[string]int{}
+	seenLinks := map[uint64]bool{}
 	ctx := context.Background()
 	sem := make(chan struct{}, 32)
 	var wg sync.WaitGroup
@@ -104,17 +119,28 @@ func main() {
 			} else {
 				node.EachText(res.Text, func(n *node.Node) { nodes = append(nodes, n) })
 			}
+			links := schemeRe.FindAllStringSubmatch(res.Text, -1)
 			mu.Lock()
 			defer mu.Unlock()
+			for _, m := range links {
+				h := fnv.New64a()
+				h.Write([]byte(m[0]))
+				if k := h.Sum64(); !seenLinks[k] {
+					seenLinks[k] = true
+					schemes[strings.ToLower(m[1])]++
+				}
+			}
 			reached++
+			usable := 0
 			for _, n := range nodes {
 				if n.Engine() == node.EngineNone {
 					continue
 				}
+				usable++
 				k := node.Key64(n.Key())
 				e := byKey[k]
 				if e == nil {
-					e = &entry{link: n.Link()}
+					e = &entry{link: n.Link(), proto: n.Proto}
 					if !n.UDPBased() {
 						e.endpoint = n.Endpoint()
 					}
@@ -122,6 +148,9 @@ func main() {
 				}
 				e.pop++
 				e.fresh = e.fresh || fresh
+			}
+			if s.Kind == sources.KindTelegram {
+				channels[s.URL] = usable
 			}
 		}(s)
 	}
@@ -153,6 +182,10 @@ func main() {
 		}
 		return list[i].link < list[j].link
 	})
+	protocols := map[string]int{}
+	for _, e := range list {
+		protocols[e.proto]++
+	}
 	var fresh, rest []string
 	for _, e := range list {
 		if e.fresh && len(fresh) < *maxFresh {
@@ -165,7 +198,8 @@ func main() {
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		log.Fatal(err)
 	}
-	m := meta{Updated: time.Now().UTC(), Sources: len(srcs), Reached: reached, Found: len(byKey), Dead: dead, Files: map[string]int{}}
+	m := meta{Updated: time.Now().UTC(), Sources: len(srcs), Reached: reached, Found: len(byKey), Dead: dead, Files: map[string]int{},
+		Schemes: schemes, Protocols: protocols, Channels: channels}
 	write := func(name string, links []string) {
 		if err := os.WriteFile(filepath.Join(*out, name), []byte(strings.Join(links, "\n")+"\n"), 0o644); err != nil {
 			log.Fatal(err)
