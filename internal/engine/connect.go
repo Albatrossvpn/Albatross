@@ -981,11 +981,13 @@ func (e *Engine) connInfo() *ConnInfo {
 
 // LANNets are the local network's addresses, which never go through a
 // server: private, link-local, multicast (mDNS, SSDP) and broadcast. The
-// tunnel's own 172.19.0.0/16 is left out of 172.16.0.0/12.
+// tunnel's own addresses stay inside: 172.19.0.0/16 is left out of
+// 172.16.0.0/12, and IPv6 unique-local (fc00::/7) holds the tunnel's
+// fdfe:dcba:9876::/126, which Android refuses to route around.
 var LANNets = []string{
 	"10.0.0.0/8", "172.16.0.0/15", "172.18.0.0/16", "172.20.0.0/14", "172.24.0.0/13",
 	"192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32",
-	"fe80::/10", "fc00::/7", "ff00::/8",
+	"fe80::/10", "ff00::/8",
 }
 
 // stickyDomains are sites that sign people out, or ask them to prove who
