@@ -222,7 +222,7 @@ jobs:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Albatross-folder
           path: dist/Albatross
@@ -322,11 +322,11 @@ jobs:
     needs: [build, installer, android]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Albatross-portable-${{ needs.build.outputs.version }}
           path: dist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Albatross-android-${{ needs.build.outputs.version }}
           path: dist
