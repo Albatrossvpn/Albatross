@@ -30,7 +30,9 @@ func (p TorPaths) loadPTConfig() *ptConfig {
 	return &c
 }
 
-var pluginLineRe = regexp.MustCompile(`^ClientTransportPlugin\s+(\S+)\s+exec\s+\$\{pt_path\}(\S+?)\$\{pt_ext\}(.*)$`)
+// Matches e.g. "ClientTransportPlugin snowflake exec ${pt_path}lyrebird.exe";
+// some releases write the extension as ${pt_ext}.
+var pluginLineRe = regexp.MustCompile(`^ClientTransportPlugin\s+(\S+)\s+exec\s+\$\{pt_path\}(\S+?)(?:\$\{pt_ext\}|\.exe)?(\s.*)?$`)
 
 // transportPlugins returns the ClientTransportPlugin lines for the bundled
 // transports and the set of transport names they provide.

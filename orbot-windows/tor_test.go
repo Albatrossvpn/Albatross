@@ -39,8 +39,9 @@ func fakeBundle(t *testing.T, ptConfig string) TorPaths {
 const samplePTConfig = `{
   "recommendedDefault": "obfs4",
   "pluggableTransports": {
-    "lyrebird": "ClientTransportPlugin meek_lite,obfs2,obfs3,obfs4,scramblesuit,webtunnel,snowflake exec ${pt_path}lyrebird${pt_ext}",
-    "conjure": "ClientTransportPlugin conjure exec ${pt_path}conjure-client${pt_ext} -registerURL https://registration.refraction.network/api"
+    "lyrebird" : "ClientTransportPlugin meek_lite,obfs2,obfs3,obfs4,scramblesuit,webtunnel exec ${pt_path}lyrebird.exe",
+    "snowflake": "ClientTransportPlugin snowflake exec ${pt_path}lyrebird.exe",
+    "conjure" : "ClientTransportPlugin conjure exec ${pt_path}conjure-client${pt_ext} -registerURL https://registration.refraction.network/api"
   },
   "bridges": {
     "snowflake": ["snowflake 192.0.2.9:80 AAAA fingerprint=AAAA url=https://example.invalid/"]
@@ -57,7 +58,8 @@ func TestTorrcUsesPTConfig(t *testing.T) {
 	}
 	lyre := filepath.Join("pluggable_transports", "lyrebird"+exeSuffix())
 	for _, want := range []string{
-		"ClientTransportPlugin meek_lite,obfs2,obfs3,obfs4,scramblesuit,webtunnel,snowflake exec " + lyre + "\n",
+		"ClientTransportPlugin meek_lite,obfs2,obfs3,obfs4,scramblesuit,webtunnel exec " + lyre + "\n",
+		"ClientTransportPlugin snowflake exec " + lyre + "\n",
 		"-registerURL https://registration.refraction.network/api\n",
 		"Bridge snowflake 192.0.2.9:80 AAAA",
 		"UseBridges 1\n",
