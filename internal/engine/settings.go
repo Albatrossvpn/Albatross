@@ -33,6 +33,13 @@ type Settings struct {
 	// servers that fail with fragmentation on, "on" always fragments,
 	// "off" never does.
 	Fragment string `json:"fragment"`
+	// HelpOthers runs a Snowflake proxy, which lets people in censored
+	// countries reach Tor through this computer. It only runs while the
+	// computer is outside Iran on an open network (see help.go).
+	HelpOthers bool `json:"help_others"`
+	// ShareStats shares, anonymously, which kinds of server pass on this
+	// network and starts new networks from what others found (crowd.go).
+	ShareStats bool `json:"share_stats"`
 	// AllowPlain includes servers without transport encryption.
 	AllowPlain bool `json:"allow_plain"`
 	// SecureOnly refuses to send unencrypted protocols (plain HTTP, FTP,

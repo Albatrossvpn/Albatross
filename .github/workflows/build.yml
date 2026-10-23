@@ -59,10 +59,12 @@ jobs:
           tar xzf sb.tgz --strip-components=1
           curl -fsSL --retry 4 -o x.zip "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip"
           unzip -o x.zip xray
+          bash "$GITHUB_WORKSPACE/build/tor.sh" linux-x86_64 /tmp/cores/torbundle
       - name: Test
         env:
           SING_BOX: /tmp/cores/sing-box
           XRAY: /tmp/cores/xray
+          TOR_BUNDLE: /tmp/cores/torbundle
           E2E_UPSTREAM: direct
         run: |
           export E2E_HOST_IP="$(hostname -I | awk '{print $1}')"

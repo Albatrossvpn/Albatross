@@ -250,6 +250,8 @@ func (c *connection) backups(skip map[*member]bool) []*member {
 	}
 	rank := func(m *member) int {
 		switch {
+		case m.soaked < 0:
+			return 3
 		case !m.speedKnown():
 			return 1
 		case m.speed >= usable:
@@ -346,6 +348,7 @@ func (e *Engine) race(ctx context.Context, c *connection, list []*member, timeou
 // and of its backups, and whether the group should be refreshed.
 func (e *Engine) monitor(ctx context.Context, c *connection) {
 	go c.streamTraffic(ctx)
+	go e.soakBackups(ctx, c)
 	if e.acct != nil {
 		go e.meter(ctx, c)
 	}
@@ -434,9 +437,48 @@ func (e *Engine) checkActive(ctx context.Context, c *connection, urgent bool) bo
 		c.mu.Lock()
 		c.healthy, c.delay = true, d
 		c.mu.Unlock()
+		e.rotateEarly(ctx, c, m)
 		return true
 	}
 	return e.failover(ctx, c, m)
+}
+
+// rotateEarly moves new connections to a backup when the server in use is
+// near the age at which filtering usually cuts servers of its style on this
+// network (it marks flows and kills them after a while). Open connections
+// stay where they are.
+func (e *Engine) rotateEarly(ctx context.Context, c *connection, m *member) {
+	life, ok := e.net.life(m.style())
+	if !ok || life > 2*time.Hour {
+		return
+	}
+	c.mu.Lock()
+	age := time.Since(c.switched)
+	c.mu.Unlock()
+	if age < max(stayAtLeast, life*8/10) {
+		return
+	}
+	for _, b := range c.backups(map[*member]bool{m: true}) {
+		c.mu.Lock()
+		good := b.soaked >= 0 && b.country == m.country && b.server != m.server
+		c.mu.Unlock()
+		if !good {
+			continue
+		}
+		if c.use(ctx, b) == nil {
+			e.logf("info", "Server %q has been in use for %s, near the %s servers like it usually last here; new connections now go to %q.",
+				m.server.Name, age.Round(time.Minute), life.Round(time.Minute), b.server.Name)
+		}
+		return
+	}
+}
+
+// style is the wire style of the member's server.
+func (m *member) style() uint8 {
+	if n := m.server.Node(); n != nil {
+		return n.Style()
+	}
+	return 0
 }
 
 // failover moves traffic off a member that stopped answering: at once to a
@@ -444,6 +486,13 @@ func (e *Engine) checkActive(ctx context.Context, c *connection, urgent bool) bo
 // only when the whole group is down to a fresh group in the same country.
 // It reports false once the connection has been replaced.
 func (e *Engine) failover(ctx context.Context, c *connection, dead *member) bool {
+	c.mu.Lock()
+	inUse := time.Since(c.switched)
+	wasActive := c.active == dead
+	c.mu.Unlock()
+	if wasActive {
+		e.net.recordLife(dead.style(), inUse)
+	}
 	tried := map[*member]bool{dead: true}
 	for _, b := range c.backups(tried) {
 		tried[b] = true
@@ -849,6 +898,15 @@ func (e *Engine) speedRound(ctx context.Context, c *connection) {
 		}
 	}
 	c.mu.Lock()
+	if tested > 0 && cur < usable && bestSpeed < usable && time.Since(c.slowNet) > time.Hour {
+		// Every server is slow, so the network itself is (Iran throttles
+		// all encrypted traffic at times). Switching would only drop
+		// connections; say so instead.
+		c.slowNet = time.Now()
+		c.mu.Unlock()
+		e.logf("info", "Every server is slow right now (%s at best), so the network itself is slow; staying on %q.", rate(max(cur, bestSpeed)), active.server.Name)
+		return
+	}
 	better := best != nil && bestSpeed >= 2*cur && bestSpeed-cur >= 200<<10
 	if better {
 		c.slowRuns++

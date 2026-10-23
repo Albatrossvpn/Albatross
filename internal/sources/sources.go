@@ -9,6 +9,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
 	"fmt"
@@ -99,16 +100,28 @@ const CentralBase = "https://raw.githubusercontent.com/cezomagoanlace29861-jpg/v
 // CentralShards is how many all-N.txt files the collector writes.
 const CentralShards = 8
 
+// OwnBuckets is how many parts the collector splits the own servers into.
+const OwnBuckets = 4
+
 // Central returns the collector's lists: fresh.txt first, then the shards.
-func Central() []Source {
+// install is this installation's random number, which picks the parts of
+// the own servers it reads.
+func Central(install uint32) []Source {
 	var out []Source
 	add := func(name string, tier int) {
 		u := CentralBase + name
 		out = append(out, Source{ID: ID(KindSubscription, u), Kind: KindSubscription, URL: u, Tier: tier, Builtin: true, Enabled: true, Central: true})
 	}
 	if ownKey() != nil {
-		add("own.bin", TierPriority)
-		out[len(out)-1].Sealed = true
+		// Each install reads two of the OwnBuckets parts of the project's
+		// own servers, so whoever unpacks one app learns only those, and
+		// which part gets blocked shows which part leaked.
+		a := install % OwnBuckets
+		b := (a + 1 + (install/OwnBuckets)%(OwnBuckets-1)) % OwnBuckets
+		for _, k := range []uint32{a, b} {
+			add(fmt.Sprintf("own-%d.bin", k+1), TierPriority)
+			out[len(out)-1].Sealed = true
+		}
 	}
 	add("fresh.txt", TierPriority)
 	for i := 1; i <= CentralShards; i++ {
@@ -145,8 +158,20 @@ func Seal(key []byte, text string) ([]byte, error) {
 }
 
 // Open decrypts what Seal made with OwnKey, or returns "".
-func Open(data string) string {
-	g, err := gcm(ownKey())
+func Open(data string) string { return OpenWith(ownKey(), data) }
+
+// ShareKey seals the server lists people pass to each other (see
+// engine.ShareCode). Every build of the app has it, so it only keeps the
+// links out of sight and catches a damaged or edited code; it does not
+// stop someone who unpacks the app.
+func ShareKey() []byte {
+	h := sha256.Sum256(append([]byte("albatross share v1:"), ownKey()...))
+	return h[:]
+}
+
+// OpenWith decrypts what Seal made with key, or returns "".
+func OpenWith(key []byte, data string) string {
+	g, err := gcm(key)
 	if err != nil || len(data) < g.NonceSize() {
 		return ""
 	}

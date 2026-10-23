@@ -206,6 +206,22 @@ test("bulk creation gives working accounts; search and delete", async () => {
   assert.ok(stats.users >= 7 && stats.total_bytes > 0);
 });
 
+test("crowd stats: operators appear after three reports; bad reports are refused", async () => {
+  const report = { asn: 58224, proto: [[1, 40, 50]], style: [[10, 5, 30]], hello: [[2, 9, 10]], port: [[1, 0, 20]] };
+  assert.equal((await call("POST", "stats", { body: { ...report, proto: [[1, 60, 50]] } })).status, 400, "ok above n");
+  assert.equal((await call("POST", "stats", { body: { ...report, asn: 0 } })).status, 400);
+  assert.equal((await call("POST", "stats", { body: { ...report, hello: [[99, 1, 1]] } })).status, 400, "code out of range");
+  for (let i = 0; i < 2; i++) assert.equal((await call("POST", "stats", { body: report })).status, 200);
+  assert.equal((await call("GET", "stats")).body.asns["58224"], undefined, "two reports are not enough to publish");
+  assert.equal((await call("POST", "stats", { body: report })).status, 200);
+  const a = (await call("GET", "stats")).body.asns["58224"];
+  assert.deepEqual(a.proto, [[1, 120, 150]]);
+  assert.deepEqual(a.port, [[1, 0, 60]]);
+  const mine = (await call("GET", "stats?asn=self")).body;
+  assert.equal(typeof mine.asn, "number", "the asker learns its own network");
+  if (mine.asn !== 58224) assert.equal(mine.asns["58224"], undefined, "asn=self gives only the asker's network");
+});
+
 test("pages are served; unknown API paths are 404", async () => {
   const home = await fetch(BASE + "/");
   assert.equal(home.status, 200);

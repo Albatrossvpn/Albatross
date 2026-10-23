@@ -995,6 +995,8 @@ func WarpPlus(mode, country string) *Node {
 		n.Name = "Psiphon " + n.WPCountry
 	case "gool":
 		n.Name = "WARP in WARP"
+	case "tor":
+		n.Name = "Tor"
 	default:
 		n.Name = "Cloudflare WARP"
 	}

@@ -197,7 +197,7 @@ func (n *Node) xrayStream() map[string]any {
 		if len(n.ALPN) > 0 {
 			t["alpn"] = n.ALPN
 		}
-		fp := n.Fingerprint
+		fp := n.fp()
 		if fp == "" {
 			fp = "chrome"
 		}
@@ -216,7 +216,7 @@ func (n *Node) xrayStream() map[string]any {
 	case "reality":
 		r := map[string]any{
 			"serverName":  n.serverName(),
-			"fingerprint": n.Fingerprint,
+			"fingerprint": n.fp(),
 			"publicKey":   n.PublicKey,
 			"shortId":     n.ShortID,
 		}

@@ -135,6 +135,7 @@ type Running struct {
 	WarpPlus []*Process
 	Rejected []*node.Node // configs a core refused
 	Failed   []*node.Node // warp-plus methods that could not connect
+	release  func()       // lets go of the shared tor
 }
 
 // Stop stops every core.
@@ -148,6 +149,10 @@ func (r *Running) Stop() {
 	}
 	for _, p := range r.WarpPlus {
 		p.Stop()
+	}
+	if r.release != nil {
+		r.release()
+		r.release = nil
 	}
 }
 
@@ -164,6 +169,11 @@ type Runtime struct {
 	Bin    Binaries
 	Dir    string // where configs are written
 	OnLine func(core, line string)
+	// TorBridges, when set, returns extra bridge lines for tor as a JSON
+	// map of transport to lines.
+	TorBridges func() []byte
+
+	tor torProc
 }
 
 var (
@@ -181,11 +191,14 @@ type ConfigFunc func(s *Set) map[string]any
 func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o BuildOptions, cfg ConfigFunc, probe string) (*Running, error) {
 	var rejected []*node.Node
 	nodes = append([]*node.Node(nil), nodes...)
-	wp, ports, failed, nodes := r.startWarpPlus(ctx, nodes)
+	wp, ports, failed, nodes, release := r.startWarpPlus(ctx, nodes)
 	o.warpPorts = ports
 	stopWP := func() {
 		for _, p := range wp {
 			p.Stop()
+		}
+		if release != nil {
+			release()
 		}
 	}
 	for attempt := 0; attempt < 200; attempt++ {
@@ -251,7 +264,7 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 			stopWP()
 			return nil, err
 		}
-		return &Running{Set: set, SingBox: sb, Xray: xr, WarpPlus: wp, Rejected: rejected, Failed: failed}, nil
+		return &Running{Set: set, SingBox: sb, Xray: xr, WarpPlus: wp, Rejected: rejected, Failed: failed, release: release}, nil
 	}
 	stopWP()
 	return nil, fmt.Errorf("too many rejected servers")
@@ -259,8 +272,9 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 
 // startWarpPlus launches one warp-plus process per warp-plus node, in
 // parallel, and waits for each to open its SOCKS port. warp-plus only
-// listens once its tunnel is up, so this also tests the method.
-func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Process, map[*node.Node]int, []*node.Node, []*node.Node) {
+// listens once its tunnel is up, so this also tests the method. Tor nodes
+// share one tor process instead; release lets go of it.
+func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Process, map[*node.Node]int, []*node.Node, []*node.Node, func()) {
 	var idx []int
 	for i, n := range nodes {
 		if n.Engine() == node.EngineWarpPlus {
@@ -268,17 +282,31 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 		}
 	}
 	if len(idx) == 0 {
-		return nil, nil, nil, nodes
+		return nil, nil, nil, nodes, nil
 	}
 	procs := make([]*Process, len(nodes))
+	torPorts := make([]int, len(nodes))
 	ports, err := FreePorts(len(idx))
-	if err == nil && r.Bin.WarpPlus != "" {
+	if err == nil {
 		var wg sync.WaitGroup
 		for k, i := range idx {
+			n := nodes[i]
+			if n.WPMode == "tor" {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					if port, err := r.acquireTor(ctx); err == nil {
+						torPorts[i] = port
+					}
+				}(i)
+				continue
+			}
+			if r.Bin.WarpPlus == "" {
+				continue
+			}
 			wg.Add(1)
 			go func(i, port int) {
 				defer wg.Done()
-				n := nodes[i]
 				bind := "127.0.0.1:" + strconv.Itoa(port)
 				cache := filepath.Join(r.Dir, "warp-plus", n.WPMode+"-"+strings.ToLower(n.WPCountry))
 				os.MkdirAll(cache, 0o755)
@@ -302,23 +330,38 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 	bound := map[*node.Node]int{}
 	var keep, failed []*node.Node
 	var running []*Process
+	held := 0
 	k := 0
 	for i, n := range nodes {
 		if n.Engine() != node.EngineWarpPlus {
 			keep = append(keep, n)
 			continue
 		}
-		if procs[i] != nil {
+		switch {
+		case torPorts[i] != 0:
+			keep = append(keep, n)
+			bound[n] = torPorts[i]
+			held++
+		case procs[i] != nil:
 			keep = append(keep, n)
 			running = append(running, procs[i])
 			bound[n] = ports[k]
-		} else {
+		default:
 			failed = append(failed, n)
 		}
 		k++
 	}
-	return running, bound, failed, keep
+	var release func()
+	if held > 0 {
+		release = func() {
+			for range held {
+				r.releaseTor()
+			}
+		}
+	}
+	return running, bound, failed, keep, release
 }
+
 func dropIdx(nodes []*node.Node, idx []int, rejected []*node.Node) ([]*node.Node, []*node.Node) {
 	drop := map[int]bool{}
 	for _, i := range idx {
