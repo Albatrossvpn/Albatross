@@ -62,6 +62,7 @@ type connection struct {
 	switched time.Time // last time the member in use changed
 	speedAt  time.Time // last speed round
 	slowRuns int       // speed rounds in a row that found a much faster backup
+	slowNet  time.Time // when the whole network was last found slow
 	errs     []logErr  // recent failed connections, for watchLog
 }
 
