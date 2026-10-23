@@ -197,3 +197,22 @@ func TestRejectsJunk(t *testing.T) {
 		}
 	}
 }
+
+func TestNamesHaveNoPersian(t *testing.T) {
+	for in, want := range map[string]string{
+		"سرور آلمان 🇩🇪 Germany-1": "🇩🇪 Germany-1",
+		"🇺🇸 USA | کانال ما":       "🇺🇸 USA",
+		"Plain-Name":              "Plain-Name",
+	} {
+		if got := cleanName(in); got != want {
+			t.Errorf("cleanName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	n, err := ParseLink("trojan://pw@203.0.113.5:443?security=tls&sni=a.example#%D8%B3%D8%B1%D9%88%D8%B1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Name != "TROJAN 203.0.113.5" {
+		t.Fatalf("a Persian-only name became %q", n.Name)
+	}
+}
