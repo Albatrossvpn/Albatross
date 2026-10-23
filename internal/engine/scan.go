@@ -76,6 +76,10 @@ func (e *Engine) refreshLoop() {
 			e.updateRegime()
 		}
 		e.updateHelp()
+		if time.Since(e.crowdAt) > crowdEvery {
+			e.crowdAt = time.Now()
+			go e.crowdReport(e.ctx)
+		}
 		e.mu.Lock()
 		// The WARP methods are their own protocol; a chosen one excludes them.
 		warp, clean := e.settings.Warp && e.settings.Protocol == "", e.settings.CleanIP

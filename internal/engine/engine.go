@@ -68,11 +68,15 @@ type Engine struct {
 	rt   *core.Runtime
 	pool *pool.Pool
 
-	acct     *account.Client // nil when this build has no accounts
-	fetcher  *sources.Fetcher
-	tester   *tester.Tester
-	resolver *antiblock.Resolver
-	cf       *antiblock.Scanner
+	acct *account.Client // nil when this build has no accounts
+	// crowdURLs are the account service's addresses, which also collect
+	// crowd stats (crowd.go); crowdAt is when tests were last reported.
+	crowdURLs []string
+	crowdAt   time.Time
+	fetcher   *sources.Fetcher
+	tester    *tester.Tester
+	resolver  *antiblock.Resolver
+	cf        *antiblock.Scanner
 
 	mu           sync.Mutex
 	settings     Settings
@@ -171,6 +175,7 @@ func New(opt Options) (*Engine, error) {
 	e.fetcher = &sources.Fetcher{Direct: direct, Proxy: e.proxyClient, CacheDir: filepath.Join(e.dir, "cache")}
 	if urls := accountURLs(opt); len(urls) > 0 {
 		e.acct = account.New(urls, account.SessionPath(e.dir), e.anyClient)
+		e.crowdURLs = urls
 	}
 	e.tester = &tester.Tester{Runtime: e.rt}
 	e.resolver = &antiblock.Resolver{Client: e.anyClient}
@@ -383,6 +388,9 @@ func (e *Engine) UpdateSettings(s Settings) error {
 		return ErrNeedAdmin
 	}
 	saveJSON(filepath.Join(e.dir, "settings.json"), e.Settings())
+	if s.ShareStats && !old.ShareStats {
+		go e.crowdLookup(e.ctx)
+	}
 	if old.HelpOthers != s.HelpOthers {
 		go e.updateHelp()
 	}
