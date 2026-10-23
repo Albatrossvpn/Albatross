@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar glyph: the shield of icon.svg in one colour. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <group android:translateX="-3.94" android:translateY="-3.94" android:scaleX="0.0165" android:scaleY="0.0165">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M449,503 L966,322 L546,1286 C482,1196 449,1096 449,990 Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M966,322 L1482,503 L1482,990 C1482,1096 1450,1196 1387,1286 Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M966,683 L1086,990 Q966,950 846,990 Z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M760,1197 Q966,1027 1172,1197 L1258,1435 Q1130,1550 966,1610 Q802,1550 674,1435 Z" />
+    </group>
+</vector>

@@ -1,0 +1,10 @@
+.gradle/
+build/
+local.properties
+app/build/
+app/libs/*.aar
+app/libs/*.jar
+app/src/main/jniLibs/
+*.keystore
+*.jks
+app/src/main/assets/

@@ -1,74 +1,80 @@
-<div dir="rtl">
+# Albatross
 
-# آزادراه VPN
+A VPN client for Windows and Android. Pick a location, press the button, and it connects to the lowest-latency server there. It keeps a group of ready backups in the same location, so if the server in use drops, traffic moves to a backup within a second and the location does not change.
 
-برنامهٔ ویندوزی VPN رایگان که خودش از صدها منبع عمومی سرورهای رایگان را جمع می‌کند، دائم آزمایششان می‌کند و با یک دکمه به **کم‌پینگ‌ترین سرور سالم در هر کشوری که بخواهید** وصل می‌شود.
+## Features
 
-## دانلود و نصب
+- **Locations:** the fastest location overall, or any location with servers available, each shown with its server count and best ping.
+- **Instant failover:** a connection holds a group of servers in one location behind a selector. The server in use is watched continuously, backups are checked in the background, and a drop switches to the best backup without restarting anything.
+- **Protocols:** automatic, or a fixed choice of VLESS, VMess, Trojan, Shadowsocks, Hysteria 2, TUIC, AnyTLS, WireGuard or OpenVPN.
+- **Bypass local sites:** open the sites of one region (China or Iran) directly instead of through the VPN. Besides domain and address lists, names the VPN carries are looked up and added to a list of the region's sites as they are found.
+- **Secure by default:** plain HTTP, FTP, Telnet and unprotected mail ports are refused, because whoever carries them can read them (a setting turns this off). On Android a shortcut opens the system's *Always-on VPN* and *Block connections without VPN* switches.
+- **Accounts:** users sign in with a username and password; each account can have a data allowance, a time allowance, a renewal period and an end date, managed from a website (see [backend/README.md](backend/README.md)).
+- **Ad and tracker blocker, auto-connect, start with the system** (Windows), and whole-device protection on Windows.
+- **Light on the machine:** lists are parsed as a stream, scanning slows down once enough servers are ready, and the window only asks the engine for state while it is visible.
 
-از بخش [Releases](../../releases) یا از خروجی‌های [Actions](../../actions) (artifact با نام `Azadrah-Setup-…`) فایل نصبی را بگیرید و اجرا کنید. **همه پیش‌نیازها داخل همین یک فایل است**: خود برنامه، هسته‌های sing-box و Xray، warp-plus (برای WARP و سایفون)، فهرست سایت‌های ایرانی و فونت‌ها. اگر WebView2 روی ویندوز نباشد، نصب‌کننده خودش نصبش می‌کند. نسخهٔ پرتابل (zip) هم هست که نصب نمی‌خواهد.
+The app shows only what a user needs: how many servers are available, where, and how fast. There is no server list.
 
-نیازمندی: ویندوز ۱۰ یا ۱۱ (۶۴ بیتی).
+## Privacy and security
 
-## استفاده
+What the app guarantees, and what it cannot:
 
-۱. برنامه را باز کنید.
-۲. روی کارت کشور بزنید و کشور را انتخاب کنید (یا «سریع‌ترین کشور»).
-۳. تمام. برنامه به کم‌پینگ‌ترین سرورهای سالم آن کشور وصل می‌شود و اگر سرور کند یا قطع شود، خودکار جابه‌جا می‌شود.
+- Traffic is encrypted from the device to the server, and sites that use HTTPS stay encrypted to the site, so a server cannot read their content.
+- Unencrypted traffic is refused (after the region bypass, which is not carried by a server), so nothing the app carries can be read in plain text by whoever carries it.
+- Name lookups for carried sites go through the connection.
+- The account service receives a username, a password at sign-in, and counts of bytes and seconds. It never receives the sites visited.
+- **Not** guaranteed: a server operator can still see which sites a user connects to and how much data they move. The app says so in its Privacy sheet and does not claim anonymity or "no logs".
+- Account limits are enforced by the app (the servers belong to others), so they stop honest overuse, not someone who rebuilds the client.
 
-## چه چیزهایی دارد
-
-- **همهٔ منابع:** ۱۰۴ فهرست اولویت‌دار (آزمایش‌شده و مخصوص ایران)، ۳۳۸ فهرست عمیق که همهٔ کانفیگ‌های یکتای پیدا‌شده از بین ۵٬۰۶۰ منبع زنده را پوشش می‌دهند (حدود ۶۹۴ هزار کانفیگ یکتا)، ۲۳۷ کانال تلگرام، VPN Gate (اوپن‌وی‌پی‌ان رایگان)، Cloudflare WARP، WARP در WARP و سایفون در ۳۲ کشور. لینک اشتراک، کانال تلگرام یا خود کانفیگ‌ها را هم می‌توانید اضافه کنید.
-- **همهٔ پروتکل‌ها:** VLESS (Reality، Vision، xhttp، رمزنگاری پساکوانتومی)، VMess، Trojan، Shadowsocks (همهٔ رمزها و پلاگین‌ها)، Hysteria 1 و 2 (با obfs و port hopping)، TUIC، AnyTLS، WireGuard، SOCKS، OpenVPN، و فرمت Clash. هر چه sing-box اجرا کند با sing-box و بقیه با Xray.
-- **به‌روزرسانی دائم:** منابع هر ۲۰ دقیقه تا ۴ ساعت دوباره خوانده می‌شوند و سرورها پشت سر هم آزمایش می‌شوند؛ هر آزمایش یک درخواست واقعی از داخل سرور است که پینگ، آی‌پی خروجی و **کشور واقعی خروجی** را می‌دهد.
-- **اولویت با کمترین پینگ:** ۱۲ سرور سریع‌تر کشور انتخابی آماده نگه داشته می‌شوند و همیشه سریع‌ترینشان استفاده می‌شود.
-- **سایت‌های ایرانی بدون VPN:** بیش از ۵۷ هزار دامنه و ۲٬۸۰۰ محدودهٔ آی‌پی ایران مستقیم باز می‌شوند.
-- **عبور از فیلترینگ:** تکه‌تکه کردن TLS (خودکار برای سرورهایی که بدون آن کار نمی‌کنند)، تشخیص DNS مسموم (۱۰.۱۰.۳۴.x) و حل دوباره با DNS-over-HTTPS، پیدا کردن آی‌پی تمیز کلودفلر برای سرورهای پشت CDN، جعل SNI برای اینترنت ملی و لیست سفید، uTLS، ECH، و روش‌های پشتیبان WARP و سایفون.
-- **دو حالت اتصال:** پروکسی سیستم (بدون نیاز به دسترسی مدیر) یا تونل کامل TUN برای همهٔ برنامه‌ها و بازی‌ها.
-- اشتراک پروکسی در شبکهٔ محلی برای گوشی، مسدود کردن تبلیغات، اجرا با ویندوز، اتصال خودکار.
-
-## نکتهٔ امنیتی
-
-سرورها عمومی و رایگان‌اند و گردانندگانشان ناشناس هستند. اطلاعات حساس را فقط روی سایت‌های HTTPS وارد کنید.
-
-</div>
-
----
-
-## English
-
-Azadrah is a Windows VPN client that collects free public servers from hundreds of sources, tests them continuously, and connects to the lowest-latency working server in the country you pick. It is built for networks with heavy censorship (Iran in particular).
-
-### How it works
+## How it works
 
 | Part | Package |
 |---|---|
 | Share-link and Clash parsing, sing-box/Xray outbound generation | `internal/node` |
-| Source lists, GitHub CDN mirrors, Telegram previews, VPN Gate, ETag cache | `internal/sources` |
+| Server lists, GitHub CDN mirrors, VPN Gate, ETag cache | `internal/sources` |
 | Disk-backed candidate pool (hundreds of thousands of servers in tens of MB) | `internal/pool` |
 | Runs sing-box with Xray and warp-plus sidecars; drops configs a core rejects | `internal/core` |
 | TCP probe plus a real HTTPS request through each server (delay, exit IP, exit country) | `internal/tester` |
-| DNS unpoisoning over DoH, Cloudflare clean-IP scanner, IP pinning | `internal/antiblock` |
-| Scheduler, connect (sing-box `urltest` group), health checks and failover | `internal/engine` |
-| Local API and the embedded Persian UI | `internal/ui` |
+| DNS unpoisoning over DoH, edge-address scanner, IP pinning | `internal/antiblock` |
+| Scheduler, connect, same-location failover, speed checks, local-site learning, update check | `internal/engine` |
+| Local API and the embedded page; it only receives the public view of the state | `internal/ui` |
+| Account session, usage reporting, limits | `internal/account`, `internal/engine/account.go` |
 | System proxy, elevation, autostart, single instance | `internal/platform` |
+| Account service and website (Cloudflare Worker + D1) | `backend/` |
+| Android bridge (gomobile): VpnService hooks and tun2socks into the local proxy | `mobile`, `android/` |
 
-Every server runs through sing-box. Servers only Xray supports (xhttp, mKCP, VLESS post-quantum encryption, ECH, pinned certificates) are served by an Xray sidecar on a local SOCKS port that sing-box connects to, and warp-plus methods (WARP, WARP in WARP, Psiphon) work the same way.
+Every server runs through sing-box. Servers only Xray supports are served by an Xray sidecar on a local SOCKS port that sing-box connects to, and warp-plus methods work the same way.
 
-### Build
+## Build
 
 ```sh
 go test ./...
-VERSION=0.1.0 bash build/package.sh      # dist/Azadrah + portable zip (needs curl, unzip, zip)
+VERSION=0.1.0 bash build/package.sh      # dist/Albatross + portable zip (needs curl, unzip, zip)
 iscc /DAppVersion=0.1.0 build/windows/installer.iss   # on Windows, needs Inno Setup 6
 ```
 
-CI (`.github/workflows/build.yml`) runs the tests including end-to-end runs against real local servers, builds the app, bundles the cores, smoke-tests it on Windows, builds and installs the installer, and publishes a release for `v*` tags.
+Android (needs Go, Java 17 and an Android SDK with the NDK):
+
+```sh
+ANDROID_HOME=/path/to/sdk VERSION=0.1.0 bash build/android/build.sh   # dist/Albatross-0.1.0-android-<abi>.apk
+```
+
+On Android the engine runs in the app process (gomobile) and the cores run as executables shipped as native libraries. Where Windows sets the system proxy, Android starts a `VpnService`; tun2socks carries the tunnel's packets to the local proxy. Set the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` repository secrets so CI signs APKs with one key (otherwise each build is signed with a throwaway debug key and cannot update the previous install).
+
+Builds ask users to sign in only when the account service address is set: `ACCOUNT_URL=https://vpn.example.com bash build/package.sh` (CI reads the `ACCOUNT_URL` repository variable). Without it the app connects without an account.
+
+### Forcing an update
+
+Every copy reads `update.json` from the `main` branch (directly, through GitHub's CDN mirrors, or through its own VPN) at start and every 6 hours, and keeps the last copy so it also holds offline. Raise `min_version` to stop older versions from connecting: they show an "update required" screen with `download_url`. A `latest_version` newer than the running one only shows an "update available" banner. Mirrors cache the file, so a change can take a few hours to reach everyone.
+
+CI (`.github/workflows/build.yml`) runs the tests including end-to-end runs against real local servers, builds the app, bundles the cores, smoke-tests it on Windows, builds and installs the installer, and publishes a release for `v*` tags or for a manual run with a `release` version.
 
 Opt-in validation against real data:
 
 ```sh
-AZADRAH_LINKS=links.txt SING_BOX=/path/sing-box XRAY=/path/xray go test -run RealData ./internal/node
+ALBATROSS_LINKS=links.txt SING_BOX=/path/sing-box XRAY=/path/xray go test -run RealData ./internal/node
 ```
 
-Bundled third-party components keep their own licenses: sing-box (GPL-3.0-or-later), Xray-core (MPL-2.0), warp-plus (MIT), Vazirmatn (OFL-1.1), Twemoji flags (CC-BY 4.0), Iran rule sets by Chocolate4U.
+## Licenses
+
+Bundled third-party components keep their own licenses: sing-box (GPL-3.0-or-later), Xray-core (MPL-2.0), warp-plus (MIT), tun2socks (GPL-3.0), Twemoji flags (CC-BY 4.0), and the site rule sets from SagerNet (sing-geoip, sing-geosite; GPL-3.0-or-later) and Chocolate4U.

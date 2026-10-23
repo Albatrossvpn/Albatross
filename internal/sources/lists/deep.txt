@@ -1,4 +1,4 @@
-# Azadrah VPN source list. One URL per line; lines starting with # are comments.
+# Albatross VPN source list. One URL per line; lines starting with # are comments.
 # Tier 1: the smallest set of public lists that covered every unique config found in Oct 2026 (greedy set cover over 5,060 live sources).
 https://raw.githubusercontent.com/sevcator/5ubscrpt10n/main/protocols/tr.txt
 https://raw.githubusercontent.com/sevcator/5ubscrpt10n/main/protocols/vm.txt

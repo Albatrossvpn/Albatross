@@ -1,4 +1,4 @@
-// Azadrah is a free VPN client that gathers public servers from hundreds
+// Albatross is a free VPN client that gathers public servers from hundreds
 // of sources, keeps testing them, and connects to the fastest one in the
 // country the user picks.
 package main
@@ -24,7 +24,7 @@ import (
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
-const windowTitle = "آزادراه VPN"
+const windowTitle = "Albatross VPN"
 
 func main() {
 	headless := flag.Bool("headless", false, "serve the UI without opening a window")
@@ -53,9 +53,9 @@ func main() {
 
 	sysProxy := &platform.SystemProxy{}
 	var only []sources.Source
-	// AZADRAH_SOURCES replaces the built-in sources (comma separated), for
+	// ALBATROSS_SOURCES replaces the built-in sources (comma separated), for
 	// testing against a private list.
-	for _, s := range strings.Split(os.Getenv("AZADRAH_SOURCES"), ",") {
+	for _, s := range strings.Split(os.Getenv("ALBATROSS_SOURCES"), ",") {
 		if src, ok := sources.User(s); ok {
 			src.Builtin = true
 			only = append(only, src)
@@ -72,7 +72,7 @@ func main() {
 		Autostart: platform.SetAutostart,
 	})
 	if err != nil {
-		platform.Alert(windowTitle, "اجرای برنامه ممکن نشد:\n"+err.Error())
+		platform.Alert(windowTitle, "The app could not start:\n"+err.Error())
 		os.Exit(1)
 	}
 	eng.Start()
@@ -98,7 +98,7 @@ func main() {
 		OpenURL: platform.OpenURL,
 	}, *uiPort)
 	if err != nil {
-		platform.Alert(windowTitle, "رابط کاربری اجرا نشد:\n"+err.Error())
+		platform.Alert(windowTitle, "The window could not open:\n"+err.Error())
 		eng.Close()
 		os.Exit(1)
 	}

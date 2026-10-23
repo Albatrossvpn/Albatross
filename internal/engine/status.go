@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
 )
 
 // Snapshot is everything the main screen shows.
@@ -24,7 +23,10 @@ type Snapshot struct {
 	Version    string        `json:"version"`
 	Cores      CoreInfo      `json:"cores"`
 	WorkingNow int           `json:"working_now"`
+	Mobile     bool          `json:"mobile"` // the Android app: one VPN mode, no admin
+	Update     *UpdateInfo   `json:"update,omitempty"`
 	TotalGood  int           `json:"total_good"`
+	Account    AccountState  `json:"account"`
 }
 
 // ScanInfo is scan progress.
@@ -56,6 +58,7 @@ func (e *Engine) Snapshot() Snapshot {
 	countries := e.Countries()
 	now := time.Now()
 	e.mu.Lock()
+	e.uiSeen = now
 	total, untested, dead := e.poolStats[0], e.poolStats[1], e.poolStats[2]
 	working := 0
 	for _, s := range e.good {
@@ -78,6 +81,8 @@ func (e *Engine) Snapshot() Snapshot {
 		Countries:  countries,
 		Settings:   e.settings,
 		Version:    e.opt.Version,
+		Mobile:     e.opt.Mobile,
+		Update:     e.update,
 		Cores:      CoreInfo{SingBox: e.bin.SingBox != "", Xray: e.bin.Xray != "", WarpPlus: e.bin.WarpPlus != ""},
 		WorkingNow: working,
 		TotalGood:  len(e.good),
@@ -95,6 +100,7 @@ func (e *Engine) Snapshot() Snapshot {
 	snap.Scan.Downloaded = e.fetcher.BytesDownloaded()
 	snap.Admin = e.opt.IsAdmin()
 	snap.Conn = e.connInfo()
+	snap.Account = e.Account()
 	return snap
 }
 
@@ -119,25 +125,6 @@ func (e *Engine) Refresh() {
 	methodsMu.Unlock()
 	e.triggerRefill()
 }
-
-// Import adds servers the user pasted (links, a subscription body, or a
-// Clash profile) and tests them first.
-func (e *Engine) Import(text string) (int, error) {
-	e.mu.Lock()
-	idx, ok := e.srcIndex["__import__"]
-	if !ok {
-		idx = len(e.srcs)
-		e.srcIndex["__import__"] = idx
-		e.srcs = append(e.srcs, importSource)
-		e.srcStats = append(e.srcStats, SourceStat{})
-	}
-	e.mu.Unlock()
-	added := e.ingest(idx, importSource, text, nil)
-	e.poke()
-	return added, nil
-}
-
-var importSource = sources.Source{ID: "__import__", Kind: sources.KindSubscription, URL: "imported", Tier: sources.TierUser}
 
 func randomToken() string {
 	b := make([]byte, 16)

@@ -218,11 +218,22 @@ func (n *Node) sbTLS(o SingBoxOptions) map[string]any {
 	if n.Insecure || (n.Security == "tls" && n.serverName() == "") {
 		t["insecure"] = true
 	}
-	if alpn := n.tcpALPN(); len(alpn) > 0 {
+	alpn := n.tcpALPN()
+	fp := n.Fingerprint
+	if fp == "" && n.Security == "tls" {
+		// Go's own ClientHello is easy for filtering to single out; look
+		// like Chrome, as Xray does by default.
+		fp = "chrome"
+		if len(alpn) == 0 && (n.Transport == "ws" || n.Transport == "httpupgrade") {
+			// Chrome's hello offers h2, which these transports cannot use.
+			alpn = []string{"http/1.1"}
+		}
+	}
+	if len(alpn) > 0 {
 		t["alpn"] = alpn
 	}
-	if n.Fingerprint != "" {
-		t["utls"] = map[string]any{"enabled": true, "fingerprint": n.Fingerprint}
+	if fp != "" {
+		t["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
 	}
 	if o.Spoof != "" && n.Security == "tls" {
 		t["spoof"] = o.Spoof
