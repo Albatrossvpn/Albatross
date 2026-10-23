@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -36,8 +37,10 @@ const (
 	quietFor = 3 * time.Minute
 	// stayAtLeast is how long a member stays in use before it is swapped
 	// for a better one; a member that stops answering is left at once.
-	// Each swap changes the exit address, which can sign users out.
-	stayAtLeast = 3 * time.Minute
+	// Each swap changes the exit address, which can sign users out, and
+	// delays of seconds on filtered networks are noisy enough to make two
+	// servers look faster in turn.
+	stayAtLeast = 20 * time.Minute
 )
 
 // Speed tests: real downloads through one member, made only while traffic
@@ -124,6 +127,15 @@ func (c *connection) test(ctx context.Context, m *member, timeout time.Duration)
 	return r.Delay, err == nil && r.Delay > 0, true
 }
 
+// testTag is test for any outbound or endpoint by tag.
+func (c *connection) testTag(ctx context.Context, tag string, timeout time.Duration) (delay int, ok bool) {
+	var r struct {
+		Delay int `json:"delay"`
+	}
+	_, err := c.api(ctx, http.MethodGet, "/proxies/"+url.PathEscape(tag)+"/delay?"+delayQuery(timeout), nil, &r, timeout+2*time.Second)
+	return r.Delay, err == nil && r.Delay > 0
+}
+
 // use makes m the member all new connections go through.
 func (c *connection) use(ctx context.Context, m *member) error {
 	if _, err := c.api(ctx, http.MethodPut, "/proxies/proxy", map[string]string{"name": m.tag}, nil, 3*time.Second); err != nil {
@@ -139,6 +151,16 @@ func (c *connection) use(ctx context.Context, m *member) error {
 	}
 	c.mu.Unlock()
 	return nil
+}
+
+// keep makes m the member stickyDomains go through.
+func (c *connection) keep(ctx context.Context, m *member) {
+	if _, err := c.api(ctx, http.MethodPut, "/proxies/sticky", map[string]string{"name": m.tag}, nil, 3*time.Second); err != nil {
+		return
+	}
+	c.mu.Lock()
+	c.sticky = m
+	c.mu.Unlock()
 }
 
 // closeOn closes the connections still going through tag, so apps waiting
@@ -358,6 +380,7 @@ func (e *Engine) race(ctx context.Context, c *connection, list []*member, timeou
 func (e *Engine) monitor(ctx context.Context, c *connection) {
 	go c.streamTraffic(ctx)
 	go e.soakBackups(ctx, c)
+	go e.watchWarpExit(ctx, c)
 	if e.acct != nil {
 		go e.meter(ctx, c)
 	}
@@ -432,20 +455,22 @@ func (e *Engine) checkActive(ctx context.Context, c *connection, urgent bool) bo
 		return false
 	}
 	m := c.activeMember()
-	timeout := 4 * time.Second
+	c.mu.Lock()
+	usual := time.Duration(m.delay) * time.Millisecond
+	c.mu.Unlock()
+	// Servers that answer in seconds are common on filtered networks; a
+	// fixed limit would call them dead on every check.
+	timeout := min(max(4*time.Second, 2*usual+time.Second), 10*time.Second)
 	if urgent {
 		// A server that usually answers in 300 ms and has not in 1.5 s is
-		// not coming back; slow ones get up to 3 s.
-		c.mu.Lock()
-		usual := time.Duration(m.delay) * time.Millisecond
-		c.mu.Unlock()
-		timeout = min(max(3*usual+500*time.Millisecond, 1500*time.Millisecond), 3*time.Second)
+		// not coming back.
+		timeout = min(max(3*usual+500*time.Millisecond, 1500*time.Millisecond), max(3*time.Second, 2*usual))
 	}
 	d, ok, reached := c.test(ctx, m, timeout)
 	if reached && !ok && ctx.Err() == nil {
 		// A second try rules out one lost request, or a busy server
 		// answering a little late.
-		d, ok, reached = c.test(ctx, m, max(timeout, 3*time.Second))
+		d, ok, reached = c.test(ctx, m, min(max(timeout, 3*time.Second, 2*usual+time.Second), 10*time.Second))
 	}
 	if ctx.Err() != nil {
 		return false
@@ -460,40 +485,9 @@ func (e *Engine) checkActive(ctx context.Context, c *connection, urgent bool) bo
 		c.mu.Lock()
 		c.healthy, c.delay = true, d
 		c.mu.Unlock()
-		e.rotateEarly(ctx, c, m)
 		return true
 	}
 	return e.failover(ctx, c, m)
-}
-
-// rotateEarly moves new connections to a backup when the server in use is
-// near the age at which filtering usually cuts servers of its style on this
-// network (it marks flows and kills them after a while). Open connections
-// stay where they are.
-func (e *Engine) rotateEarly(ctx context.Context, c *connection, m *member) {
-	life, ok := e.net.life(m.style())
-	if !ok || life > 2*time.Hour {
-		return
-	}
-	c.mu.Lock()
-	age := time.Since(c.switched)
-	c.mu.Unlock()
-	if age < max(stayAtLeast, life*8/10) {
-		return
-	}
-	for _, b := range c.backups(map[*member]bool{m: true}) {
-		c.mu.Lock()
-		good := b.soaked >= 0 && b.country == m.country && b.server != m.server
-		c.mu.Unlock()
-		if !good {
-			continue
-		}
-		if c.use(ctx, b) == nil {
-			e.logf("info", "Server %q has been in use for %s, near the %s servers like it usually last here; new connections now go to %q.",
-				m.server.Name, age.Round(time.Minute), life.Round(time.Minute), b.server.Name)
-		}
-		return
-	}
 }
 
 // style is the wire style of the member's server.
@@ -594,11 +588,20 @@ func (e *Engine) failover(ctx context.Context, c *connection, dead *member) bool
 func (e *Engine) switched(ctx context.Context, c *connection, from, to *member) {
 	c.mu.Lock()
 	c.healthy = true
+	move := c.sticky == nil || c.sticky == from
 	c.mu.Unlock()
 	if ctx.Err() != nil {
 		return
 	}
+	if move {
+		c.keep(ctx, to)
+	}
 	e.setStatus(StatusConnected, connectedMessage(c))
+	if from == to {
+		// It missed the checks but answered the race: a pause, not a drop.
+		e.logf("info", "Server %q paused and answered again.", from.server.Name)
+		return
+	}
 	e.logf("info", "Server %q dropped; switched at once to ready server %q in the same location.", from.server.Name, to.server.Name)
 	go e.refreshExit(ctx, c)
 }
@@ -642,6 +645,12 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 		c.poke()
 		return true
 	}
+	c.mu.Lock()
+	sticky := c.sticky
+	c.mu.Unlock()
+	if _, ok := live[sticky.tagOr(active)]; !ok {
+		c.keep(ctx, active)
+	}
 	e.mu.Lock()
 	auto := e.settings.AutoSwitch
 	e.mu.Unlock()
@@ -651,11 +660,13 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 	if !c.idle() {
 		// Speed tests take seconds; health checks must not wait for them.
 		go e.speedRound(ctx, c)
-	} else if b := c.faster(); b != nil && c.use(ctx, b) == nil {
+	} else if b := c.faster(); b != nil && c.confirmFaster(b) && c.use(ctx, b) == nil {
 		c.mu.Lock()
 		d := b.delay
 		c.mu.Unlock()
 		e.logf("info", "A faster server was found in this group: %q (%d ms).", b.server.Name, d)
+	} else if b == nil {
+		c.confirmFaster(nil)
 	}
 	// A group younger than refreshAfter is left alone, so a country whose
 	// servers keep failing does not restart the core over and over. The
@@ -667,6 +678,19 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 		return false
 	}
 	return true
+}
+
+// confirmFaster reports whether b was also the faster member at the last
+// sweep: one lucky measurement is not reason enough to change the exit.
+func (c *connection) confirmFaster(b *member) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	same := b != nil && c.fasterSeen == b
+	c.fasterSeen = b
+	if same {
+		c.fasterSeen = nil
+	}
+	return same
 }
 
 // faster returns a live member clearly faster than the one in use. It is
@@ -726,7 +750,8 @@ func (e *Engine) rebuild(c *connection, failed []*member) {
 	e.mu.Unlock()
 	e.stopConn(c, false)
 	go func() {
-		if err := e.connectLoop(gen, c.country, c.home, nil, avoid); err != nil {
+		// A stale loop gave way to a newer connect, whose VPN must stay up.
+		if err := e.connectLoop(gen, c.country, c.home, nil, avoid); err != nil && !errors.Is(err, errStale) {
 			e.mu.Lock()
 			still := e.conn == nil
 			e.mu.Unlock()
@@ -861,6 +886,14 @@ func (c *connection) speed(ctx context.Context, m *member, size int) (float64, e
 	return float64(n) / max(took.Seconds(), 0.05), nil
 }
 
+// noteLine learns the line speed from a result. Hysteria servers are left
+// out: they send at the speed asked for, which comes from this number.
+func (e *Engine) noteLine(m *member, bps float64) {
+	if p := m.server.Proto; p != "hysteria2" && p != "hysteria" {
+		e.net.recordLine(bps)
+	}
+}
+
 // noteSpeed records a speed result on m.
 func (c *connection) noteSpeed(m *member, bps float64) {
 	c.mu.Lock()
@@ -891,6 +924,7 @@ func (e *Engine) speedRound(ctx context.Context, c *connection) {
 		return
 	}
 	c.noteSpeed(active, cur)
+	e.noteLine(active, cur)
 	if cur >= fastEnough {
 		c.mu.Lock()
 		c.slowRuns = 0
@@ -916,6 +950,7 @@ func (e *Engine) speedRound(ctx context.Context, c *connection) {
 			continue
 		}
 		c.noteSpeed(b, s)
+		e.noteLine(b, s)
 		if s > bestSpeed {
 			best, bestSpeed = b, s
 		}
@@ -955,4 +990,12 @@ func rate(bps float64) string {
 		return fmt.Sprintf("%.1f MB/s", bps/(1<<20))
 	}
 	return fmt.Sprintf("%.0f KB/s", bps/(1<<10))
+}
+
+// tagOr is m's tag, or other's when m is nil.
+func (m *member) tagOr(other *member) string {
+	if m == nil {
+		return other.tag + "\x00" // never live, so the caller moves it
+	}
+	return m.tag
 }

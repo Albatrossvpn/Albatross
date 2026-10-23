@@ -72,7 +72,7 @@ func TestProtocolFilter(t *testing.T) {
 			t.Fatalf("connected group holds a %s server", sv.Proto)
 		}
 	}
-	if g := e.pickGroup("", "", nil); len(g) != 3 || g[0].Country != "DE" {
+	if g := e.pickGroup("", "", nil, groupSize); len(g) != 3 || g[0].Country != "DE" {
 		t.Fatalf("group for vless: %d servers", len(g))
 	}
 	s.Protocol = "trojan"
