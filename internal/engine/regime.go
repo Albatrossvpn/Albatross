@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,6 +65,9 @@ type regimeProbe struct {
 	Blocked   bool `json:"blocked"`    // a blocked site opens directly
 	Poisoned  bool `json:"poisoned"`   // the local resolver fakes answers for blocked names
 	UDP       bool `json:"udp"`        // UDP gets out on a port other than 53
+	// Country is where this network's direct traffic leaves from, as
+	// Cloudflare sees it.
+	Country string `json:"country,omitempty"`
 }
 
 func (p regimeProbe) classify() regime {
@@ -91,6 +95,7 @@ var (
 	regimeEdge     = "104.16.132.229:443" // a Cloudflare edge
 	regimeSTUN     = "stun.l.google.com:19302"
 	regimeName     = "www.youtube.com"
+	regimeTrace    = "https://www.cloudflare.com/cdn-cgi/trace"
 )
 
 // regimeEvery is how often the regime is probed; a change of network
@@ -153,6 +158,27 @@ func (e *Engine) probeRegime(ctx context.Context) (regime, regimeProbe) {
 	set(&p.RandomSNI, func() bool { return randomSNIReaches(ctx, regimeEdge) })
 	set(&p.Poisoned, func() bool { return e.poisoned(ctx) })
 	set(&p.UDP, func() bool { return stunAnswers(ctx, regimeSTUN) })
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, regimeTrace, nil)
+		if err != nil {
+			return
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		for _, l := range strings.Split(string(b), "\n") {
+			if c, ok := strings.CutPrefix(l, "loc="); ok && len(c) == 2 {
+				mu.Lock()
+				p.Country = c
+				mu.Unlock()
+			}
+		}
+	}()
 	wg.Wait()
 	return p.classify(), p
 }

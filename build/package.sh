@@ -46,6 +46,10 @@ unzip -q -o "$dl/warp-plus-$WARPPLUS_VERSION.zip" -d "$tmp/wp"
 cp "$(find "$tmp/wp" -iname 'warp-plus*.exe' | head -1)" "$out/core/warp-plus.exe"
 cp "$(find "$tmp/wp" -iname 'LICENSE*' | head -1)" "$out/licenses/warp-plus-LICENSE.txt"
 bash "$root/build/tor.sh" windows-x86_64 "$out/core" "$dl"
+# The Snowflake proxy for "Help others" is its own module: its library
+# needs a newer Go than the app.
+(cd "$root/tools/snowflake" && GOTOOLCHAIN="${SNOWFLAKE_GO:-go1.26.10}" GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+  go build -trimpath -ldflags "-s -w -H windowsgui" -o "$out/core/snowflake-helper.exe" .)
 
 cat > "$out/README.txt" <<TXT
 Albatross VPN $VERSION
@@ -57,6 +61,7 @@ Bundled components (see the licenses folder):
   Xray-core $XRAY_VERSION    https://github.com/XTLS/Xray-core    (MPL-2.0)
   warp-plus $WARPPLUS_VERSION   https://github.com/bepass-org/warp-plus (MIT)
   Tor Expert Bundle         https://www.torproject.org (BSD-3-Clause; transports under their own licenses)
+  Snowflake proxy           https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/snowflake (BSD-3-Clause)
   Twemoji country flags     https://github.com/talkjs/country-flag-emoji-polyfill (CC-BY 4.0 graphics by Twitter)
   Site rule sets            https://github.com/SagerNet/sing-geoip, https://github.com/SagerNet/sing-geosite (GPL-3.0-or-later),
                             https://github.com/Chocolate4U/Iran-sing-box-rules
