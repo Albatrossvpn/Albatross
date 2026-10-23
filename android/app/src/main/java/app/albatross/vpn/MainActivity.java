@@ -92,6 +92,7 @@ public final class MainActivity extends Activity {
             }
         }).start();
 
+        SelfTest.maybeRun(this, getIntent());
         if (saved == null) {
             // Ask now rather than in the middle of the first connection.
             askForVpn();
