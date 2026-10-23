@@ -173,6 +173,7 @@ func New(opt Options) (*Engine, error) {
 	}
 	e.loadServers()
 	e.net.load(e.dir)
+	e.net.use(opt.LocalDNS)
 	e.loadSourceStats()
 	e.buildSources()
 	return e, nil
@@ -253,13 +254,10 @@ func (e *Engine) poke() {
 // direct traffic (see Options.LocalDNS).
 func (e *Engine) SetLocalDNS(addr string) {
 	e.mu.Lock()
-	moved := e.localDNS != "" && e.localDNS != addr
 	e.localDNS = addr
 	e.mu.Unlock()
-	if moved {
-		// Another network filters differently.
-		e.net.fade()
-	}
+	// Another network filters differently.
+	e.net.use(addr)
 }
 
 func (e *Engine) dns() string {

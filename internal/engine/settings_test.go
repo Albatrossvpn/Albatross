@@ -16,7 +16,7 @@ import (
 
 func TestSettingsNormalize(t *testing.T) {
 	s := DefaultSettings()
-	if s.Bypass != "" || s.Protocol != "" || s.AllowPlain {
+	if s.Bypass != "IR" || s.Protocol != "" || s.AllowPlain {
 		t.Fatalf("defaults: %+v", s)
 	}
 	s.Bypass, s.Protocol = "FR", "gopher"
