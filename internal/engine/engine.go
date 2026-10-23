@@ -98,6 +98,7 @@ type Engine struct {
 	regNet       string        // the network reg was probed on
 	notice       string        // a message for the user that outlives status changes
 	install      uint32        // this installation's random number (installNumber)
+	helper       *core.Process // the "Help others" Snowflake proxy (help.go)
 	update       *UpdateInfo   // a newer version, from update.json
 	uiSeen       time.Time     // last time the UI asked for a snapshot
 	countries    []CountryInfo // cached for countryCache
@@ -223,6 +224,7 @@ func (e *Engine) Close() {
 	}
 	e.wg.Wait()
 	e.rt.StopTor()
+	e.stopHelp()
 	e.saveServers()
 	e.saveSourceStats()
 	e.saveStates()
@@ -381,6 +383,9 @@ func (e *Engine) UpdateSettings(s Settings) error {
 		return ErrNeedAdmin
 	}
 	saveJSON(filepath.Join(e.dir, "settings.json"), e.Settings())
+	if old.HelpOthers != s.HelpOthers {
+		go e.updateHelp()
+	}
 	if old.DeepSources != s.DeepSources || len(old.UserSources) != len(s.UserSources) || len(old.DisabledSources) != len(s.DisabledSources) {
 		e.buildSources()
 		e.triggerRefill()

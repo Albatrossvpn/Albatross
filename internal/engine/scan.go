@@ -75,6 +75,7 @@ func (e *Engine) refreshLoop() {
 		if e.regimeDue() {
 			e.updateRegime()
 		}
+		e.updateHelp()
 		e.mu.Lock()
 		// The WARP methods are their own protocol; a chosen one excludes them.
 		warp, clean := e.settings.Warp && e.settings.Protocol == "", e.settings.CleanIP
