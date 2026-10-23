@@ -329,6 +329,9 @@ func (e *Engine) updateRegime() {
 	e.reg, e.regNet = s, netKey
 	e.mu.Unlock()
 	e.saveRegime(s)
+	if r != regimeOffline {
+		e.crowdLookup(e.ctx)
+	}
 	if r != prev.Regime {
 		e.logf("info", "Network check: %s.", regimeText[r])
 	}

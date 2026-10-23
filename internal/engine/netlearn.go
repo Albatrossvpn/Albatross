@@ -37,6 +37,12 @@ type netTable struct {
 	Life [32]lifeRate `json:"life"`
 	All  passRate     `json:"all"`
 	Used time.Time    `json:"used"`
+	// Pend counts tests since the last crowd report (crowd.go); ASN is the
+	// network's operator as the crowd service saw it, and Seeded says the
+	// crowd's numbers were already added to this table.
+	Pend   crowdCounts `json:"pend"`
+	ASN    uint32      `json:"asn,omitempty"`
+	Seeded bool        `json:"seeded,omitempty"`
 }
 
 // lifeRate is a running average of lifetimes in minutes over N deaths.
@@ -86,6 +92,7 @@ func (l *netLearn) use(key string) {
 	}
 	t := *prev
 	t.scale(0.2)
+	t.Pend, t.ASN, t.Seeded = crowdCounts{}, 0, false
 	l.Nets[key] = &t
 	for len(l.Nets) > maxNets {
 		oldest := ""
@@ -134,6 +141,7 @@ func (l *netLearn) recordHello(code int, ok bool) {
 	t := l.table()
 	if code >= 0 && code < len(t.Hello) {
 		t.Hello[code].add(ok)
+		t.Pend.Hello[code].add(ok)
 	}
 }
 
@@ -146,10 +154,13 @@ func (l *netLearn) record(proto, style uint8, ok bool) {
 	add(&t.All)
 	if int(proto) < len(t.Proto) {
 		add(&t.Proto[proto])
+		t.Pend.Proto[proto].add(ok)
 	}
 	add(&t.Style[node.StyleWire(style)])
-	if p := node.StylePort(style); p != 0 {
+	t.Pend.Style[node.StyleWire(style)].add(ok)
+	if p := node.StylePort(style); p != 0 && int(p) < len(t.Port) {
 		add(&t.Port[p])
+		t.Pend.Port[p].add(ok)
 	}
 }
 
