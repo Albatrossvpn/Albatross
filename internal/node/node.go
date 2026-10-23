@@ -79,6 +79,10 @@ type Node struct {
 	VerifyName string `json:"vcn,omitempty"`
 	Fragment   bool   `json:"fragment,omitempty"` // link asked for TLS ClientHello fragmentation
 	FinalMask  string `json:"fm,omitempty"`       // raw Xray finalmask JSON
+	// SplitDownload, for XHTTP behind Cloudflare, is a second edge IP the
+	// download goes through while uploads use the first, so no single
+	// connection carries a whole exchange for filtering to analyse.
+	SplitDownload string `json:"-"`
 
 	Plugin     string `json:"plugin,omitempty"`
 	PluginOpts string `json:"plugin_opts,omitempty"`

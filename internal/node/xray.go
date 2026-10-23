@@ -228,6 +228,9 @@ func (n *Node) xrayStream() map[string]any {
 	default:
 		s["security"] = "none"
 	}
+	if x, ok := s["xhttpSettings"].(map[string]any); ok {
+		n.xhttpTuning(x, s)
+	}
 	if n.FinalMask != "" {
 		var fm map[string]any
 		if json.Unmarshal([]byte(n.FinalMask), &fm) == nil {
@@ -235,6 +238,44 @@ func (n *Node) xrayStream() map[string]any {
 		}
 	}
 	return s
+}
+
+// xhttpTuning adds what the link leaves out: connection rotation, and a
+// separate download path when SplitDownload is set.
+func (n *Node) xhttpTuning(x, stream map[string]any) {
+	extra, _ := x["extra"].(map[string]any)
+	has := func(k string) bool {
+		_, a := x[k]
+		_, b := extra[k]
+		return a || b
+	}
+	if !has("xmux") {
+		// Spread the traffic over many short-lived connections: filtering
+		// that slows or cuts a long connection, or Cloudflare edges that
+		// stall one after a few packets, meet a fresh one every few dozen
+		// requests or minutes.
+		x["xmux"] = map[string]any{
+			"maxConcurrency":   "8-16",
+			"cMaxReuseTimes":   "16-32",
+			"hMaxRequestTimes": "80-120",
+			"hMaxReusableSecs": "60-120",
+		}
+	}
+	if n.SplitDownload == "" || n.Mode == "stream-one" || has("downloadSettings") {
+		return
+	}
+	down := map[string]any{"address": n.SplitDownload, "port": n.Port, "network": "xhttp", "security": stream["security"]}
+	if t, ok := stream["tlsSettings"]; ok {
+		down["tlsSettings"] = t
+	}
+	ds := map[string]any{}
+	for _, k := range []string{"path", "host"} {
+		if v, ok := x[k]; ok {
+			ds[k] = v
+		}
+	}
+	down["xhttpSettings"] = ds
+	x["downloadSettings"] = down
 }
 
 func itoa(i int) string {
