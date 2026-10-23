@@ -16,7 +16,7 @@ for i in $(seq 1 60); do
 done
 if [ $ok -eq 0 ]; then
   summary "Android emulator: connected through the VPN."
-  adb shell ip -o link | grep tun || true
+  adb shell ip -o link | grep -E ': tun[0-9]+:' || true
   # SelfTest disconnects 15 s after connecting; the tunnel must then go
   # (a core that inherited it used to keep the VPN up).
   for i in $(seq 1 12); do
@@ -24,9 +24,9 @@ if [ $ok -eq 0 ]; then
     if adb logcat -d -s AlbatrossTest:I | grep -q 'disconnect: 200'; then break; fi
   done
   sleep 10
-  if adb shell ip -o link | grep -q tun; then
+  if adb shell ip -o link | grep -qE ': tun[0-9]+:'; then
     summary "Android emulator: FAIL, the VPN is still up after Disconnect." >&2
-    adb shell ip -o link | grep tun
+    adb shell ip -o link | grep -E ': tun[0-9]+:'
     ok=1
   else
     summary "Android emulator: Disconnect took the VPN down."
