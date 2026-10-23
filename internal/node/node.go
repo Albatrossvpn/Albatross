@@ -66,7 +66,10 @@ type Node struct {
 	Fingerprint string   `json:"fp,omitempty"`
 	// HelloFP is the browser ClientHello the app picked for a server whose
 	// link names none; it is not part of the link.
-	HelloFP    string `json:"-"`
+	HelloFP string `json:"-"`
+	// TryECH asks the core to look up the server's ECH config over DNS
+	// (Cloudflare publishes one for most sites) when the link has none.
+	TryECH     bool   `json:"-"`
 	Insecure   bool   `json:"insecure,omitempty"`
 	PublicKey  string `json:"pbk,omitempty"`
 	ShortID    string `json:"sid,omitempty"`
