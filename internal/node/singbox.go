@@ -219,13 +219,16 @@ func (n *Node) sbTLS(o SingBoxOptions) map[string]any {
 		t["insecure"] = true
 	}
 	alpn := n.tcpALPN()
-	fp := n.Fingerprint
-	if fp == "" && n.Security == "tls" {
+	fp := n.fp()
+	if n.Fingerprint == "" && n.Security == "tls" {
 		// Go's own ClientHello is easy for filtering to single out; look
-		// like Chrome, as Xray does by default.
-		fp = "chrome"
+		// like a browser (Chrome unless the app picked another), as Xray
+		// does by default.
+		if fp == "" {
+			fp = "chrome"
+		}
 		if len(alpn) == 0 && (n.Transport == "ws" || n.Transport == "httpupgrade") {
-			// Chrome's hello offers h2, which these transports cannot use.
+			// A browser's hello offers h2, which these transports cannot use.
 			alpn = []string{"http/1.1"}
 		}
 	}
@@ -240,7 +243,7 @@ func (n *Node) sbTLS(o SingBoxOptions) map[string]any {
 	}
 	if n.Security == "reality" {
 		t["reality"] = map[string]any{"enabled": true, "public_key": n.PublicKey, "short_id": n.ShortID}
-		if n.Fingerprint == "" {
+		if fp == "" {
 			t["utls"] = map[string]any{"enabled": true, "fingerprint": "chrome"}
 		}
 	} else {
