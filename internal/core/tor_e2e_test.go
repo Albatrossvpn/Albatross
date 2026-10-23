@@ -29,10 +29,15 @@ func TestTorBootstrap(t *testing.T) {
 	r := &Runtime{Bin: Binaries{Tor: filepath.Join(dir, "tor", "tor"+exe)}, Dir: t.TempDir(),
 		OnLine: func(_, l string) { lines = append(lines, l) }}
 	defer r.StopTor()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	// Bridges on the live Tor network are sometimes slow; like the app, a
+	// slow bootstrap carries on into the next attempt.
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	start := time.Now()
 	port, err := r.acquireTor(ctx)
+	for err != nil && ctx.Err() == nil && time.Since(start) < 5*time.Minute {
+		port, err = r.acquireTor(ctx)
+	}
 	if err != nil {
 		for _, l := range lines {
 			t.Log(l)
@@ -42,7 +47,12 @@ func TestTorBootstrap(t *testing.T) {
 	t.Logf("bootstrapped in %v", time.Since(start).Round(time.Second))
 	proxy, _ := url.Parse("socks5://127.0.0.1:" + strconv.Itoa(port))
 	c := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}, Timeout: time.Minute}
+	// A fresh circuit's first exit sometimes drops the request; Tor
+	// builds another for the next one.
 	resp, err := c.Get("https://check.torproject.org/api/ip")
+	for i := 0; err != nil && i < 3; i++ {
+		resp, err = c.Get("https://check.torproject.org/api/ip")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

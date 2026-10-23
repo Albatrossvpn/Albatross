@@ -5,7 +5,9 @@ name: Collect servers
 # instead of hundreds of sources (see cmd/collect).
 on:
   schedule:
-    - cron: "17 */2 * * *"
+    # Hourly, off the top of the hour: GitHub skips scheduled runs when it
+    # is busy, and a list hours old sends phones to servers that are gone.
+    - cron: "41 * * * *"
   # A change to the collector or its lists publishes at once instead of
   # waiting for the schedule, which GitHub may also delay or skip.
   push:
@@ -29,11 +31,29 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: servers
+          path: prev
+      - name: Cores
+        env:
+          SINGBOX_VERSION: "1.14.3"
+          XRAY_VERSION: "26.9.30"
+        run: |
+          mkdir -p /tmp/cores && cd /tmp/cores
+          curl -fsSL --retry 4 -o sb.tgz "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-amd64.tar.gz"
+          tar xzf sb.tgz --strip-components=1
+          curl -fsSL --retry 4 -o x.zip "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip"
+          unzip -o x.zip xray
       - name: Collect
         env:
+          # Servers in fresh.txt are connected through for real (cmd/collect/realtest.go).
+          SING_BOX: /tmp/cores/sing-box
+          XRAY: /tmp/cores/xray
           OWN_SERVERS: ${{ secrets.OWN_SERVERS }}
           OWN_KEY: ${{ secrets.OWN_KEY }}
-        run: go run ./cmd/collect -out "$RUNNER_TEMP/servers"
+        run: go run ./cmd/collect -prev prev -out "$RUNNER_TEMP/servers"
       - name: Publish
         working-directory: ${{ runner.temp }}/servers
         run: |

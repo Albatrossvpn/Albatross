@@ -51,6 +51,7 @@ type Tester struct {
 	Fragment       bool
 	FragmentFor    func(*node.Node) bool
 	Spoof          string
+	LineMbps       int
 	// LocalDNS resolves server names where the core cannot ask the system
 	// (Android); empty means the system's resolver.
 	LocalDNS string
@@ -147,7 +148,7 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 	}
 	port := ports[0]
 	pass := randomHex(8)
-	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof}
+	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof, LineMbps: t.LineMbps}
 	run, err := t.Runtime.Run(ctx, name, nodes, opts, func(s *core.Set) map[string]any {
 		return testConfig(s, port, pass, t.LocalDNS, t.Mobile)
 	}, "127.0.0.1:"+strconv.Itoa(port))
