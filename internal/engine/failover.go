@@ -631,7 +631,7 @@ func (e *Engine) rebuild(c *connection, failed []*member) {
 			still := e.conn == nil
 			e.mu.Unlock()
 			if still {
-				e.opt.SysProxy.Clear()
+				e.clearProxy()
 			}
 		}
 	}()
