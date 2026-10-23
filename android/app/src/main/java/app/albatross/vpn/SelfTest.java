@@ -31,10 +31,17 @@ final class SelfTest {
                 String token = url.substring(hash + 1);
                 Log.i(TAG, "connect: " + call(base, token, "POST", "/api/connect", "{}"));
                 int shown = 0;
+                boolean disconnected = false;
                 for (int i = 0; i < 120; i++) {
                     Thread.sleep(5000);
                     String state = call(base, token, "GET", "/api/state", null);
                     Log.i(TAG, "state: " + state.substring(0, Math.min(state.length(), 600)));
+                    if (!disconnected && state.contains("\"status\":\"connected\"")) {
+                        // selftest.sh checks the tunnel is gone after this.
+                        Thread.sleep(15000);
+                        Log.i(TAG, "disconnect: " + call(base, token, "POST", "/api/disconnect", "{}"));
+                        disconnected = true;
+                    }
                     String logs = call(base, token, "GET", "/api/logs", null);
                     if (logs.length() > shown) {
                         Log.i(TAG, "logs: " + logs.substring(shown, Math.min(logs.length(), shown + 3000)));

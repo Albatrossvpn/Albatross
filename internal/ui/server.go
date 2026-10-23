@@ -80,6 +80,7 @@ func (s *Server) routes() http.Handler {
 		"POST /api/settings":     s.settings,
 		"POST /api/admin":        s.admin,
 		"POST /api/open":         s.open,
+		"POST /api/update":       s.getUpdate,
 		"POST /api/vpn-settings": s.vpnSettings,
 		"POST /api/quit":         s.quit,
 		"POST /api/share":        s.share,
@@ -152,6 +153,8 @@ func fail(w http.ResponseWriter, err error) {
 		code = "login_required"
 	case errors.As(err, &limit):
 		code = "limit"
+	case errors.Is(err, engine.ErrNoInAppUpdate):
+		code = "no_in_app"
 	}
 	w.WriteHeader(http.StatusBadRequest)
 	writeJSON(w, apiError{Error: err.Error(), Code: code})
@@ -206,6 +209,16 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	s.eng.Logout()
+	ok(w)
+}
+
+// getUpdate starts downloading the new version; the state reports progress.
+func (s *Server) getUpdate(w http.ResponseWriter, r *http.Request) {
+	if snap := s.eng.Snapshot(); snap.Update == nil || !snap.Update.InApp {
+		fail(w, engine.ErrNoInAppUpdate)
+		return
+	}
+	go s.eng.GetUpdate()
 	ok(w)
 }
 

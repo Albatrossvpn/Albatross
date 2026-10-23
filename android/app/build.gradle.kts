@@ -12,12 +12,12 @@ val appVersionCode = Regex("""^(\d+)\.(\d+)\.(\d+)""").find(appVersion)?.destruc
 
 android {
     namespace = "app.albatross.vpn"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "app.albatross.vpn"
         minSdk = 24
-        targetSdk = 35
+        targetSdk = 36
         versionCode = maxOf(appVersionCode, 1)
         versionName = appVersion
     }
@@ -32,6 +32,8 @@ android {
                 storePassword = System.getenv("ALBATROSS_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("ALBATROSS_KEY_ALIAS")
                 keyPassword = System.getenv("ALBATROSS_KEY_PASSWORD")
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
