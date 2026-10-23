@@ -4,3 +4,4 @@
 *.syso
 /core/
 /collect
+/tools/snowflake/snowflake
