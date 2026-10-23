@@ -20,6 +20,8 @@ import (
 var bundledRules embed.FS
 
 var ruleSets = map[string]string{
+	"geoip-cn.srs":    "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+	"geosite-cn.srs":  "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
 	"geoip-ir.srs":    "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geoip-ir.srs",
 	"geosite-ir.srs":  "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geosite-ir.srs",
 	"geosite-ads.srs": "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geosite-category-ads-all.srs",
@@ -43,7 +45,20 @@ func installRules(dir string) error {
 			return err
 		}
 	}
+	// The core refuses to start without the learned list, even empty.
+	for _, r := range regions {
+		if path := r.learnedFile(dir); !fileExists(path) {
+			if err := writeLearned(path, nil); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // updateRules downloads fresh rule sets if the local ones are a day old.

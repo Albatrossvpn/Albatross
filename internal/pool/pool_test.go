@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestAddLinkCompact(t *testing.T) {
@@ -27,11 +28,12 @@ func TestAddLinkCompact(t *testing.T) {
 		t.Fatalf("Link(42) = %q", l)
 	}
 	p.Update(7, func(e *Entry) { e.State = StateOK })
-	for c := 0; c < 6; c++ {
-		p.NextCycle()
+	// Three days pass without any source listing them again.
+	for i := range p.entries {
+		p.entries[i].SeenAt -= 3 * 24 * 60
 	}
 	p.Add(Entry{Key: 9}, "link-8", nil)
-	if err := p.Compact(6); err != nil {
+	if err := p.Compact(48 * time.Hour); err != nil {
 		t.Fatal(err)
 	}
 	if p.Len() != 2 {

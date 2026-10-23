@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The shield of icon.svg, centred in the 72dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="7.55" android:translateY="7.5" android:scaleX="0.0481" android:scaleY="0.0481">
+        <path android:pathData="M449,503 L966,322 L546,1286 C482,1196 449,1096 449,990 Z">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="560" android:startY="1500" android:endX="1470" android:endY="520"><item android:offset="0" android:color="#0B1B55" /><item android:offset="0.5" android:color="#1F31B8" /><item android:offset="1" android:color="#6F2FF5" /></gradient></aapt:attr>
+        </path>
+        <path android:pathData="M966,322 L1482,503 L1482,990 C1482,1096 1450,1196 1387,1286 Z">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="560" android:startY="1500" android:endX="1470" android:endY="520"><item android:offset="0" android:color="#0B1B55" /><item android:offset="0.5" android:color="#1F31B8" /><item android:offset="1" android:color="#6F2FF5" /></gradient></aapt:attr>
+        </path>
+        <path android:pathData="M966,683 L1086,990 Q966,950 846,990 Z">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="560" android:startY="1500" android:endX="1470" android:endY="520"><item android:offset="0" android:color="#0B1B55" /><item android:offset="0.5" android:color="#1F31B8" /><item android:offset="1" android:color="#6F2FF5" /></gradient></aapt:attr>
+        </path>
+        <path android:pathData="M760,1197 Q966,1027 1172,1197 L1258,1435 Q1130,1550 966,1610 Q802,1550 674,1435 Z">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="560" android:startY="1500" android:endX="1470" android:endY="520"><item android:offset="0" android:color="#0B1B55" /><item android:offset="0.5" android:color="#1F31B8" /><item android:offset="1" android:color="#6F2FF5" /></gradient></aapt:attr>
+        </path>
+    </group>
+</vector>

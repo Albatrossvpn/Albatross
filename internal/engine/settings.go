@@ -13,16 +13,21 @@ type Settings struct {
 	// Mode is "proxy" (system proxy, no admin needed) or "tun" (every app,
 	// needs administrator rights).
 	Mode string `json:"mode"`
-	// BypassIran sends Iranian sites directly instead of through the VPN.
-	BypassIran bool `json:"bypass_iran"`
+	// Bypass is the code of a region (see regions.go) whose own sites are
+	// opened directly instead of through the VPN; "" turns it off.
+	Bypass string `json:"bypass"`
+	// Protocol limits connections to one protocol ("" = automatic); see
+	// ProtocolChoices.
+	Protocol string `json:"protocol"`
 	// BlockAds rejects connections to known ad and tracker domains.
 	BlockAds bool `json:"block_ads"`
 	// ProxyPort is the local HTTP+SOCKS port.
 	ProxyPort int `json:"proxy_port"`
 	// AllowLAN lets other devices on the network use the proxy port.
 	AllowLAN bool `json:"allow_lan"`
-	// AutoSwitch moves to faster servers in the chosen country while
-	// connected, and away from failing ones.
+	// AutoSwitch moves to clearly faster servers in the same country while
+	// connected and refreshes backups that stopped working. Moving off a
+	// server that failed happens either way.
 	AutoSwitch bool `json:"auto_switch"`
 	// Fragment controls TLS ClientHello fragmentation: "auto" retries
 	// servers that fail with fragmentation on, "on" always fragments,
@@ -30,12 +35,20 @@ type Settings struct {
 	Fragment string `json:"fragment"`
 	// AllowPlain includes servers without transport encryption.
 	AllowPlain bool `json:"allow_plain"`
+	// SecureOnly refuses to send unencrypted protocols (plain HTTP, FTP,
+	// telnet, mail without TLS) through the servers. Whoever runs a server
+	// can read such traffic and change it; HTTPS stays encrypted from the
+	// device to the site, whatever the server does.
+	SecureOnly bool `json:"secure_only"`
 	// Country is the last chosen country ("" means the fastest anywhere).
 	Country string `json:"country"`
+	// Connected says the user left the VPN on: the last thing they did was
+	// connect, not disconnect. Android's Always-on VPN resumes it.
+	Connected bool `json:"connected,omitempty"`
 	// AutoConnect connects when the app starts.
 	AutoConnect bool `json:"auto_connect"`
-	// StartWithWindows launches the app at login.
-	StartWithWindows bool `json:"start_with_windows"`
+	// StartWithSystem launches the app at login.
+	StartWithSystem bool `json:"start_with_system"`
 	// Intensity is "low", "normal" or "max" scanning effort.
 	Intensity string `json:"intensity"`
 	// DeepSources also downloads the large lists needed for full coverage.
@@ -54,15 +67,35 @@ type Settings struct {
 	CleanIP bool `json:"clean_ip"`
 }
 
-// DefaultSettings favor reaching the internet over everything else.
+// ProtocolChoice is a connection protocol the user can pick.
+type ProtocolChoice struct {
+	Value string `json:"value"` // Settings.Protocol; "" is automatic
+	Label string `json:"label"`
+}
+
+// ProtocolChoices are the protocols offered, automatic first. They match
+// Server.Proto.
+func ProtocolChoices() []ProtocolChoice {
+	return []ProtocolChoice{
+		{"", "Automatic"}, {"vless", "VLESS"}, {"vmess", "VMess"}, {"trojan", "Trojan"},
+		{"shadowsocks", "Shadowsocks"}, {"hysteria2", "Hysteria 2"}, {"tuic", "TUIC"},
+		{"anytls", "AnyTLS"}, {"wireguard", "WireGuard"}, {"openvpn", "OpenVPN"},
+	}
+}
+
+// DefaultSettings favor reaching the internet while keeping traffic
+// encrypted: servers without transport encryption are left out.
 func DefaultSettings() Settings {
 	return Settings{
-		Mode:        "proxy",
-		BypassIran:  true,
+		Mode: "proxy",
+		// Iranian sites open directly: faster, it saves the servers'
+		// bandwidth, and many of them refuse foreign visitors.
+		Bypass:      "IR",
 		ProxyPort:   10808,
 		AutoSwitch:  true,
 		Fragment:    "auto",
-		AllowPlain:  true,
+		AllowPlain:  false,
+		SecureOnly:  true,
 		Intensity:   "normal",
 		DeepSources: true,
 		Warp:        true,
@@ -70,11 +103,21 @@ func DefaultSettings() Settings {
 	}
 }
 
-func loadSettings(dir string) Settings {
+func loadSettings(dir string, mobile bool) Settings {
 	s := DefaultSettings()
+	if mobile {
+		// On a phone, mobile data and battery matter more than covering
+		// every list.
+		s.DeepSources = false
+		s.Intensity = "low"
+	}
 	b, err := os.ReadFile(filepath.Join(dir, "settings.json"))
 	if err == nil {
 		json.Unmarshal(b, &s)
+	}
+	if mobile {
+		// "proxy" is the device-wide VPN there; there is no other mode.
+		s.Mode = "proxy"
 	}
 	if s.ProxyPort <= 0 || s.ProxyPort > 65535 {
 		s.ProxyPort = 10808
@@ -94,6 +137,7 @@ func loadSettings(dir string) Settings {
 	default:
 		s.Intensity = "normal"
 	}
+	s.normalize()
 	return s
 }
 
@@ -107,4 +151,18 @@ func saveJSON(path string, v any) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// normalize drops values that are not choices.
+func (s *Settings) normalize() {
+	if _, ok := findRegion(s.Bypass); !ok {
+		s.Bypass = ""
+	}
+	known := false
+	for _, c := range ProtocolChoices() {
+		known = known || c.Value == s.Protocol
+	}
+	if !known {
+		s.Protocol = ""
+	}
 }

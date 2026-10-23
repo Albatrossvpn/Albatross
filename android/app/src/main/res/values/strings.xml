@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Albatross</string>
+    <string name="channel_name">Connection status</string>
+    <string name="connected">Connected</string>
+    <string name="connected_text">All apps on this device are using Albatross</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="start_failed">The app could not start</string>
+    <string name="vpn_denied">Albatross cannot connect without VPN permission.</string>
+</resources>

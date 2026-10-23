@@ -38,6 +38,8 @@ type BuildOptions struct {
 	FragmentFor func(*node.Node) bool
 	// Spoof is the allowed SNI for forged ClientHellos ("" = off).
 	Spoof string
+	// OnLine, when set, receives every line the cores of this run print.
+	OnLine func(core, line string)
 	// warpPorts maps warp-plus nodes to the SOCKS port their process
 	// listens on; nodes without a port are left out.
 	warpPorts map[*node.Node]int
@@ -67,6 +69,13 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 			s.Endpoints = append(s.Endpoints, obj)
 			s.epIdx = append(s.epIdx, i)
 		} else {
+			if !n.UDPBased() {
+				// Mobile networks drop idle TCP connections after a minute or
+				// two; keepalives this often keep quiet connections (chats,
+				// notifications) open.
+				obj["tcp_keep_alive"] = "30s"
+				obj["tcp_keep_alive_interval"] = "15s"
+			}
 			s.Outbounds = append(s.Outbounds, obj)
 			s.outIdx = append(s.outIdx, i)
 		}
@@ -200,7 +209,7 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 				nodes, rejected = dropIdx(nodes, set.xrayIdx, rejected)
 				continue
 			}
-			xr, err = r.start(ctx, "xray", name, set.Xray, set.XrayProbe, func(path string) []string {
+			xr, err = r.start(ctx, "xray", name, set.Xray, set.XrayProbe, o.OnLine, func(path string) []string {
 				return []string{"run", "-c", path}
 			})
 			if err != nil {
@@ -217,7 +226,7 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 				return nil, err
 			}
 		}
-		sb, err := r.start(ctx, "sing-box", name, cfg(set), probe, func(path string) []string {
+		sb, err := r.start(ctx, "sing-box", name, cfg(set), probe, o.OnLine, func(path string) []string {
 			return []string{"run", "-c", path, "--disable-color"}
 		})
 		if err != nil {
@@ -326,7 +335,7 @@ func dropIdx(nodes []*node.Node, idx []int, rejected []*node.Node) ([]*node.Node
 	return keep, rejected
 }
 
-func (r *Runtime) start(ctx context.Context, coreName, name string, cfg map[string]any, probe string, args func(string) []string) (*Process, error) {
+func (r *Runtime) start(ctx context.Context, coreName, name string, cfg map[string]any, probe string, runLine func(core, line string), args func(string) []string) (*Process, error) {
 	b, err := json.Marshal(cfg)
 	if err != nil {
 		return nil, err
@@ -343,8 +352,15 @@ func (r *Runtime) start(ctx context.Context, coreName, name string, cfg map[stri
 		bin = r.Bin.Xray
 	}
 	var onLine func(string)
-	if r.OnLine != nil {
-		onLine = func(l string) { r.OnLine(coreName, l) }
+	if r.OnLine != nil || runLine != nil {
+		onLine = func(l string) {
+			if r.OnLine != nil {
+				r.OnLine(coreName, l)
+			}
+			if runLine != nil {
+				runLine(coreName, l)
+			}
+		}
 	}
 	var env []string
 	if coreName == "xray" {

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — {name}</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/site.css">
+<script type="module" src="/text.js"></script>
+</head>
+<body>
+<header class="nav"><div class="wrap">
+  <a class="brand" href="/"><img src="/icon.svg" alt="" width="28" height="28"><span data-name>Albatross</span></a>
+  <span class="spacer"></span><a class="btn" href="/account">Sign in</a>
+</div></header>
+<main class="prose">
+  <h1>Privacy</h1>
+  <p>How <span data-name>Albatross</span> handles your information, in plain words.</p>
+
+  <h2>What your account stores</h2>
+  <ul>
+    <li>Your <strong>username</strong>, and your password as a salted one-way hash. We cannot read your password.</li>
+    <li><strong>Counters</strong>: how much data you have used and how long you have been connected, for the current period and in total, and when you were last seen.</li>
+    <li>The limits set on your account: data and time allowance, renewal period and end date.</li>
+  </ul>
+  <p>There is no email address, name or phone number. Because of that, a lost password cannot be recovered; it can only be reset.</p>
+
+  <h2>What the app sends us</h2>
+  <p>Only your username and password when you sign in, and numbers of bytes and seconds when it reports usage. It does <strong>not</strong> send the sites you visit, the addresses you connect to, or the content of your traffic.</p>
+
+  <h2>What we do not store</h2>
+  <p>This service does not record the sites you visit or the content of your connections. Sign-in attempts are counted per username and per a one-way tag of your network address, only to slow down password guessing, and are forgotten after a short while.</p>
+
+  <h2>What the servers can see</h2>
+  <p>Your connection is carried through servers that may be run by independent parties. Treat any VPN server as able to see <strong>which sites you connect to</strong> and <strong>how much data you transfer</strong>. Content of sites that use HTTPS stays encrypted from your device to the site. Connections that are not encrypted can be read by whoever carries them, so the app blocks them by default.</p>
+  <p>A VPN protects you from your local network and provider. It does not make you anonymous.</p>
+
+  <h2>Cookies and tracking</h2>
+  <p>The website keeps your sign-in in your browser's storage so you stay signed in. It uses no advertising or analytics trackers.</p>
+
+  <h2>Deleting your data</h2>
+  <p>Ask the person who runs this service to delete your account. It removes everything listed above.</p>
+</main>
+<footer class="footer" id="footer"></footer>
+</body>
+</html>
