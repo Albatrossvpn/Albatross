@@ -105,8 +105,12 @@ function render(s) {
   $("notice").textContent = s.notice || "";
 
   const u = s.update;
-  $("update-banner").classList.toggle("hidden", !u || u.required);
-  $("update-modal").classList.toggle("hidden", !u || !u.required);
+  // A required update the app downloads itself blocks the page only once
+  // it is downloaded; until then the user can still connect, so the
+  // download can go through the VPN.
+  const blocking = !!u && u.required && (!u.in_app || u.progress === 100);
+  $("update-banner").classList.toggle("hidden", !u || blocking);
+  $("update-modal").classList.toggle("hidden", !blocking);
   if (u) {
     const busy = u.in_app && u.progress > 0 && u.progress < 100;
     $("update-banner").textContent = busy ? `Downloading version ${u.latest}… ${u.progress}%`

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -149,5 +150,49 @@ func TestUpdateResumes(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(installed); !bytes.Equal(b, body) || cuts != 1 {
 		t.Fatalf("installed %d bytes after %d cuts", len(b), cuts)
+	}
+}
+
+// A required update that cannot be downloaded must not strand the user:
+// connecting stays allowed (so the next try goes through the VPN) until
+// the new version is downloaded and its installer open.
+func TestForcedUpdateNeverStrands(t *testing.T) {
+	body := []byte("new version")
+	sum := sha256.Sum256(body)
+	var broken atomic.Bool
+	broken.Store(true)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if broken.Load() {
+			http.Error(w, "filtered", http.StatusBadGateway)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+	old, oldRetry := directUpdateClient, updateRetry
+	directUpdateClient, updateRetry = srv.Client, 50*time.Millisecond
+	defer func() { directUpdateClient, updateRetry = old, oldRetry }()
+
+	var installed atomic.Bool
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}, Version: "0.3.3",
+		InstallUpdate: func(string) error { installed.Store(true); return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	e.applyUpdate(UpdateManifest{MinVersion: "0.3.0", Require: "0.3.4", LatestVersion: "0.3.4",
+		Files: map[string]UpdateFile{updateKey(false): {URLs: []string{srv.URL + "/x"}, SHA256: hex.EncodeToString(sum[:])}}})
+	time.Sleep(200 * time.Millisecond)
+	if e.updateRequired() || installed.Load() {
+		t.Fatal("a failed download blocked connecting")
+	}
+	// The download site answers again: the retry installs, then it blocks.
+	broken.Store(false)
+	deadline := time.Now().Add(5 * time.Second)
+	for !e.updateRequired() && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !installed.Load() || !e.updateRequired() {
+		t.Fatalf("installed %v, required %v", installed.Load(), e.updateRequired())
 	}
 }
