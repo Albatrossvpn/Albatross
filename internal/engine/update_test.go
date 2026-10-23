@@ -1,13 +1,16 @@
 package engine
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
 )
@@ -34,6 +37,11 @@ func TestUpdateManifest(t *testing.T) {
 	}
 	if err := e.ConnectServer("x"); !errors.Is(err, ErrUpdateRequired) {
 		t.Fatalf("connect to a server while outdated: %v", err)
+	}
+	// Versions that update themselves also honour require.
+	e.applyUpdate(UpdateManifest{MinVersion: "0.2.0", Require: "0.2.2", LatestVersion: "0.2.2"})
+	if u := e.Snapshot().Update; u == nil || !u.Required {
+		t.Fatalf("require: %+v", u)
 	}
 	// Up to date: nothing to show, connecting is allowed again.
 	e.applyUpdate(UpdateManifest{MinVersion: "0.2.1", LatestVersion: "0.2.1"})
@@ -105,5 +113,41 @@ func TestInAppUpdate(t *testing.T) {
 	e.applyUpdate(UpdateManifest{LatestVersion: "0.2.3", Files: map[string]UpdateFile{updateKey(false): file}})
 	if err := e.GetUpdate(); err == nil || installed != "" {
 		t.Fatalf("err = %v, installed %q", err, installed)
+	}
+}
+
+func TestUpdateResumes(t *testing.T) {
+	body := bytes.Repeat([]byte("albatross"), 50000)
+	sum := sha256.Sum256(body)
+	cuts := 0
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Range") == "" {
+			// The line is cut halfway through the first download.
+			cuts++
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.Write(body[:len(body)/2])
+			panic(http.ErrAbortHandler)
+		}
+		http.ServeContent(w, r, "x.apk", time.Time{}, bytes.NewReader(body))
+	}))
+	defer srv.Close()
+	old := directUpdateClient
+	directUpdateClient = srv.Client
+	defer func() { directUpdateClient = old }()
+
+	installed := ""
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}, Version: "0.2.1",
+		InstallUpdate: func(path string) error { installed = path; return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	e.applyUpdate(UpdateManifest{LatestVersion: "0.2.2", Files: map[string]UpdateFile{
+		updateKey(false): {URLs: []string{srv.URL + "/x.apk"}, SHA256: hex.EncodeToString(sum[:])}}})
+	if err := e.GetUpdate(); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(installed); !bytes.Equal(b, body) || cuts != 1 {
+		t.Fatalf("installed %d bytes after %d cuts", len(b), cuts)
 	}
 }
