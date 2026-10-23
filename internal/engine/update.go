@@ -33,6 +33,12 @@ var ErrUpdateRequired = errors.New("update required")
 type UpdateManifest struct {
 	// MinVersion is the oldest version that may still connect.
 	MinVersion string `json:"min_version"`
+	// Require is the oldest version that may still connect, read only by
+	// versions that download updates themselves (0.3.2 and later), which
+	// fetch the new one through their own connection before they stop.
+	// Older versions read only MinVersion, which stays low so they are not
+	// cut off where the download site is filtered.
+	Require string `json:"require,omitempty"`
 	// LatestVersion, when newer than this one, is offered to the user.
 	LatestVersion string `json:"latest_version"`
 	// Message is shown with the offer or the requirement.
@@ -94,7 +100,7 @@ func (e *Engine) applyUpdate(m UpdateManifest) {
 	cur, ok := parseVersion(e.opt.Version)
 	// Builds without a release version (dev, tests) are never held back.
 	if ok {
-		if min, ok := parseVersion(m.MinVersion); ok && versionLess(cur, min) {
+		if requiredFrom(cur, m.MinVersion, m.Require) {
 			info = &UpdateInfo{Required: true}
 		} else if latest, ok := parseVersion(m.LatestVersion); ok && versionLess(cur, latest) {
 			info = &UpdateInfo{}
@@ -131,6 +137,16 @@ func (e *Engine) applyUpdate(m UpdateManifest) {
 		e.Disconnect()
 		e.setStatus(StatusIdle, "Install the new version to connect.")
 	}
+}
+
+// requiredFrom reports whether cur is older than any of the minimums.
+func requiredFrom(cur [3]int, mins ...string) bool {
+	for _, v := range mins {
+		if min, ok := parseVersion(v); ok && versionLess(cur, min) {
+			return true
+		}
+	}
+	return false
 }
 
 // ErrNoInAppUpdate means this build or platform has no installer in the
@@ -212,7 +228,14 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 			if !strings.HasPrefix(u, "https://") {
 				continue
 			}
-			if err = e.fetchUpdate(c, u, path, version); err != nil {
+			// A cut line resumes where it stopped (fetchUpdate keeps the
+			// partial file), so a few tries finish a large file.
+			for try := 0; try < 4; try++ {
+				if err = e.fetchUpdate(c, u, path, version); err == nil || e.ctx != nil && e.ctx.Err() != nil {
+					break
+				}
+			}
+			if err != nil {
 				continue
 			}
 			if sha256File(path) == want {
@@ -232,24 +255,43 @@ func (e *Engine) fetchUpdate(c *http.Client, u, path, version string) error {
 	}
 	ctx, cancel := context.WithTimeout(parent, 20*time.Minute)
 	defer cancel()
+	part := path + ".part"
+	var have int64
+	if fi, err := os.Stat(part); err == nil {
+		have = fi.Size()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return err
+	}
+	if have > 0 {
+		req.Header.Set("Range", "bytes="+strconv.FormatInt(have, 10)+"-")
 	}
 	resp, err := c.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	flags, total := os.O_CREATE|os.O_WRONLY|os.O_TRUNC, resp.ContentLength
+	switch {
+	case resp.StatusCode == http.StatusPartialContent && have > 0:
+		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
+		if total > 0 {
+			total += have
+		}
+	case resp.StatusCode == http.StatusRequestedRangeNotSatisfiable && have > 0:
+		// The partial file is already whole; the checksum decides.
+		return os.Rename(part, path)
+	case resp.StatusCode == http.StatusOK:
+		have = 0
+	default:
 		return errors.New(resp.Status)
 	}
-	tmp, err := os.Create(path + ".part")
+	tmp, err := os.OpenFile(part, flags, 0o644)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
-	var done int64
+	done := have
 	buf := make([]byte, 64<<10)
 	for {
 		n, rerr := resp.Body.Read(buf)
@@ -259,10 +301,10 @@ func (e *Engine) fetchUpdate(c *http.Client, u, path, version string) error {
 				return err
 			}
 			done += int64(n)
-			if resp.ContentLength > 0 {
+			if total > 0 {
 				e.mu.Lock()
 				if e.update != nil && e.update.Latest == version {
-					e.update.Progress = int(done * 99 / resp.ContentLength)
+					e.update.Progress = int(done * 99 / total)
 				}
 				e.mu.Unlock()
 			}
@@ -271,6 +313,7 @@ func (e *Engine) fetchUpdate(c *http.Client, u, path, version string) error {
 			break
 		}
 		if rerr != nil {
+			// The partial file stays for the next try to resume.
 			tmp.Close()
 			return rerr
 		}
@@ -278,7 +321,7 @@ func (e *Engine) fetchUpdate(c *http.Client, u, path, version string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return os.Rename(part, path)
 }
 
 // sha256File is the lowercase hex SHA-256 of a file, or "" if unreadable.
