@@ -1,4 +1,4 @@
-module github.com/cezomagoanlace29861-jpg/vp
+module github.com/cezomagoanlace29861-jpg/vp/orbot-windows
 
 go 1.27.3
 

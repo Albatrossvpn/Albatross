@@ -1,10 +1,12 @@
-name: Build Windows x64
+name: Orbot for Windows x64
 
 on:
   push:
     branches: [main]
-    tags: ["v*"]
+    tags: ["orbot-v*"]
+    paths: ["orbot-windows/**", ".github/workflows/orbot-windows.yml"]
   pull_request:
+    paths: ["orbot-windows/**", ".github/workflows/orbot-windows.yml"]
   workflow_dispatch:
     inputs:
       tor_version:
@@ -23,12 +25,16 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orbot-windows
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: orbot-windows/go.mod
+          cache-dependency-path: orbot-windows/go.sum
 
       - name: Vet
         run: |
@@ -38,7 +44,7 @@ jobs:
       - name: Version
         id: ver
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="0.1.0-${GITHUB_SHA::7}"; fi
+          if [[ "$GITHUB_REF" == refs/tags/orbot-v* ]]; then v="${GITHUB_REF#refs/tags/orbot-v}"; else v="0.1.0-${GITHUB_SHA::7}"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       - name: Build Orbot.exe
@@ -107,13 +113,13 @@ jobs:
         with:
           name: Orbot-Windows-x64-${{ steps.ver.outputs.version }}
           path: |
-            dist/*.zip
-            dist/*-setup.exe
+            orbot-windows/dist/*.zip
+            orbot-windows/dist/*-setup.exe
 
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/orbot-v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*.zip
-            dist/*-setup.exe
+            orbot-windows/dist/*.zip
+            orbot-windows/dist/*-setup.exe
