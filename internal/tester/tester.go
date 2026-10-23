@@ -7,6 +7,8 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
@@ -33,6 +36,9 @@ type Result struct {
 	ExitIP   string
 	Err      string
 	Rejected bool // the core refused the config
+	// Tampered means the server showed a certificate the system does not
+	// trust for the site: it intercepts HTTPS (see Intercepted).
+	Tampered bool
 }
 
 // Tester runs probes and real tests.
@@ -206,6 +212,9 @@ func Probe(ctx context.Context, proxy *url.URL, timeout time.Duration) Result {
 		if err == nil {
 			return Result{OK: true, Delay: time.Since(start), Country: country, ExitIP: ip}
 		}
+		if forged(err) {
+			return Result{Tampered: true, Err: "intercepts HTTPS"}
+		}
 		lastErr = err
 		if ctx.Err() != nil || isTimeout(err) {
 			// A server that times out once will not answer the fallback.
@@ -225,6 +234,7 @@ func fetchTrace(ctx context.Context, proxy *url.URL, endpoint string, timeout ti
 		TLSHandshakeTimeout:   timeout,
 		ResponseHeaderTimeout: timeout,
 		DialContext:           (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
+		TLSClientConfig:       &tls.Config{RootCAs: RootCAs},
 	}
 	defer tr.CloseIdleConnections()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -278,6 +288,66 @@ func parseTrace(body string) (ip, country string, err error) {
 		country = ""
 	}
 	return ip, country, nil
+}
+
+// forged reports whether err is a certificate that does not belong to the
+// site: signed by an authority the system does not trust, or issued for
+// another name. A server that shows one is reading the user's HTTPS.
+// Expired or not-yet-valid certificates do not count: a device with a
+// wrong clock sees those for every site.
+func forged(err error) bool {
+	var ua x509.UnknownAuthorityError
+	var he x509.HostnameError
+	var ci x509.CertificateInvalidError
+	if errors.As(err, &ci) {
+		return ci.Reason != x509.Expired
+	}
+	if errors.As(err, &ua) || errors.As(err, &he) {
+		return true
+	}
+	var ve *tls.CertificateVerificationError
+	if errors.As(err, &ve) {
+		return forged(ve.Err)
+	}
+	return false
+}
+
+// InterceptSites are well-known HTTPS sites a server that reads traffic
+// selectively is likely to target. Each check visits one of them in turn.
+var InterceptSites = []string{
+	"https://www.google.com/generate_204",
+	"https://www.apple.com/library/test/success.html",
+	"https://www.microsoft.com/",
+	"https://www.wikipedia.org/",
+}
+
+var interceptNext uint32
+
+// RootCAs are the authorities a test trusts; nil means the system's.
+// Tests replace them.
+var RootCAs *x509.CertPool
+
+// Intercepted asks one of InterceptSites through proxy and reports whether
+// the server answered with a forged certificate. Any other failure is not
+// evidence, and reports false.
+func Intercepted(ctx context.Context, proxy *url.URL, timeout time.Duration) bool {
+	site := InterceptSites[int(atomic.AddUint32(&interceptNext, 1))%len(InterceptSites)]
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	tr := &http.Transport{Proxy: http.ProxyURL(proxy), DisableKeepAlives: true, TLSHandshakeTimeout: timeout,
+		TLSClientConfig: &tls.Config{RootCAs: RootCAs}}
+	defer tr.CloseIdleConnections()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, site, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0")
+	resp, err := (&http.Client{Transport: tr}).Do(req)
+	if err != nil {
+		return forged(err)
+	}
+	resp.Body.Close()
+	return false
 }
 
 func isTimeout(err error) bool {

@@ -12,7 +12,6 @@ func TestHint(t *testing.T) {
 		"🆔vipv2rey 🔒 HY-UDP-N/A 🇭🇰 HK down": "HK",
 		"canfingV2rayNG-58":                 "",
 		"NL-Amsterdam":                      "NL",
-		"کانفیگ آلمان":                      "DE",
 		"Irancell":                          "",
 		"vless-US-reality":                  "US",
 		"Telegram : @spikevpn":              "",

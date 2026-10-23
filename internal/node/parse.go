@@ -311,13 +311,15 @@ func splitList(s string) []string {
 }
 
 func cleanName(s string) string {
-	s = strings.TrimSpace(s)
 	s = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if r < 0x20 || r == 0x7f || arabicScript(r) {
 			return -1
 		}
 		return r
 	}, s)
+	// Dropping words can leave runs of spaces and stray separators.
+	s = strings.Join(strings.Fields(s), " ")
+	s = strings.Trim(s, " -_|:.,()[]")
 	if utf8.RuneCountInString(s) > 80 {
 		r := []rune(s)
 		s = string(r[:80])
@@ -903,6 +905,17 @@ func (n *Node) normalize() {
 		}
 	}
 	n.Name = cleanName(n.Name)
+	if n.Name == "" {
+		n.Name = strings.ToUpper(n.Proto) + " " + n.Server
+	}
+}
+
+// arabicScript reports Persian and Arabic letters, digits and joiners. The
+// app is English only, so publishers' Persian names are not shown; the
+// rest of the name (flags, countries, numbers) stays.
+func arabicScript(r rune) bool {
+	return r >= 0x0600 && r <= 0x06FF || r >= 0x0750 && r <= 0x077F || r >= 0x08A0 && r <= 0x08FF ||
+		r >= 0xFB50 && r <= 0xFDFF || r >= 0xFE70 && r <= 0xFEFF || r == 0x200C || r == 0x200F
 }
 
 var badEscapeRe = regexp.MustCompile(`%(?:[^0-9A-Fa-f]|[0-9A-Fa-f][^0-9A-Fa-f]|[0-9A-Fa-f]?$)`)
