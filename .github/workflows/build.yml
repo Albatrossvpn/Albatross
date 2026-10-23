@@ -2,7 +2,7 @@ name: Build
 
 on:
   push:
-    branches: ["**"]
+    branches: ["**", "!servers"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -50,6 +50,8 @@ jobs:
           go vet ./...
           GOOS=windows go vet ./...
           test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: Collector smoke test
+        run: go run ./cmd/collect -limit 6 -probe=false -out /tmp/collect && cat /tmp/collect/meta.json
       - name: Download cores for end-to-end tests
         run: |
           mkdir -p /tmp/cores && cd /tmp/cores

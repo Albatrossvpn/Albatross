@@ -26,6 +26,8 @@ if [ -z "${ANDROID_NDK_HOME:-}" ]; then
 fi
 [ -d "$ANDROID_NDK_HOME" ] || { echo "no Android NDK found" >&2; exit 1; }
 
+bash "$root/build/snapshot.sh"
+
 fetch() {
   [ -s "$2" ] || curl -fsSL --retry 4 --retry-delay 3 -o "$2" "$1"
 }
