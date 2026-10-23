@@ -31,9 +31,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Runs are not queued behind each other (a queue keeps only the
-          # newest and cancels the rest); an overlapping one just stops.
+          # newest and cancels the rest): a run stops when an older one is
+          # still going, so two starting together never both stop.
           busy=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/collect.yml/runs?status=in_progress" \
-            --jq "[.workflow_runs[] | select(.id != $GITHUB_RUN_ID)] | length")
+            --jq "[.workflow_runs[] | select(.id < $GITHUB_RUN_ID)] | length")
           if [ "$busy" -gt 0 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
   collect:
     needs: due
