@@ -185,6 +185,7 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 	for _, k := range avoid {
 		exclude[k] = true
 	}
+	triedRecent := false
 	for attempt := 0; ; attempt++ {
 		e.mu.Lock()
 		want := e.wantConnect && e.target == country && e.connGen == gen
@@ -195,6 +196,12 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 		picks := pinned
 		if picks == nil {
 			picks = e.pickGroup(country, home, exclude)
+		}
+		if len(picks) == 0 && !triedRecent {
+			// Nothing fresh: try last week's servers once before waiting on
+			// the scan.
+			triedRecent = true
+			picks = e.recentServers(country, groupSize, exclude)
 		}
 		if len(picks) == 0 {
 			if len(exclude) > 0 {
@@ -269,12 +276,26 @@ func (e *Engine) pickGroup(country, home string, exclude map[string]bool) []*Ser
 
 // bestServers picks the lowest-delay usable servers in a country.
 func (e *Engine) bestServers(country string, n int, exclude map[string]bool) []*Server {
+	return e.rankedServers(country, n, exclude, (*Server).usable)
+}
+
+// recentServers picks servers that worked in the last week but are no
+// longer counted usable. When nothing fresh is known (the app was closed
+// for a while, or filtering got heavier), trying them at once is much
+// faster than waiting for a scan, and most still work.
+func (e *Engine) recentServers(country string, n int, exclude map[string]bool) []*Server {
+	return e.rankedServers(country, n, exclude, func(s *Server, now time.Time) bool {
+		return !s.usable(now) && s.Fails < 6 && now.Sub(s.LastOK) < 7*24*time.Hour
+	})
+}
+
+func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, ok func(*Server, time.Time) bool) []*Server {
 	now := time.Now()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var list []*Server
 	for _, s := range e.good {
-		if exclude[s.Key] || !s.usable(now) || s.Country == "IR" || !s.matches(e.settings.Protocol) {
+		if exclude[s.Key] || !ok(s, now) || s.Country == "IR" || !s.matches(e.settings.Protocol) {
 			continue
 		}
 		if country != "" && s.Country != country {

@@ -164,3 +164,35 @@ func TestSecureOnlyRules(t *testing.T) {
 		}
 	}
 }
+
+// With nothing confirmed lately, last week's servers are offered instead
+// of waiting for a scan; fresh ones always win.
+func TestRecentServersWhenNothingFresh(t *testing.T) {
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	add := func(host string, ok time.Time, fails int) {
+		link := fmt.Sprintf("trojan://pw@%s:443?security=tls&type=tcp#x", host)
+		n, err := node.ParseLink(link)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.good[node.Key64(n.Key())] = &Server{Key: n.Key(), Link: link, Proto: n.Proto, Country: "DE", Delay: 100, LastOK: ok, TestedAt: ok, Fails: fails}
+	}
+	now := time.Now()
+	add("yesterday.example", now.Add(-24*time.Hour), 0)
+	add("broken.example", now.Add(-24*time.Hour), 7)
+	if got := e.bestServers("DE", groupSize, nil); len(got) != 0 {
+		t.Fatalf("old servers counted fresh: %d", len(got))
+	}
+	got := e.recentServers("DE", groupSize, nil)
+	if len(got) != 1 || got[0].Node().Server != "yesterday.example" {
+		t.Fatalf("recent servers %v, want only yesterday's working one", got)
+	}
+	add("fresh.example", now, 0)
+	if got := e.recentServers("DE", groupSize, nil); len(got) != 1 {
+		t.Fatal("a fresh server was offered as a recent one")
+	}
+}
