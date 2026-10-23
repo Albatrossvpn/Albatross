@@ -379,6 +379,7 @@ type candidate struct {
 	node      *node.Node
 	good      *Server
 	frag      bool   // fragment the TLS ClientHello
+	hello     int8   // 1 + index into helloFPs when the app picks the ClientHello
 	pin       string // connect to this IP instead of resolving the name
 	pinReason string
 }
@@ -659,21 +660,43 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 	if e.ctx.Err() != nil {
 		return
 	}
+	learned := e.net.snapshot()
 	for i := range live {
-		live[i].frag = frag == "on" || (live[i].good != nil && live[i].good.Fragment)
+		c := &live[i]
+		c.frag = frag == "on" || (c.good != nil && c.good.Fragment)
+		if !helloable(c.node) {
+			continue
+		}
+		if c.good != nil && helloIndex(c.good.Hello) >= 0 {
+			c.setHello(helloIndex(c.good.Hello))
+			continue
+		}
+		c.setHello(learned.pickHello(c.frag, rand.Float64))
+		if frag == "auto" && !c.frag && c.node.Security == "tls" && learned.fragHelps(c.fp()) {
+			c.frag = true
+		}
 	}
 
 	// Real tests. Servers that fail get one more chance with the tricks
 	// that beat SNI filtering: a fragmented ClientHello and, behind
 	// Cloudflare, an edge IP that is not blocked here.
 	failed := e.realTest(live, spoof, chunk)
+	for _, c := range failed {
+		e.net.recordHello(c.helloCode(), false)
+	}
 	var retry []candidate
 	clean := e.cf.Best()
 	for _, c := range failed {
 		r := c
 		changed := false
-		if frag == "auto" && !r.frag && r.node.Security == "tls" && !r.node.UDPBased() {
+		// The second try changes the ClientHello: fragmented, unless that
+		// clearly does worse on this network, else another browser's.
+		switch {
+		case frag == "auto" && !r.frag && r.node.Security == "tls" && !r.node.UDPBased() && (r.hello == 0 || !learned.fragHurts(r.fp())):
 			r.frag, changed = true, true
+		case r.hello != 0:
+			r.setHello(learned.nextHello(r.fp(), r.frag))
+			changed = true
 		}
 		if cleanOn && len(clean) > 0 && antiblock.CDNFrontable(c.node) && r.pinReason != "clean" {
 			ip := clean[rand.Intn(min(len(clean), 3))].IP
@@ -685,6 +708,7 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 	}
 	if len(retry) > 0 && e.ctx.Err() == nil {
 		for _, c := range e.realTest(retry, spoof, chunk) {
+			e.net.recordHello(c.helloCode(), false)
 			e.recordFail(c, "failed")
 		}
 	}
@@ -813,6 +837,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	now := time.Now()
 	n := c.node
 	e.net.record(protoCodes[n.Proto], n.Style(), true)
+	e.net.recordHello(c.helloCode(), true)
 	e.pool.Update(c.key, func(p *pool.Entry) {
 		p.State = pool.StateOK
 		p.Fails = 0
@@ -846,6 +871,10 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	s.Fails = 0
 	s.OKCount++
 	s.Fragment = c.frag
+	s.Hello = ""
+	if c.hello != 0 {
+		s.Hello = helloFPs[c.fp()]
+	}
 	s.PinIP, s.PinReason = c.pin, c.pinReason
 	e.scan.Tested++
 	e.scan.recent = append(e.scan.recent, now)

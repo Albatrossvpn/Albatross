@@ -25,6 +25,9 @@ type netLearn struct {
 type netTable struct {
 	Proto [16]passRate `json:"proto"`
 	Style [32]passRate `json:"style"`
+	// Hello is per ClientHello (helloCode: browser fingerprint and
+	// fragmentation) on TLS and Reality servers.
+	Hello [16]passRate `json:"hello"`
 	All   passRate     `json:"all"`
 	Used  time.Time    `json:"used"`
 }
@@ -91,6 +94,28 @@ func (t *netTable) scale(f float64) {
 	for i := range t.Style {
 		sc(&t.Style[i])
 	}
+	for i := range t.Hello {
+		sc(&t.Hello[i])
+	}
+}
+
+func (r *passRate) add(ok bool) {
+	r.OK *= learnDecay
+	r.N *= learnDecay
+	r.N++
+	if ok {
+		r.OK++
+	}
+}
+
+// recordHello counts one test of a ClientHello (see helloCode).
+func (l *netLearn) recordHello(code int, ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	t := l.table()
+	if code >= 0 && code < len(t.Hello) {
+		t.Hello[code].add(ok)
+	}
 }
 
 func (l *netLearn) record(proto, style uint8, ok bool) {
@@ -98,14 +123,7 @@ func (l *netLearn) record(proto, style uint8, ok bool) {
 	defer l.mu.Unlock()
 	t := l.table()
 	t.Used = time.Now()
-	add := func(r *passRate) {
-		r.OK *= learnDecay
-		r.N *= learnDecay
-		r.N++
-		if ok {
-			r.OK++
-		}
-	}
+	add := func(r *passRate) { r.add(ok) }
 	add(&t.All)
 	if int(proto) < len(t.Proto) {
 		add(&t.Proto[proto])
@@ -119,6 +137,7 @@ func (l *netLearn) record(proto, style uint8, ok bool) {
 type learnedView struct {
 	proto [16]float64
 	style [32]float64
+	hello [16]float64
 }
 
 func (l *netLearn) snapshot() learnedView {
@@ -138,6 +157,9 @@ func (l *netLearn) snapshot() learnedView {
 	}
 	for i := range t.Style {
 		v.style[i] = lift(t.Style[i])
+	}
+	for i := range t.Hello {
+		v.hello[i] = lift(t.Hello[i])
 	}
 	return v
 }
