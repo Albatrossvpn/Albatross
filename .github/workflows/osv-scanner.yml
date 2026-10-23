@@ -26,6 +26,8 @@ permissions:
   security-events: write
   # Read commit contents
   contents: read
+  # The v2 reusable workflows read workflow runs
+  actions: read
 
 jobs:
   scan-scheduled:
