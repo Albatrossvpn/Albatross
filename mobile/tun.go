@@ -12,7 +12,10 @@ import (
 )
 
 // MTU of the VPN interface; the app's VpnService.Builder uses the same.
-const MTU = 1500
+// Packets never leave the device at this size (the proxy re-sends the data
+// over ordinary connections), and large ones let the user-space network
+// stack move far more data per packet, which raises download speed.
+const MTU = 9000
 
 var (
 	tunMu  sync.Mutex

@@ -126,6 +126,7 @@ func (e *Engine) Connect(country string) error {
 	e.mu.Lock()
 	e.target = country
 	e.settings.Country = country
+	e.settings.Connected = true
 	e.wantConnect = true
 	e.connGen++
 	gen := e.connGen
@@ -160,10 +161,12 @@ func (e *Engine) ConnectServer(key string) error {
 		return fmt.Errorf("server not found")
 	}
 	e.target = s.Country
+	e.settings.Connected = true
 	e.wantConnect = true
 	e.connGen++
 	gen := e.connGen
 	e.mu.Unlock()
+	saveJSON(filepath.Join(e.dir, "settings.json"), e.Settings())
 	return e.connectLoop(gen, s.Country, "", []*Server{s}, nil)
 }
 
@@ -556,11 +559,24 @@ func connectedMessage(c *connection) string {
 
 // Disconnect stops the VPN and restores system settings.
 func (e *Engine) Disconnect() {
+	e.disconnect(true)
+}
+
+// disconnect takes the connection and the VPN down; byUser also records
+// that the user wants it off (see Settings.Connected).
+func (e *Engine) disconnect(byUser bool) {
 	e.mu.Lock()
 	e.wantConnect = false
 	e.connGen++
 	c := e.conn
+	wasOn := e.settings.Connected
+	if byUser {
+		e.settings.Connected = false
+	}
 	e.mu.Unlock()
+	if byUser && wasOn {
+		saveJSON(filepath.Join(e.dir, "settings.json"), e.Settings())
+	}
 	if c != nil {
 		e.stopConn(c, true)
 	}
@@ -569,6 +585,22 @@ func (e *Engine) Disconnect() {
 	// still up; it must go too.
 	e.clearProxy()
 	e.setStatus(StatusIdle, "")
+}
+
+// Resume connects again when the user left the VPN on, for Android's
+// Always-on VPN starting the app by itself (after a restart, say). It
+// reports whether a connection is on its way.
+func (e *Engine) Resume() bool {
+	e.mu.Lock()
+	on, busy, target := e.settings.Connected, e.wantConnect, e.target
+	e.mu.Unlock()
+	if !on {
+		return false
+	}
+	if !busy {
+		go e.Connect(target)
+	}
+	return true
 }
 
 // setProxy points the system (on Android, the VPN) at addr unless the user

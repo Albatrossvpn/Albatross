@@ -127,6 +127,16 @@ func Disconnect() {
 	}
 }
 
+// Resume connects again if the user left the VPN on; the app calls it when
+// Android starts the VPN by itself (Always-on VPN). It reports whether a
+// connection is on its way.
+func Resume() bool {
+	mu.Lock()
+	e := eng
+	mu.Unlock()
+	return e != nil && e.Resume()
+}
+
 // SetDNS tells the engine the current network's resolver; the app calls it
 // when the device moves between networks.
 func SetDNS(addr string) {
