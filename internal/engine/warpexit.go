@@ -125,6 +125,9 @@ func (w *warpID) endpoint() map[string]any {
 	}
 }
 
+// warpMaxDelay is the slowest WARP answer worth sending traffic through.
+const warpMaxDelay = 1500
+
 // watchWarpExit moves traffic onto WARP when it answers through the server
 // in use and is not much slower than the server alone, and back when it
 // stops answering (servers that do not carry UDP cannot carry WARP) or
@@ -153,9 +156,10 @@ func (e *Engine) watchWarpExit(ctx context.Context, c *connection) {
 		c.mu.Lock()
 		direct := c.delay
 		c.mu.Unlock()
-		// Worth it only while it costs little: within twice the server's
-		// own delay, or 400 ms more, whichever is larger.
-		cheap := direct <= 0 || r <= max(2*direct, direct+400)
+		// Worth it only while it costs next to nothing: at most a fifth or
+		// 150 ms over the server's own delay, and never on a slow line,
+		// where every added hop is felt. Unknown server delay means no.
+		cheap := direct > 0 && r <= direct+max(150, direct/5) && r <= warpMaxDelay
 		switch {
 		case ok && !on && cheap:
 			if _, err := c.api(ctx, http.MethodPut, "/proxies/exit", map[string]string{"name": "warp-exit"}, nil, 3*time.Second); err == nil {

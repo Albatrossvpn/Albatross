@@ -8,6 +8,11 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.widget.Toast;
 
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.util.Collections;
+
 import app.albatross.mobile.Mobile;
 import app.albatross.mobile.Platform;
 
@@ -91,6 +96,29 @@ final class Bridge implements Platform {
             app.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
         } catch (Exception ignored) {
         }
+    }
+
+    // Go cannot list the network interfaces on Android 11 and later; Java
+    // can. Cellular and tunnel interfaces are left out: other devices reach
+    // this phone only on its hotspot, Wi-Fi or USB/Bluetooth tethering.
+    @Override
+    public String lanAddrs() {
+        StringBuilder out = new StringBuilder();
+        try {
+            for (NetworkInterface ni : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                String name = ni.getName();
+                if (!ni.isUp() || ni.isLoopback() || name.startsWith("rmnet") || name.startsWith("ccmni")
+                        || name.startsWith("tun") || name.startsWith("dummy") || name.startsWith("clat")
+                        || name.startsWith("v4-") || name.startsWith("ppp")) continue;
+                for (InetAddress a : Collections.list(ni.getInetAddresses())) {
+                    if (!(a instanceof Inet4Address) || !a.isSiteLocalAddress()) continue;
+                    if (out.length() > 0) out.append(',');
+                    out.append(a.getHostAddress());
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return out.toString();
     }
 
     @Override

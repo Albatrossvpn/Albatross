@@ -146,8 +146,16 @@ jobs:
           ALBATROSS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ALBATROSS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ALBATROSS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          RELEASE: ${{ inputs.release }}
         run: |
-          # Without a key in the repository secrets the APKs get a debug key.
+          # Without a key in the repository secrets the APKs get the runner's
+          # debug key, which is new on every run: Android then refuses to
+          # install the next version over the old one. Fine for test builds,
+          # never for a release.
+          if [ -z "$KEYSTORE_BASE64" ] && { [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; }; then
+            echo "::error::A release needs the ANDROID_KEYSTORE_BASE64 secret, or users must uninstall to update."
+            exit 1
+          fi
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/albatross.jks"
             export ALBATROSS_KEYSTORE="$RUNNER_TEMP/albatross.jks"

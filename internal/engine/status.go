@@ -166,6 +166,18 @@ func (e *Engine) shareAddrs() []string {
 	if err != nil {
 		return nil
 	}
+	var out []string
+	for _, ip := range e.lanIPs() {
+		out = append(out, net.JoinHostPort(ip, port))
+	}
+	return out
+}
+
+// lanIPs are this device's private IPv4 addresses, without the tunnel's.
+func (e *Engine) lanIPs() []string {
+	if e.opt.LANAddrs != nil {
+		return e.opt.LANAddrs()
+	}
 	addrs, _ := net.InterfaceAddrs()
 	var out []string
 	for _, a := range addrs {
@@ -173,7 +185,7 @@ func (e *Engine) shareAddrs() []string {
 		if !ok || ip.IP.To4() == nil || !ip.IP.IsPrivate() || ip.IP.To4()[1] == 19 && ip.IP.To4()[0] == 172 {
 			continue
 		}
-		out = append(out, net.JoinHostPort(ip.IP.String(), port))
+		out = append(out, ip.IP.String())
 	}
 	return out
 }

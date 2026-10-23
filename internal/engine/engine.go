@@ -48,6 +48,10 @@ type Options struct {
 	// Mobile tunes defaults and pacing for phones: lighter scanning, no
 	// large lists by default, and "proxy" mode is the device-wide VPN.
 	Mobile bool
+	// LANAddrs lists this device's addresses on its hotspot and Wi-Fi, for
+	// systems where the engine cannot list them itself (Android 11 and
+	// later refuse it); nil means the engine asks the system.
+	LANAddrs func() []string
 }
 
 // SystemProxy sets and clears the OS proxy settings.

@@ -282,10 +282,17 @@ func (e *Engine) refreshSources(central bool) {
 	total := e.scan.SourcesOK
 	e.mu.Unlock()
 	e.pool.NextCycle()
-	// The longest refresh interval is a day; keep two of them.
-	e.pool.Compact(48 * time.Hour)
+	// The longest refresh interval is a day; keep two of them. A phone
+	// never gets through more than a few tens of thousands between
+	// refreshes, so it keeps no more than that.
+	limit := 120000
+	if e.opt.Mobile {
+		limit = 30000
+	}
+	e.pool.Compact(48*time.Hour, limit)
 	releaseMemory()
-	e.logf("info", "Server list updated: %d lists reachable, %d servers queued for testing.", total, e.pool.Len())
+	_, untested, _, _ := e.pool.Stats()
+	e.logf("info", "Server list updated: %d lists reachable, %d servers not yet tested.", total, untested)
 }
 
 func (e *Engine) cachedText(s sources.Source) (string, bool) {

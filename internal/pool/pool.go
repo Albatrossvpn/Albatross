@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"io"
 	"os"
+	"sort"
 	"sync"
 	"time"
 )
@@ -213,19 +214,53 @@ func (p *Pool) Stats() (total, untested, dead, ok int) {
 }
 
 // Compact drops candidates that no source has listed for the keep
-// duration (unless they are known to work) and rewrites the file.
-func (p *Pool) Compact(keep time.Duration) error {
+// duration (unless they are known to work) and rewrites the file. Beyond
+// limit candidates (0: no limit), the least promising ones go too: those
+// that failed before those never tested, those on few lists before those
+// on many, the longest unseen first; the collector's picks stay.
+func (p *Pool) Compact(keep time.Duration, limit int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	cutoff := Minutes(time.Now().Add(-keep))
-	stale := 0
+	drop := map[int]bool{}
 	for i := range p.entries {
 		e := &p.entries[i]
 		if e.State != StateOK && e.SeenAt < cutoff {
-			stale++
+			drop[i] = true
 		}
 	}
-	if stale*3 < len(p.entries) {
+	if over := len(p.entries) - len(drop) - limit; limit > 0 && over > 0 {
+		var cand []int
+		for i := range p.entries {
+			if e := &p.entries[i]; !drop[i] && e.State != StateOK && e.Flags&(FlagHot|FlagFresh) == 0 {
+				cand = append(cand, i)
+			}
+		}
+		rank := func(e *Entry) (int, uint8, uint32) {
+			alive := 1
+			if e.State == StateDead || e.State == StateRejected {
+				alive = 0
+			}
+			return alive, e.Pop, e.SeenAt
+		}
+		sort.Slice(cand, func(a, b int) bool {
+			a1, a2, a3 := rank(&p.entries[cand[a]])
+			b1, b2, b3 := rank(&p.entries[cand[b]])
+			if a1 != b1 {
+				return a1 < b1
+			}
+			if a2 != b2 {
+				return a2 < b2
+			}
+			return a3 < b3
+		})
+		for _, i := range cand[:min(over, len(cand))] {
+			drop[i] = true
+		}
+	} else if len(drop)*3 < len(p.entries) {
+		return nil
+	}
+	if len(drop) == 0 {
 		return nil
 	}
 	p.w.Flush()
@@ -240,7 +275,7 @@ func (p *Pool) Compact(keep time.Duration) error {
 	var size int64
 	for i := range p.entries {
 		e := p.entries[i]
-		if e.State != StateOK && e.SeenAt < cutoff {
+		if drop[i] {
 			continue
 		}
 		buf := make([]byte, e.size)

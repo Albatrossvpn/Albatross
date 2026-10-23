@@ -592,9 +592,13 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	// Test the whole group at once and start on the first server to answer;
 	// the rest keep being tested and become the known-good backups.
 	proxy := &url.URL{Scheme: "http", Host: c.proxyAddr}
-	var r tester.Result
+	var r, bestR tester.Result
+	var cur, best *member
 	tried := map[*member]bool{}
-	for try := 0; try < 3 && !r.OK; try++ {
+	// A server that answers slowly is kept only when no other one in the
+	// group does better: a first page after many seconds is not a
+	// connection anyone can use.
+	for try := 0; try < 3 && !(r.OK && r.Delay <= slowPath); try++ {
 		var rest []*member
 		for _, m := range c.members {
 			if !tried[m] {
@@ -611,6 +615,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 			return err
 		}
 		c.keep(actx, m)
+		cur = m
 		// Prove the whole path works before telling anyone it does.
 		r = tester.Probe(actx, proxy, 12*time.Second)
 		if !r.OK {
@@ -620,6 +625,15 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 			c.mu.Lock()
 			m.forged = true
 			c.mu.Unlock()
+		}
+		if r.OK && (best == nil || r.Delay < bestR.Delay) {
+			best, bestR = m, r
+		}
+	}
+	if best != nil && best != cur {
+		if err := c.use(actx, best); err == nil {
+			c.keep(actx, best)
+			r = bestR
 		}
 	}
 	if !r.OK {
@@ -800,6 +814,10 @@ type connOptions struct {
 	warp        *warpID // offer WARP through the server in use (watchWarpExit)
 }
 
+// slowPath is the first-page delay through a new connection above which the
+// next server in the group is tried before settling.
+const slowPath = 3 * time.Second
+
 // connectConfig builds the sing-box config for a live connection.
 func connectConfig(s *core.Set, o connOptions) map[string]any {
 	outbounds := append([]any{}, s.Outbounds...)
@@ -910,14 +928,18 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 	if len(ruleSets) > 0 {
 		route["rule_set"] = ruleSets
 	}
+	remote := map[string]any{"type": "https", "tag": "remote", "server": "1.1.1.1", "detour": "proxy"}
 	dns := map[string]any{
-		"servers": []any{
-			tester.DNSServer(o.localDNS),
-			map[string]any{"type": "https", "tag": "remote", "server": "1.1.1.1", "detour": "proxy"},
-		},
+		"servers":  []any{tester.DNSServer(o.localDNS), remote},
 		"rules":    dnsRules,
 		"final":    "remote",
 		"strategy": "ipv4_only",
+	}
+	if r, ok := findRegion(o.bypass); ok && r.Subnet != "" {
+		// Cloudflare's resolver never passes the subnet on; Google's does.
+		// The subnet is a public block of the region, not this device's.
+		remote["server"] = "8.8.8.8"
+		dns["client_subnet"] = r.Subnet
 	}
 	cfg := map[string]any{
 		"log":       map[string]any{"level": "warn", "timestamp": false},
