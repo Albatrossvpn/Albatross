@@ -254,10 +254,20 @@ func (e *Engine) poke() {
 // direct traffic (see Options.LocalDNS).
 func (e *Engine) SetLocalDNS(addr string) {
 	e.mu.Lock()
+	moved := e.localDNS != addr
 	e.localDNS = addr
+	c := e.conn
 	e.mu.Unlock()
 	// Another network filters differently.
 	e.net.use(addr)
+	if moved && c != nil {
+		// Connections made over the old network are gone; check the
+		// server in use now so traffic recovers at once.
+		select {
+		case c.wake <- struct{}{}:
+		default:
+		}
+	}
 }
 
 func (e *Engine) dns() string {

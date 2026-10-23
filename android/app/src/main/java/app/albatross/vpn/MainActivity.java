@@ -9,6 +9,8 @@ import android.net.Uri;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.View;
 import android.view.WindowInsets;
 import android.webkit.WebResourceRequest;
@@ -127,6 +129,25 @@ public final class MainActivity extends Activity {
         visible = new WeakReference<>(this);
         web.onResume();
         web.resumeTimers();
+        askBatteryOnce();
+    }
+
+    /**
+     * Once the VPN is allowed, asks once to leave the app out of battery
+     * optimization: some phones otherwise kill the VPN while the screen is
+     * off, and the connection drops until the app is opened again.
+     */
+    private void askBatteryOnce() {
+        if (VpnService.prepare(this) != null) return;
+        PowerManager pm = getSystemService(PowerManager.class);
+        if (pm == null || pm.isIgnoringBatteryOptimizations(getPackageName())) return;
+        android.content.SharedPreferences prefs = getSharedPreferences("app", MODE_PRIVATE);
+        if (prefs.getBoolean("asked_battery", false)) return;
+        prefs.edit().putBoolean("asked_battery", true).apply();
+        try {
+            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())));
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
