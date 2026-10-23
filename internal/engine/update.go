@@ -126,12 +126,11 @@ func (e *Engine) applyUpdate(m UpdateManifest) {
 		e.logf("warn", "This version is no longer supported; install the new version to connect.")
 		if info.InApp {
 			// Fetched while the connection still stands, so a network
-			// that blocks the download site does not strand the user.
-			go func() {
-				e.GetUpdate()
-				e.Disconnect()
-				e.setStatus(StatusIdle, "Install the new version to connect.")
-			}()
+			// that blocks the download site does not strand the user: the
+			// app disconnects only once the new version is downloaded and
+			// its installer open, and until then it keeps (or may make) a
+			// connection to retry through.
+			go e.forceUpdate(info.Latest)
 			return
 		}
 		e.Disconnect()
@@ -156,10 +155,13 @@ var ErrNoInAppUpdate = errors.New("no in-app update")
 // updateKey names this platform's entry in UpdateManifest.Files.
 func updateKey(mobile bool) string {
 	if mobile {
-		if runtime.GOARCH == "amd64" {
+		switch runtime.GOARCH {
+		case "amd64":
 			return "android-x86_64"
+		case "arm64":
+			return "android-arm64-v8a"
 		}
-		return "android-arm64-v8a"
+		return "android-" + runtime.GOARCH // no installer is published
 	}
 	return "windows"
 }
@@ -338,11 +340,46 @@ func sha256File(path string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// updateRequired reports whether this version may no longer connect.
+// forceUpdate downloads a required new version, retrying every few
+// minutes (through the VPN once one is up), and disconnects once its
+// installer is open.
+func (e *Engine) forceUpdate(version string) {
+	for {
+		err := e.GetUpdate()
+		e.mu.Lock()
+		u := e.update
+		e.mu.Unlock()
+		if u == nil || !u.Required || u.Latest != version {
+			return // a newer manifest took over
+		}
+		if err == nil {
+			e.Disconnect()
+			e.setStatus(StatusIdle, "Install the new version to connect.")
+			return
+		}
+		done := context.Background().Done()
+		if e.ctx != nil {
+			done = e.ctx.Done()
+		}
+		select {
+		case <-done:
+			return
+		case <-time.After(updateRetry):
+		}
+	}
+}
+
+// updateRetry is how long forceUpdate waits after a failed download.
+var updateRetry = 3 * time.Minute
+
+// updateRequired reports whether this version may no longer connect. A
+// version that downloads its update itself may still connect until the
+// new one is downloaded, so the download can go through the VPN.
 func (e *Engine) updateRequired() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.update != nil && e.update.Required
+	u := e.update
+	return u != nil && u.Required && (!u.InApp || u.Progress == 100)
 }
 
 // parseVersion reads the leading "major.minor.patch" of v ("0.2.1",
