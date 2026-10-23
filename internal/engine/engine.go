@@ -4,6 +4,8 @@ package engine
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
@@ -95,6 +97,7 @@ type Engine struct {
 	reg          regimeState   // the network's filtering regime (regime.go)
 	regNet       string        // the network reg was probed on
 	notice       string        // a message for the user that outlives status changes
+	install      uint32        // this installation's random number (installNumber)
 	update       *UpdateInfo   // a newer version, from update.json
 	uiSeen       time.Time     // last time the UI asked for a snapshot
 	countries    []CountryInfo // cached for countryCache
@@ -148,6 +151,7 @@ func New(opt Options) (*Engine, error) {
 		localDNS:     opt.LocalDNS,
 	}
 	e.settings = loadSettings(e.dir, opt.Mobile)
+	e.install = installNumber(e.dir)
 	e.target = e.settings.Country
 	e.bin = core.Locate(append(opt.AppDirs, e.dir)...)
 	e.rt = &core.Runtime{Bin: e.bin, Dir: filepath.Join(e.dir, "run"), TorBridges: e.torBridges}
@@ -404,6 +408,22 @@ func (e *Engine) triggerRefill() {
 	}
 }
 
+// installNumber returns this installation's random number, made once and
+// kept in the data folder. It never leaves the device.
+func installNumber(dir string) uint32 {
+	path := filepath.Join(dir, "install.id")
+	if b, err := os.ReadFile(path); err == nil && len(b) == 8 {
+		if v, err := strconv.ParseUint(string(b), 16, 32); err == nil {
+			return uint32(v)
+		}
+	}
+	var b [4]byte
+	rand.Read(b[:])
+	v := binary.BigEndian.Uint32(b[:])
+	os.WriteFile(path, []byte(fmt.Sprintf("%08x", v)), 0o644)
+	return v
+}
+
 // buildSources rebuilds the source list from built-ins and settings.
 func (e *Engine) buildSources() {
 	e.mu.Lock()
@@ -415,7 +435,7 @@ func (e *Engine) buildSources() {
 	var list []sources.Source
 	builtin := e.opt.Sources
 	if builtin == nil {
-		builtin = append(sources.Central(), sources.Builtin()...)
+		builtin = append(sources.Central(e.install), sources.Builtin()...)
 	}
 	for _, s := range builtin {
 		if s.Tier == sources.TierDeep && !s.Central && !e.settings.DeepSources {

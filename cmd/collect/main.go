@@ -220,14 +220,29 @@ func main() {
 		if err != nil || len(k) != 32 {
 			log.Fatal("OWN_KEY must be 64 hex digits")
 		}
-		sealed, err := sources.Seal(k, own)
-		if err != nil {
-			log.Fatal(err)
+		// Split into sources.OwnBuckets parts; each app reads two. With
+		// fewer servers than parts, each part gets one of them.
+		links := strings.Fields(own)
+		for b := range sources.OwnBuckets {
+			var part []string
+			for i, l := range links {
+				if i%sources.OwnBuckets == b {
+					part = append(part, l)
+				}
+			}
+			if len(part) == 0 {
+				part = []string{links[b%len(links)]}
+			}
+			sealed, err := sources.Seal(k, strings.Join(part, "\n")+"\n")
+			if err != nil {
+				log.Fatal(err)
+			}
+			name := fmt.Sprintf("own-%d.bin", b+1)
+			if err := os.WriteFile(filepath.Join(*out, name), sealed, 0o644); err != nil {
+				log.Fatal(err)
+			}
+			m.Files[name] = len(part)
 		}
-		if err := os.WriteFile(filepath.Join(*out, "own.bin"), sealed, 0o644); err != nil {
-			log.Fatal(err)
-		}
-		m.Files["own.bin"] = len(strings.Fields(own))
 	}
 	if br, err := torBridges(ctx, &http.Client{Timeout: 90 * time.Second}); err != nil {
 		log.Printf("tor bridges: %v", err)
