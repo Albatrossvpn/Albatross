@@ -361,6 +361,7 @@ func (e *Engine) newTester() tester.Tester {
 	}
 	t.LocalDNS = e.localDNS
 	t.Mobile = e.opt.Mobile
+	t.LineMbps = e.net.lineMbps()
 	return t
 }
 

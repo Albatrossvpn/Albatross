@@ -399,6 +399,7 @@ type candidate struct {
 	ech       bool   // look the server's ECH config up over DNS
 	pin       string // connect to this IP instead of resolving the name
 	pinReason string
+	split     string // XHTTP downloads through this second clean edge
 }
 
 type scored struct {
@@ -735,8 +736,13 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 			changed = true
 		}
 		if cleanOn && len(clean) > 0 && antiblock.CDNFrontable(c.node) && r.pinReason != "clean" {
-			ip := clean[rand.Intn(min(len(clean), 3))].IP
+			i := rand.Intn(min(len(clean), 3))
+			ip := clean[i].IP
 			r.node, r.pin, r.pinReason, changed = antiblock.Pin(c.node, ip), ip, "clean", true
+			if r.node.Transport == "xhttp" && len(clean) > 1 {
+				r.split = clean[(i+1)%min(len(clean), 4)].IP
+				r.node.SplitDownload = r.split
+			}
 		}
 		if changed {
 			retry = append(retry, r)
@@ -915,7 +921,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	if c.hello != 0 {
 		s.Hello = helloFPs[c.fp()]
 	}
-	s.PinIP, s.PinReason = c.pin, c.pinReason
+	s.PinIP, s.PinReason, s.SplitIP = c.pin, c.pinReason, c.split
 	e.scan.Tested++
 	e.scan.recent = append(e.scan.recent, now)
 }

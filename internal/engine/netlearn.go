@@ -43,10 +43,12 @@ type netTable struct {
 	// crowd's numbers were already added to this table.
 	// Net is per server network (node.NetID): the /24s and names this
 	// operator blocks, so their other servers are tried last.
-	Net    map[uint32]*passRate `json:"net,omitempty"`
-	Pend   crowdCounts          `json:"pend"`
-	ASN    uint32               `json:"asn,omitempty"`
-	Seeded bool                 `json:"seeded,omitempty"`
+	Net map[uint32]*passRate `json:"net,omitempty"`
+	// Line is the fastest download measured here lately, bytes/s.
+	Line   float64     `json:"line,omitempty"`
+	Pend   crowdCounts `json:"pend"`
+	ASN    uint32      `json:"asn,omitempty"`
+	Seeded bool        `json:"seeded,omitempty"`
 }
 
 // lifeRate is a running average of lifetimes in minutes over N deaths.
@@ -168,6 +170,22 @@ func (l *netLearn) record(proto, style uint8, ok bool) {
 		add(&t.Port[p])
 		t.Pend.Port[p].add(ok)
 	}
+}
+
+// recordLine counts a speed test result; the line is at least as fast as
+// the fastest, and the record fades so a slower network shows through.
+func (l *netLearn) recordLine(bps float64) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	t := l.table()
+	t.Line = max(bps, t.Line*0.95)
+}
+
+// lineMbps is the line speed in megabits per second, 0 when unknown.
+func (l *netLearn) lineMbps() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return int(l.table().Line * 8 / 1e6)
 }
 
 // maxNetIDs bounds the networks remembered per operator; the least
