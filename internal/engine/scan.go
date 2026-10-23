@@ -72,6 +72,9 @@ func (e *Engine) refreshLoop() {
 			go e.checkUpdate()
 		}
 		e.refreshDue()
+		if e.regimeDue() {
+			e.updateRegime()
+		}
 		e.mu.Lock()
 		// The WARP methods are their own protocol; a chosen one excludes them.
 		warp, clean := e.settings.Warp && e.settings.Protocol == "", e.settings.CleanIP
@@ -455,6 +458,9 @@ func (e *Engine) pickBatch(size int) []candidate {
 	e.mu.Unlock()
 	scores := e.sourceScores()
 	learned := e.net.snapshot()
+	e.mu.Lock()
+	reg, regProbe := e.reg.Regime, e.reg.Probe
+	e.mu.Unlock()
 	var out []candidate
 	rand.Shuffle(len(recheck), func(i, j int) { recheck[i], recheck[j] = recheck[j], recheck[i] })
 	maxRecheck := size / 3
@@ -497,6 +503,7 @@ func (e *Engine) pickBatch(size int) []candidate {
 		sc += float64(min(en.Pop, 10)) * 3
 		sc += protoPrior[en.Proto]
 		sc += learned.bonus(en.Proto, en.Style)
+		sc += reg.bonus(regProbe, en)
 		if en.Flags&pool.FlagFresh != 0 {
 			sc += 15
 		}
@@ -611,6 +618,7 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 	e.mu.Lock()
 	frag := e.settings.Fragment
 	cleanOn := e.settings.CleanIP
+	free := e.reg.Regime == regimeFree
 	spoof := ""
 	if e.settings.SpoofSNI != "" && e.opt.IsAdmin() {
 		spoof = e.settings.SpoofSNI
@@ -688,6 +696,10 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 	var retry []candidate
 	clean := e.cf.Best()
 	for _, c := range failed {
+		if free {
+			// Nothing here needs the tricks that beat filtering.
+			break
+		}
 		r := c
 		changed := false
 		// The second try changes the ClientHello: fragmented, unless that

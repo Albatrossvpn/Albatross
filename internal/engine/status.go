@@ -27,6 +27,8 @@ type Snapshot struct {
 	Update     *UpdateInfo   `json:"update,omitempty"`
 	TotalGood  int           `json:"total_good"`
 	Account    AccountState  `json:"account"`
+	Notice     string        `json:"notice,omitempty"`
+	Network    string        `json:"network,omitempty"` // the filtering regime found here
 }
 
 // ScanInfo is scan progress.
@@ -75,6 +77,8 @@ func (e *Engine) Snapshot() Snapshot {
 	snap := Snapshot{
 		Status:     e.status,
 		Message:    e.message,
+		Notice:     e.notice,
+		Network:    string(e.reg.Regime),
 		Target:     e.target,
 		TargetName: countryName(e.target),
 		TargetFlag: geo.Flag(e.target),

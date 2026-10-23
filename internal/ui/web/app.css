@@ -57,6 +57,11 @@ html, body { margin: 0; height: 100%; }
   background: #22c55e22; color: inherit; font: inherit; text-align: center; cursor: pointer;
 }
 .update-banner.hidden { display: none; }
+.notice {
+  margin: 0 0 14px; padding: 10px 14px; border-radius: 12px;
+  background: #f59e0b22; text-align: center;
+}
+.notice.hidden { display: none; }
 body {
   background: var(--bg-grad), var(--bg);
   color: var(--text);

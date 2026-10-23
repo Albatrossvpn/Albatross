@@ -92,6 +92,9 @@ type Engine struct {
 	scan         scanState
 	logs         []LogLine
 	localDNS     string
+	reg          regimeState   // the network's filtering regime (regime.go)
+	regNet       string        // the network reg was probed on
+	notice       string        // a message for the user that outlives status changes
 	update       *UpdateInfo   // a newer version, from update.json
 	uiSeen       time.Time     // last time the UI asked for a snapshot
 	countries    []CountryInfo // cached for countryCache
@@ -173,6 +176,7 @@ func New(opt Options) (*Engine, error) {
 	}
 	e.loadServers()
 	e.net.load(e.dir)
+	e.loadRegime()
 	e.net.use(opt.LocalDNS)
 	e.loadSourceStats()
 	e.buildSources()
@@ -261,6 +265,10 @@ func (e *Engine) SetLocalDNS(addr string) {
 	e.mu.Unlock()
 	// Another network filters differently.
 	e.net.use(addr)
+	if moved {
+		// Probe the new network's regime (the refresh loop sees it due).
+		e.triggerRefill()
+	}
 	if moved && c != nil {
 		// Connections made over the old network are gone; check the
 		// server in use now so traffic recovers at once.
