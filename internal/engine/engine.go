@@ -212,11 +212,16 @@ func New(opt Options) (*Engine, error) {
 // Start begins scanning (and connects if the user asked for that).
 func (e *Engine) Start() {
 	e.ctx, e.cancel = context.WithCancel(context.Background())
-	addr := e.proxyAddr()
-	if e.opt.SysProxy.Owned(addr) {
-		// A crash left the system pointing at our dead proxy.
-		e.opt.SysProxy.Clear()
+	// A crash left the system pointing at our dead proxy: at today's port,
+	// or at the one in use then, which an automatic port change (another
+	// program took the port) may have made different.
+	for _, addr := range []string{e.proxyAddr(), e.lastProxySet()} {
+		if addr != "" && e.opt.SysProxy.Owned(addr) {
+			e.opt.SysProxy.Clear()
+			break
+		}
 	}
+	e.rememberProxySet("")
 	if e.bin.SingBox == "" {
 		e.logf("error", "Connection core not found; please reinstall the app.")
 	}
