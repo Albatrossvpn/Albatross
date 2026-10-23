@@ -25,9 +25,6 @@ type Settings struct {
 	ProxyPort int `json:"proxy_port"`
 	// AllowLAN lets other devices on the network use the proxy port.
 	AllowLAN bool `json:"allow_lan"`
-	// WarpExit runs Cloudflare WARP through the server in use: the server's
-	// owner cannot see the traffic and sites see a clean address.
-	WarpExit bool `json:"warp_exit"`
 	// AutoSwitch moves to clearly faster servers in the same country while
 	// connected and refreshes backups that stopped working. Moving off a
 	// server that failed happens either way.

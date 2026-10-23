@@ -14,10 +14,11 @@ import (
 	"time"
 )
 
-// warpID is a free Cloudflare WARP device. With Settings.WarpExit the
-// connection runs WARP's WireGuard tunnel through the server in use, so the
-// server's owner sees only encrypted WARP traffic and sites see a clean
-// Cloudflare address (fewer captchas, Google and streaming work better).
+// warpID is a free Cloudflare WARP device. Every connection can run WARP's
+// WireGuard tunnel through the server in use, so the server's owner sees
+// only encrypted WARP traffic and sites see a clean Cloudflare address
+// (fewer captchas, Google and streaming work better). watchWarpExit decides
+// when it is worth it; there is no setting.
 type warpID struct {
 	PrivateKey string `json:"private_key"`
 	PeerKey    string `json:"peer_key"`
@@ -124,35 +125,44 @@ func (w *warpID) endpoint() map[string]any {
 	}
 }
 
-// watchWarpExit moves traffic onto WARP once it answers through the server
-// in use, and back to the server alone when it stops answering (servers
-// that do not carry UDP cannot carry WARP). A device is signed up through
-// the connection the first time.
+// watchWarpExit moves traffic onto WARP when it answers through the server
+// in use and is not much slower than the server alone, and back when it
+// stops answering (servers that do not carry UDP cannot carry WARP) or
+// falls well behind. The first connection signs a device up quietly; the
+// next ones use it.
 func (e *Engine) watchWarpExit(ctx context.Context, c *connection) {
 	if !c.warp {
-		if e.Settings().WarpExit && e.warpExit() == nil {
+		// Test runs (Version "test") do not sign devices up.
+		if e.warpExit() == nil && e.opt.Version != "test" {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(30 * time.Second):
+			}
 			if err := e.registerWarp(ctx, e.proxyClient()); err != nil {
-				e.logf("warn", "Could not set up the WARP exit: %v", err)
+				e.logf("info", "WARP is not available: %v", err)
 				return
 			}
-			e.logf("info", "WARP exit is set up; reconnecting to use it.")
-			e.mu.Lock()
-			target := e.target
-			e.mu.Unlock()
-			go e.Connect(target)
+			e.logf("info", "WARP is set up; connections from now on can use it.")
 		}
 		return
 	}
 	on, fails := false, 0
 	for {
 		r, ok := c.testTag(ctx, "warp-exit", 8*time.Second)
+		c.mu.Lock()
+		direct := c.delay
+		c.mu.Unlock()
+		// Worth it only while it costs little: within twice the server's
+		// own delay, or 400 ms more, whichever is larger.
+		cheap := direct <= 0 || r <= max(2*direct, direct+400)
 		switch {
-		case ok && !on:
+		case ok && !on && cheap:
 			if _, err := c.api(ctx, http.MethodPut, "/proxies/exit", map[string]string{"name": "warp-exit"}, nil, 3*time.Second); err == nil {
 				on, fails = true, 0
 				e.logf("info", "Traffic now leaves through WARP (%d ms).", r)
 			}
-		case ok:
+		case ok && on && cheap:
 			fails = 0
 		case on:
 			if fails++; fails >= 2 {
