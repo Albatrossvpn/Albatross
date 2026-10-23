@@ -182,6 +182,13 @@ func TestKeyIgnoresName(t *testing.T) {
 	if a.Key() != b.Key() {
 		t.Fatal("key should ignore the name")
 	}
+	b.Password = "different"
+	if a.Key() == b.Key() {
+		t.Fatal("key should include the password")
+	}
+	if len(a.Key()) != 20 {
+		t.Fatalf("key length = %d, want 20 hex characters", len(a.Key()))
+	}
 }
 
 func TestRejectsJunk(t *testing.T) {

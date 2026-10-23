@@ -3,7 +3,7 @@
 package node
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -131,7 +131,7 @@ type OpenVPN struct {
 
 // Key identifies a node by everything except its display name.
 func (n *Node) Key() string {
-	h := sha1.New()
+	h := sha256.New()
 	w := func(s string) { h.Write([]byte(s)); h.Write([]byte{0}) }
 	w(n.Proto)
 	w(strings.ToLower(n.Server))
@@ -175,7 +175,7 @@ func (n *Node) Key() string {
 func Key64(key string) uint64 {
 	b, err := hex.DecodeString(key)
 	if err != nil || len(b) < 8 {
-		s := sha1.Sum([]byte(key))
+		s := sha256.Sum256([]byte(key))
 		return binary.LittleEndian.Uint64(s[:8])
 	}
 	return binary.LittleEndian.Uint64(b[:8])
