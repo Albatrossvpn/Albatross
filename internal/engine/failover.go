@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -722,7 +723,8 @@ func (e *Engine) rebuild(c *connection, failed []*member) {
 	e.mu.Unlock()
 	e.stopConn(c, false)
 	go func() {
-		if err := e.connectLoop(gen, c.country, c.home, nil, avoid); err != nil {
+		// A stale loop gave way to a newer connect, whose VPN must stay up.
+		if err := e.connectLoop(gen, c.country, c.home, nil, avoid); err != nil && !errors.Is(err, errStale) {
 			e.mu.Lock()
 			still := e.conn == nil
 			e.mu.Unlock()
