@@ -107,8 +107,13 @@ function render(s) {
   $("update-banner").classList.toggle("hidden", !u || u.required);
   $("update-modal").classList.toggle("hidden", !u || !u.required);
   if (u) {
-    $("update-banner").textContent = `Version ${u.latest} is available. Tap to get it.${u.message ? " " + u.message : ""}`;
+    const busy = u.in_app && u.progress > 0 && u.progress < 100;
+    $("update-banner").textContent = busy ? `Downloading version ${u.latest}… ${u.progress}%`
+      : u.error ? u.error
+      : `Version ${u.latest} is available. Tap to ${u.in_app ? "install" : "get"} it.${u.message ? " " + u.message : ""}`;
     if (u.message) $("update-text").textContent = u.message;
+    $("update-get").textContent = busy ? `Downloading… ${u.progress}%` : u.error ? "Try again" : u.in_app ? "Install" : "Download";
+    $("update-get").disabled = busy;
   }
 
   renderAccount(s.account);
@@ -391,7 +396,18 @@ $("admin-ok").addEventListener("click", async () => {
 });
 $("quit-btn").addEventListener("click", () => api("POST", "/api/quit").catch(() => {}));
 
-const getUpdate = () => state && state.update && api("POST", "/api/open", { url: state.update.url }).catch((e) => toast(e.message));
+// The app downloads and opens the new version itself where it can; else the
+// download page opens.
+const getUpdate = async () => {
+  if (!state || !state.update) return;
+  try {
+    await api("POST", "/api/update");
+    poll();
+  } catch (e) {
+    if (e.code === "no_in_app") api("POST", "/api/open", { url: state.update.url }).catch((e2) => toast(e2.message));
+    else toast(e.message);
+  }
+};
 $("update-banner").addEventListener("click", getUpdate);
 $("update-get").addEventListener("click", getUpdate);
 

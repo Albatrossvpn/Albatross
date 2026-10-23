@@ -48,6 +48,9 @@ type Options struct {
 	// Mobile tunes defaults and pacing for phones: lighter scanning, no
 	// large lists by default, and "proxy" mode is the device-wide VPN.
 	Mobile bool
+	// InstallUpdate opens a downloaded installer of a newer version (see
+	// GetUpdate); nil means the download page is opened instead.
+	InstallUpdate func(path string) error
 	// LANAddrs lists this device's addresses on its hotspot and Wi-Fi, for
 	// systems where the engine cannot list them itself (Android 11 and
 	// later refuse it); nil means the engine asks the system.
@@ -101,6 +104,7 @@ type Engine struct {
 	message      string
 	target       string // country the user wants ("" = fastest anywhere)
 	wantConnect  bool   // keep trying to connect until a server is found
+	updating     bool   // GetUpdate is downloading
 	connGen      int    // bumped by every user connect/disconnect; stale loops exit
 	// startMu lets one connection attempt run at a time: two at once each
 	// start a core on the proxy port and the second finds it taken.

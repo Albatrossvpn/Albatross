@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
@@ -100,7 +101,7 @@ func (e *Engine) Snapshot() Snapshot {
 		Settings:       e.settings,
 		Version:        e.opt.Version,
 		Mobile:         e.opt.Mobile,
-		Update:         e.update,
+		Update:         e.updateCopy(),
 		Cores:          CoreInfo{SingBox: e.bin.SingBox != "", Xray: e.bin.Xray != "", WarpPlus: e.bin.WarpPlus != ""},
 		WorkingNow:     working,
 		TotalGood:      len(e.good),
@@ -178,14 +179,32 @@ func (e *Engine) lanIPs() []string {
 	if e.opt.LANAddrs != nil {
 		return e.opt.LANAddrs()
 	}
-	addrs, _ := net.InterfaceAddrs()
+	ifaces, _ := net.Interfaces()
 	var out []string
-	for _, a := range addrs {
-		ip, ok := a.(*net.IPNet)
-		if !ok || ip.IP.To4() == nil || !ip.IP.IsPrivate() || ip.IP.To4()[1] == 19 && ip.IP.To4()[0] == 172 {
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || virtualIface(ifc.Name) {
 			continue
 		}
-		out = append(out, ip.IP.String())
+		addrs, _ := ifc.Addrs()
+		for _, a := range addrs {
+			ip, ok := a.(*net.IPNet)
+			if !ok || ip.IP.To4() == nil || !ip.IP.IsPrivate() || ip.IP.To4()[1] == 19 && ip.IP.To4()[0] == 172 {
+				continue
+			}
+			out = append(out, ip.IP.String())
+		}
 	}
 	return out
+}
+
+// virtualIface reports adapters that only reach virtual machines and
+// containers on this computer, never another device.
+func virtualIface(name string) bool {
+	n := strings.ToLower(name)
+	for _, v := range []string{"docker", "br-", "veth", "vethernet", "virtualbox", "vmware", "vboxnet", "hyper-v", "wsl", "albatross"} {
+		if strings.Contains(n, v) {
+			return true
+		}
+	}
+	return false
 }

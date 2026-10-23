@@ -98,6 +98,20 @@ final class Bridge implements Platform {
         }
     }
 
+    @Override
+    public void installUpdate(String path) {
+        main.post(() -> {
+            ApkProvider.update = new java.io.File(path);
+            try {
+                app.startActivity(new Intent(Intent.ACTION_VIEW)
+                        .setDataAndType(ApkProvider.UPDATE_URI, ApkProvider.TYPE)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
+            } catch (Exception e) {
+                Toast.makeText(app, R.string.update_failed, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
     // Go cannot list the network interfaces on Android 11 and later; Java
     // can. Cellular and tunnel interfaces are left out: other devices reach
     // this phone only on its hotspot, Wi-Fi or USB/Bluetooth tethering.

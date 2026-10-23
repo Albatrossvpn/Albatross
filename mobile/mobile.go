@@ -44,6 +44,9 @@ type Platform interface {
 	// LanAddrs lists the device's IPv4 addresses on its hotspot and
 	// Wi-Fi, comma-separated. Go cannot list them on Android 11 and later.
 	LanAddrs() string
+	// InstallUpdate opens the system installer on a downloaded APK of a
+	// newer version, which installs over this one (same signing key).
+	InstallUpdate(path string)
 }
 
 var (
@@ -89,6 +92,10 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 		Version:  Version,
 		LocalDNS: dns,
 		Mobile:   true,
+		InstallUpdate: func(path string) error {
+			p.InstallUpdate(path)
+			return nil
+		},
 		LANAddrs: func() []string {
 			var out []string
 			for _, a := range strings.Split(p.LanAddrs(), ",") {

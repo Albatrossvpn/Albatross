@@ -306,3 +306,4 @@ func (p *fakeVPN) Quit()            {}
 func (p *fakeVPN) ShareText(string) {}
 func (p *fakeVPN) ShareApp()        {}
 func (p *fakeVPN) LanAddrs() string { return "" }
+func (p *fakeVPN) InstallUpdate(string) {}
