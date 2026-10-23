@@ -25,8 +25,23 @@ func loadBuiltinBridges() builtinBridges {
 }
 
 // bridgeLines returns the Bridge lines for the chosen bridge type.
-func bridgeLines(s Settings) []string {
+// Built-in bridges come from the bundle's pt_config.json when it has them,
+// since that ships with each Tor release, and otherwise from Orbot's list.
+func bridgeLines(s Settings, pt *ptConfig) []string {
 	b := loadBuiltinBridges()
+	if pt != nil {
+		if v := pt.Bridges["snowflake"]; len(v) > 0 {
+			b.Snowflake = v
+		}
+		if v := pt.Bridges["obfs4"]; len(v) > 0 {
+			b.Obfs4 = v
+		}
+		if v := pt.Bridges["meek"]; len(v) > 0 {
+			b.Meek = v
+		} else if v := pt.Bridges["meek-azure"]; len(v) > 0 {
+			b.Meek = v
+		}
+	}
 	switch s.Bridge {
 	case BridgeSnowflake:
 		return b.Snowflake

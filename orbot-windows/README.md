@@ -7,7 +7,9 @@ Persian and English.
 
 Upstream Orbot is Android/iOS only, so this is a separate app. It reuses
 Orbot's built-in bridge list and runs the official **Tor Expert Bundle**
-(`tor.exe`, `lyrebird.exe`, `snowflake-client.exe`) under the hood.
+(`tor.exe` and `lyrebird.exe`, which also provides Snowflake) under the hood.
+Transport lines and fresh built-in bridges are read from the bundle's
+`pt_config.json`, falling back to Orbot's list.
 
 ## Download
 

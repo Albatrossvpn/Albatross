@@ -36,9 +36,10 @@ jobs:
           go-version-file: orbot-windows/go.mod
           cache-dependency-path: orbot-windows/go.sum
 
-      - name: Vet
+      - name: Vet and test
         run: |
           go vet ./...
+          go test ./...
           GOOS=windows GOARCH=amd64 go vet ./...
 
       - name: Version
@@ -95,7 +96,7 @@ jobs:
           echo "wintun: $WINTUN_VERSION" >> "$P/VERSIONS.txt"
           echo "Orbot for Windows: ${{ steps.ver.outputs.version }}" >> "$P/VERSIONS.txt"
           # The app expects these files; fail the build if the bundle layout changes.
-          for f in tor/tor.exe tor/pluggable_transports/lyrebird.exe tor/pluggable_transports/snowflake-client.exe data/geoip data/geoip6 wintun.dll; do
+          for f in tor/tor.exe tor/pluggable_transports/lyrebird.exe tor/pluggable_transports/pt_config.json data/geoip data/geoip6 wintun.dll; do
             test -f "$P/$f" || { echo "missing $f"; exit 1; }
           done
           (cd dist && zip -qr "Orbot-Windows-x64-${{ steps.ver.outputs.version }}.zip" Orbot-Windows-x64)

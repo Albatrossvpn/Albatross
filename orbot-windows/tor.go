@@ -168,25 +168,14 @@ func (t *Tor) torrc(s Settings) (string, error) {
 		w("StrictNodes 1")
 	}
 
-	bridges := bridgeLines(s)
+	bridges := bridgeLines(s, t.paths.loadPTConfig())
 	if s.Bridge != BridgeNone {
 		if len(bridges) == 0 {
 			return "", errors.New("no bridges configured")
 		}
-		have := map[string]bool{}
-		if lyrebird, ok := t.paths.ptExec("lyrebird"); ok {
-			w("ClientTransportPlugin meek_lite,obfs2,obfs3,obfs4,scramblesuit,webtunnel exec %s", lyrebird)
-			for _, tr := range []string{"meek_lite", "obfs2", "obfs3", "obfs4", "scramblesuit", "webtunnel"} {
-				have[tr] = true
-			}
-		}
-		if sf, ok := t.paths.ptExec("snowflake-client"); ok {
-			w("ClientTransportPlugin snowflake exec %s", sf)
-			have["snowflake"] = true
-		}
-		if cj, ok := t.paths.ptExec("conjure-client"); ok {
-			w("ClientTransportPlugin conjure exec %s -registerURL https://registration.refraction.network/api", cj)
-			have["conjure"] = true
+		plugins, have := t.transportPlugins()
+		for _, line := range plugins {
+			w("%s", line)
 		}
 		for _, br := range bridges {
 			tr := strings.Fields(br)[0]
