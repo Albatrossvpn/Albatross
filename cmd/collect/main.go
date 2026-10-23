@@ -109,14 +109,23 @@ func refreshHot(path, out string, n int) {
 		return di < dj
 	})
 	hot := hotList(list, passed, hotSize)
+	checkIran(hot)
 	if len(hot) == 0 {
 		log.Print("nothing passed; hot.txt left as it was")
 		return
 	}
-	if err := os.WriteFile(filepath.Join(out, "hot.txt"), []byte(strings.Join(hot, "\n")+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(out, "hot.txt"), []byte(strings.Join(links(hot), "\n")+"\n"), 0o644); err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("wrote %d hot servers", len(hot))
+}
+
+func links(es []*entry) []string {
+	out := make([]string, len(es))
+	for i, e := range es {
+		out[i] = e.link
+	}
+	return out
 }
 
 type entry struct {
@@ -149,6 +158,10 @@ type meta struct {
 	// Yield is the same count for every other source, so a link that still
 	// answers but carries nothing usable shows up too.
 	Yield map[string]int `json:"yield"`
+	// IranChecked hot addresses were tried from Globalping probes inside
+	// Iran; IranOpen of them answered there.
+	IranChecked int `json:"iran_checked"`
+	IranOpen    int `json:"iran_open"`
 }
 
 var schemeRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]{1,20})://[^\s"'<>]{8,}`)
@@ -297,13 +310,6 @@ func main() {
 	passed, tested := realTest(freshE, *real)
 	freshE, failedE := orderFresh(freshE, passed, tested)
 	restE = append(failedE, restE...)
-	links := func(es []*entry) []string {
-		out := make([]string, len(es))
-		for i, e := range es {
-			out[i] = e.link
-		}
-		return out
-	}
 	fresh, rest := links(freshE), links(restE)
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
@@ -318,7 +324,9 @@ func main() {
 		m.Files[name] = len(links)
 	}
 	write("fresh.txt", fresh)
-	write("hot.txt", hotList(freshE, passed, hotSize))
+	hot := hotList(freshE, passed, hotSize)
+	m.IranChecked, m.IranOpen = checkIran(hot)
+	write("hot.txt", links(hot))
 	if *prev != "" {
 		write("new.txt", newList(fresh, readLines(filepath.Join(*prev, "fresh.txt")), readLines(filepath.Join(*prev, "new.txt")), newSize))
 	}
