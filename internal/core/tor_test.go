@@ -66,3 +66,33 @@ func TestTorConfig(t *testing.T) {
 		}
 	}
 }
+
+// On Android the transports ship as lib<name>.so beside tor and
+// pt_config.json is built in.
+func TestTorConfigAndroid(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"libtor.so", "liblyrebird.so", "libconjureclient.so"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := embeddedPT
+	defer func() { embeddedPT = old }()
+	embeddedPT = []byte(`{"pluggableTransports":{
+		"lyrebird":"ClientTransportPlugin meek_lite,obfs4,webtunnel,snowflake exec ${pt_path}lyrebird",
+		"conjure":"ClientTransportPlugin conjure exec ${pt_path}conjure-client -registerURL https://registration.refraction.network/api"},
+		"bridges":{"obfs4":["obfs4 192.0.2.1:443 0123456789ABCDEF0123456789ABCDEF01234567 cert=x iat-mode=0"]}}`)
+	rc, err := TorConfig(filepath.Join(dir, "libtor.so"), 9050, filepath.Join(dir, "data"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"ClientTransportPlugin meek_lite,obfs4,webtunnel,snowflake exec liblyrebird.so",
+		"ClientTransportPlugin conjure exec libconjureclient.so -registerURL",
+		"Bridge obfs4 192.0.2.1:443",
+	} {
+		if !strings.Contains(rc, want) {
+			t.Errorf("torrc lacks %q:\n%s", want, rc)
+		}
+	}
+}

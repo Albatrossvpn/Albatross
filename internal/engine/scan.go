@@ -814,6 +814,7 @@ func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidat
 				e.pool.Update(c.key, func(p *pool.Entry) { p.State = pool.StateRejected; p.LastTest = pool.Minutes(time.Now()) })
 			case r.OK:
 				e.recordOK(c, r)
+			case r.Tampered && e.distrust(c.key, c.node.Name):
 			default:
 				mu.Lock()
 				failed = append(failed, c)
@@ -868,6 +869,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	})
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.httpsOK = now
 	if c.source >= 0 && c.source < len(e.srcStats) {
 		e.srcStats[c.source].Tested++
 		e.srcStats[c.source].OK++
