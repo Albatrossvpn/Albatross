@@ -20,9 +20,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # An overlapping run just stops (see collect.yml).
+          # A run stops when an older one is still going (see collect.yml).
           busy=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/hot.yml/runs?status=in_progress" \
-            --jq "[.workflow_runs[] | select(.id != $GITHUB_RUN_ID)] | length")
+            --jq "[.workflow_runs[] | select(.id < $GITHUB_RUN_ID)] | length")
           if [ "$busy" -gt 0 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
   hot:
     needs: due
