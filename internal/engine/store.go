@@ -34,6 +34,7 @@ type Server struct {
 	Hello     string    `json:"hello,omitempty"`      // browser ClientHello the app picked
 	ECH       bool      `json:"ech,omitempty"`        // only works with ECH looked up over DNS
 	PinIP     string    `json:"pin_ip,omitempty"`     // connect here instead of resolving the name
+	SplitIP   string    `json:"split_ip,omitempty"`   // XHTTP downloads through this edge
 	PinReason string    `json:"pin_reason,omitempty"` // "dns" (poisoned) or "clean" (Cloudflare edge)
 	Plain     bool      `json:"plain,omitempty"`
 	Source    string    `json:"source,omitempty"`
@@ -69,7 +70,9 @@ func (s *Server) runNode() *node.Node {
 	if n == nil || s.PinIP == "" {
 		return n
 	}
-	return antiblock.Pin(n, s.PinIP)
+	n = antiblock.Pin(n, s.PinIP)
+	n.SplitDownload = s.SplitIP
+	return n
 }
 
 // matches reports whether the server uses the chosen protocol ("" = any).

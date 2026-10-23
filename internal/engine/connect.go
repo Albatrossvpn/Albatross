@@ -29,7 +29,14 @@ const groupSize = 8
 // next time the connection is idle.
 const minReady = 3
 
+// connectWide is how many candidates a connection attempt looks at. On a
+// filtered network most servers that worked an hour ago are gone; a quick
+// TCP check of many at once finds the live ones in seconds, where testing
+// groups of groupSize one after another took a minute.
+const connectWide = 40
+
 type connection struct {
+	warp        bool   // the config holds the WARP exit (watchWarpExit)
 	country     string // what the user asked for ("" = fastest anywhere)
 	home        string // country the group was built in; backups stay here
 	pinned      bool   // the user picked this one server
@@ -47,23 +54,25 @@ type connection struct {
 	cancel      context.CancelFunc
 	wake        chan struct{} // asks the monitor to check the active server now
 
-	mu       sync.Mutex
-	active   *member
-	delay    int
-	exitIP   string
-	exitCC   string
-	up       int64
-	down     int64
-	upRate   int64
-	dnRate   int64
-	lastBusy time.Time // last second that carried traffic
-	waiting  time.Time // when data went out with nothing back since
-	healthy  bool
-	switched time.Time // last time the member in use changed
-	speedAt  time.Time // last speed round
-	slowRuns int       // speed rounds in a row that found a much faster backup
-	slowNet  time.Time // when the whole network was last found slow
-	errs     []logErr  // recent failed connections, for watchLog
+	mu         sync.Mutex
+	active     *member
+	sticky     *member // where stickyDomains go; moves only when it fails
+	fasterSeen *member // the faster member the last sweep found
+	delay      int
+	exitIP     string
+	exitCC     string
+	up         int64
+	down       int64
+	upRate     int64
+	dnRate     int64
+	lastBusy   time.Time // last second that carried traffic
+	waiting    time.Time // when data went out with nothing back since
+	healthy    bool
+	switched   time.Time // last time the member in use changed
+	speedAt    time.Time // last speed round
+	slowRuns   int       // speed rounds in a row that found a much faster backup
+	slowNet    time.Time // when the whole network was last found slow
+	errs       []logErr  // recent failed connections, for watchLog
 }
 
 // member is one server of a live group.
@@ -133,6 +142,7 @@ func (e *Engine) Connect(country string) error {
 	e.settings.Connected = true
 	e.wantConnect = true
 	e.connGen++
+	e.cancelAttempt()
 	gen := e.connGen
 	mode := e.settings.Mode
 	e.mu.Unlock()
@@ -168,6 +178,7 @@ func (e *Engine) ConnectServer(key string) error {
 	e.settings.Connected = true
 	e.wantConnect = true
 	e.connGen++
+	e.cancelAttempt()
 	gen := e.connGen
 	e.mu.Unlock()
 	saveJSON(filepath.Join(e.dir, "settings.json"), e.Settings())
@@ -202,13 +213,13 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 		}
 		picks := pinned
 		if picks == nil {
-			picks = e.pickGroup(country, home, exclude)
+			picks = e.reachable(e.pickGroup(country, home, exclude, connectWide), groupSize, exclude)
 		}
-		if len(picks) == 0 && !triedRecent {
+		if len(picks) == 0 && pinned == nil && !triedRecent {
 			// Nothing fresh: try last week's servers once before waiting on
 			// the scan.
 			triedRecent = true
-			picks = e.recentServers(country, groupSize, exclude)
+			picks = e.reachable(e.recentServers(country, connectWide, exclude), groupSize, exclude)
 		}
 		if len(picks) == 0 {
 			if len(exclude) > 0 {
@@ -232,8 +243,11 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 		if err == nil {
 			return nil
 		}
-		if errors.Is(err, errStale) {
-			return err
+		e.mu.Lock()
+		stale := e.connGen != gen
+		e.mu.Unlock()
+		if stale || errors.Is(err, errStale) {
+			return errStale
 		}
 		e.logf("warn", "Connection attempt failed: %v", err)
 		for _, s := range picks {
@@ -256,9 +270,9 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 // with backups from the same country. A fastest-anywhere group forms around
 // the best server's country (or home, when it already had one) and reaches
 // into other countries only when that country runs short.
-func (e *Engine) pickGroup(country, home string, exclude map[string]bool) []*Server {
+func (e *Engine) pickGroup(country, home string, exclude map[string]bool, size int) []*Server {
 	if country != "" {
-		return e.bestServers(country, groupSize, exclude)
+		return e.bestServers(country, size, exclude)
 	}
 	if home == "" {
 		best := e.bestServers("", 1, exclude)
@@ -267,7 +281,7 @@ func (e *Engine) pickGroup(country, home string, exclude map[string]bool) []*Ser
 		}
 		home = best[0].Country
 	}
-	group := e.bestServers(home, groupSize, exclude)
+	group := e.bestServers(home, size, exclude)
 	if len(group) >= minReady {
 		return group
 	}
@@ -278,7 +292,76 @@ func (e *Engine) pickGroup(country, home string, exclude map[string]bool) []*Ser
 	for _, s := range group {
 		skip[s.Key] = true
 	}
-	return append(group, e.bestServers("", groupSize-len(group), skip)...)
+	return append(group, e.bestServers("", size-len(group), skip)...)
+}
+
+// tcpAnswers reports whether addr accepts a TCP connection. Tests replace it.
+var tcpAnswers = func(ctx context.Context, addr string) bool {
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// reachable keeps the first n of list, in order, whose address accepts a
+// TCP connection within a few seconds, and adds the rest to exclude.
+// Servers on UDP cannot be checked this way and are kept.
+func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Server {
+	ok := make([]bool, len(list))
+	ctx, cancel := context.WithTimeout(e.ctx, 3*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	for i, s := range list {
+		nd := s.Node()
+		if nd == nil || nd.UDPBased() {
+			ok[i] = nd != nil
+			continue
+		}
+		wg.Add(1)
+		go func(i int, addr string) {
+			defer wg.Done()
+			ok[i] = tcpAnswers(ctx, addr)
+		}(i, nd.Endpoint())
+	}
+	wg.Wait()
+	var out []*Server
+	alive := 0
+	for i, s := range list {
+		if !ok[i] {
+			continue
+		}
+		alive++
+		if len(out) < n {
+			out = append(out, s)
+		}
+	}
+	if alive == 0 {
+		// Nothing answered: more likely this device's network than every
+		// server at once. Leave the list as it was.
+		return list[:min(n, len(list))]
+	}
+	dead := map[string]bool{}
+	for i, s := range list {
+		if !ok[i] {
+			exclude[s.Key] = true
+			nd := s.Node()
+			dead[nd.Endpoint()] = true
+			e.net.recordNet(nd.NetID(), false)
+		}
+	}
+	// Other configs on an address that did not answer will not answer
+	// either; skip them instead of finding that out one by one.
+	e.mu.Lock()
+	for _, s := range e.good {
+		if nd := s.Node(); nd != nil && dead[nd.Endpoint()] {
+			exclude[s.Key] = true
+		}
+	}
+	e.mu.Unlock()
+	return out
 }
 
 // bestServers picks the lowest-delay usable servers in a country.
@@ -316,30 +399,47 @@ func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, o
 	sort.Slice(list, func(i, j int) bool { return list[i].rank(now) < list[j].rank(now) })
 	// WireGuard peers sharing a private key fight over one session, and each
 	// warp-plus method is a whole process; keep the group light.
+	//
+	// Backups that share a network, or a protocol, transport and port, tend
+	// to be cut together by the same block, so the first pass takes at most
+	// two from one network and two of one kind, the second drops the limit
+	// on kinds, and the last fills what is left in plain rank order.
 	var out []*Server
+	taken := map[*Server]bool{}
 	keys := map[string]bool{}
+	nets := map[uint32]int{}
+	kinds := map[string]int{}
 	warpPlus := 0
-	for _, s := range list {
-		if len(out) >= n {
-			break
-		}
-		nd := s.Node()
-		if nd == nil {
-			continue
-		}
-		if nd.Proto == "wireguard" {
-			if keys[nd.PrivateKey] {
+	for pass := 0; pass < 3; pass++ {
+		for _, s := range list {
+			if len(out) >= n {
+				break
+			}
+			nd := s.Node()
+			if nd == nil || taken[s] {
 				continue
 			}
-			keys[nd.PrivateKey] = true
-		}
-		if nd.Proto == "warpplus" {
-			if warpPlus >= 1 {
+			kind := nd.Proto + "/" + nd.Transport + "/" + nd.Security + "/" + strconv.Itoa(nd.Port)
+			if pass < 2 && nets[nd.NetID()] >= 2 || pass == 0 && kinds[kind] >= 2 {
 				continue
 			}
-			warpPlus++
+			if nd.Proto == "wireguard" {
+				if keys[nd.PrivateKey] {
+					continue
+				}
+				keys[nd.PrivateKey] = true
+			}
+			if nd.Proto == "warpplus" {
+				if warpPlus >= 1 {
+					continue
+				}
+				warpPlus++
+			}
+			taken[s] = true
+			nets[nd.NetID()]++
+			kinds[kind]++
+			out = append(out, s)
 		}
-		out = append(out, s)
 	}
 	return out
 }
@@ -350,6 +450,16 @@ var (
 	// errServers means the servers, not the local setup, failed.
 	errServers = errors.New("servers failed")
 )
+
+// cancelAttempt stops a connection attempt that a newer connect or a
+// disconnect made stale, so its core frees the proxy port at once. Called
+// with mu held.
+func (e *Engine) cancelAttempt() {
+	if e.attempt != nil {
+		e.attempt()
+		e.attempt = nil
+	}
+}
 
 // portFree reports whether a local TCP port can be bound.
 func portFree(listen string, port int) bool {
@@ -363,7 +473,16 @@ func portFree(listen string, port int) bool {
 
 // start runs the cores for a group of servers and switches over to them.
 func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) error {
+	e.startMu.Lock()
+	defer e.startMu.Unlock()
 	e.mu.Lock()
+	if e.connGen != gen {
+		e.mu.Unlock()
+		return errStale
+	}
+	actx, acancel := context.WithCancel(e.ctx)
+	defer acancel()
+	e.attempt = acancel
 	set := e.settings
 	old := e.conn
 	e.mu.Unlock()
@@ -425,15 +544,18 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
 		clashSecret: c.clashSecret, probeAddr: c.probeAddr, exe: e.opt.ExeName, localDNS: e.dns(), mobile: e.opt.Mobile,
 	}
+	opts.warp = e.warpExit()
+	c.warp = opts.warp != nil
 	build := core.BuildOptions{
 		Fragment:    set.Fragment == "on",
 		FragmentFor: func(n *node.Node) bool { return fragFor[n] },
 		OnLine:      c.watchLog,
+		LineMbps:    e.net.lineMbps(),
 	}
 	if set.SpoofSNI != "" && e.opt.IsAdmin() {
 		build.Spoof = set.SpoofSNI
 	}
-	ctx, cancel := context.WithTimeout(e.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(actx, 30*time.Second)
 	defer cancel()
 	run, err := e.rt.Run(ctx, "connect", nodes, build, func(s *core.Set) map[string]any {
 		return connectConfig(s, opts)
@@ -479,17 +601,18 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 				rest = append(rest, m)
 			}
 		}
-		m := e.race(e.ctx, c, rest, 8*time.Second)
+		m := e.race(actx, c, rest, 8*time.Second)
 		if m == nil {
 			break
 		}
 		tried[m] = true
-		if err := c.use(e.ctx, m); err != nil {
+		if err := c.use(actx, m); err != nil {
 			run.Stop()
 			return err
 		}
+		c.keep(actx, m)
 		// Prove the whole path works before telling anyone it does.
-		r = tester.Probe(e.ctx, proxy, 12*time.Second)
+		r = tester.Probe(actx, proxy, 12*time.Second)
 		if !r.OK {
 			e.noteResult(c, m, 0, false)
 		}
@@ -501,6 +624,9 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	}
 	if !r.OK {
 		run.Stop()
+		if actx.Err() != nil && e.ctx.Err() == nil {
+			return errStale // a newer connect or a disconnect took over
+		}
 		if len(tried) == 0 {
 			return fmt.Errorf("%w: no server in the group answered", errServers)
 		}
@@ -515,7 +641,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	}
 	c.exitIP, c.exitCC, c.delay, c.healthy = r.ExitIP, r.Country, int(r.Delay/time.Millisecond), true
 	if set.Mode == "proxy" {
-		bypass := []string{"localhost", "127.*", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*", "172.30.*", "172.31.*", "192.168.*", "<local>"}
+		bypass := []string{"localhost", "127.*", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*", "172.30.*", "172.31.*", "192.168.*", "169.254.*", "<local>"}
 		if r, ok := findRegion(set.Bypass); ok {
 			for _, s := range r.Suffixes {
 				bypass = append(bypass, "*"+s)
@@ -577,6 +703,7 @@ func (e *Engine) disconnect(byUser bool) {
 	e.mu.Lock()
 	e.wantConnect = false
 	e.connGen++
+	e.cancelAttempt()
 	c := e.conn
 	wasOn := e.settings.Connected
 	if byUser {
@@ -670,6 +797,7 @@ type connOptions struct {
 	exe         string
 	localDNS    string
 	mobile      bool
+	warp        *warpID // offer WARP through the server in use (watchWarpExit)
 }
 
 // connectConfig builds the sing-box config for a live connection.
@@ -680,6 +808,10 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		// (see failover.go), so a switch takes effect at once.
 		map[string]any{
 			"type": "selector", "tag": "proxy", "outbounds": s.Tags, "default": s.Tags[0],
+			"interrupt_exist_connections": false,
+		},
+		map[string]any{
+			"type": "selector", "tag": "sticky", "outbounds": s.Tags, "default": s.Tags[0],
 			"interrupt_exist_connections": false,
 		},
 		map[string]any{"type": "direct", "tag": "direct"},
@@ -704,6 +836,9 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 			"type": "tun", "tag": "tun-in", "interface_name": "Albatross",
 			"address": []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"},
 			"mtu":     9000, "auto_route": true, "strict_route": true, "stack": "mixed",
+			// The local network never enters the tunnel, so casting to a
+			// TV and finding printers keep working.
+			"route_exclude_address": LANNets,
 		})
 	}
 	var ruleSets []any
@@ -711,6 +846,7 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		map[string]any{"action": "sniff"},
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
 		map[string]any{"ip_is_private": true, "outbound": "direct"},
+		map[string]any{"ip_cidr": LANNets, "outbound": "direct"},
 	)
 	if o.tun {
 		// Our own app and the cores' test instances must not loop
@@ -751,9 +887,22 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 			map[string]any{"network": "tcp", "port": []int{21, 23, 25, 80, 110, 143}, "action": "reject"},
 		)
 	}
+	// Sites that sign people out when their address changes keep one exit
+	// for the whole connection.
+	rules = append(rules, map[string]any{"domain_suffix": stickyDomains, "outbound": "sticky"})
+	final := "proxy"
+	if o.warp != nil {
+		// Traffic starts on the server alone; watchWarpExit moves it onto
+		// WARP once WARP answers through the server.
+		outbounds = append(outbounds, map[string]any{
+			"type": "selector", "tag": "exit", "outbounds": []string{"proxy", "warp-exit"}, "default": "proxy",
+			"interrupt_exist_connections": false,
+		})
+		final = "exit"
+	}
 	route := map[string]any{
 		"rules": rules,
-		"final": "proxy",
+		"final": final,
 		// Never on Android: see tester.Tester.Mobile.
 		"auto_detect_interface":   !o.mobile,
 		"default_domain_resolver": "local",
@@ -780,8 +929,12 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 			"clash_api": map[string]any{"external_controller": o.clashAddr, "secret": o.clashSecret},
 		},
 	}
-	if len(s.Endpoints) > 0 {
-		cfg["endpoints"] = s.Endpoints
+	eps := append([]any{}, s.Endpoints...)
+	if o.warp != nil {
+		eps = append(eps, o.warp.endpoint())
+	}
+	if len(eps) > 0 {
+		cfg["endpoints"] = eps
 	}
 	return cfg
 }
@@ -842,4 +995,27 @@ func (e *Engine) connInfo() *ConnInfo {
 		info.Server, info.Proto = c.servers[0].Name, c.servers[0].Proto
 	}
 	return info
+}
+
+// LANNets are the local network's addresses, which never go through a
+// server: private, link-local, multicast (mDNS, SSDP) and broadcast. The
+// tunnel's own addresses stay inside: 172.19.0.0/16 is left out of
+// 172.16.0.0/12, and IPv6 unique-local (fc00::/7) holds the tunnel's
+// fdfe:dcba:9876::/126, which Android refuses to route around.
+var LANNets = []string{
+	"10.0.0.0/8", "172.16.0.0/15", "172.18.0.0/16", "172.20.0.0/14", "172.24.0.0/13",
+	"192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32",
+	"fe80::/10", "ff00::/8",
+}
+
+// stickyDomains are sites that sign people out, or ask them to prove who
+// they are, when their address changes: banks, payments, exchanges,
+// accounts and AI services.
+var stickyDomains = []string{
+	"accounts.google.com", "myaccount.google.com", "login.microsoftonline.com", "login.live.com",
+	"appleid.apple.com", "icloud.com", "paypal.com", "wise.com", "revolut.com",
+	"binance.com", "okx.com", "bybit.com", "kucoin.com", "coinbase.com", "kraken.com",
+	"chatgpt.com", "openai.com", "claude.ai", "anthropic.com", "gemini.google.com",
+	"instagram.com", "facebook.com", "x.com", "twitter.com", "linkedin.com",
+	"github.com", "steampowered.com", "steamcommunity.com", "web.telegram.org",
 }

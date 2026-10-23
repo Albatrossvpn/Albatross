@@ -38,12 +38,17 @@ var protoCodes = map[string]uint8{
 // refreshEvery says how often each kind of source is downloaded again.
 func refreshEvery(s sources.Source, mobile bool) time.Duration {
 	switch {
+	case (s.Hot || s.Delta) && mobile:
+		return 30 * time.Minute
+	case s.Hot || s.Delta:
+		return 20 * time.Minute
 	case s.Central && s.Tier == sources.TierDeep && mobile:
 		return 24 * time.Hour
 	case s.Central && s.Tier == sources.TierDeep:
 		return 6 * time.Hour
 	case s.Central && mobile:
-		return 3 * time.Hour
+		// new.txt brings the additions in between.
+		return 8 * time.Hour
 	case s.Central:
 		return time.Hour
 	case s.Kind == sources.KindTelegram:
@@ -318,7 +323,7 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 			hint = geo.Hint(n.Name)
 		}
 		key := node.Key64(n.Key())
-		en := pool.Entry{Key: key, Source: uint16(idx), Proto: protoCodes[n.Proto], Engine: uint8(eng), Style: n.Style()}
+		en := pool.Entry{Key: key, Source: uint16(idx), Proto: protoCodes[n.Proto], Engine: uint8(eng), Style: n.Style(), Net: n.NetID()}
 		if len(hint) == 2 {
 			en.Hint = [2]byte{hint[0], hint[1]}
 		}
@@ -327,6 +332,9 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 		}
 		if fresh {
 			en.Flags |= pool.FlagFresh
+		}
+		if s.Hot {
+			en.Flags |= pool.FlagHot
 		}
 		if isPlain(n) {
 			en.Flags |= pool.FlagPlain
@@ -391,6 +399,7 @@ type candidate struct {
 	ech       bool   // look the server's ECH config up over DNS
 	pin       string // connect to this IP instead of resolving the name
 	pinReason string
+	split     string // XHTTP downloads through this second clean edge
 }
 
 type scored struct {
@@ -508,9 +517,14 @@ func (e *Engine) pickBatch(size int) []candidate {
 		sc += float64(min(en.Pop, 10)) * 3
 		sc += protoPrior[en.Proto]
 		sc += learned.bonus(en.Proto, en.Style)
+		sc += learned.netBonus(en.Net)
 		sc += reg.bonus(regProbe, en)
 		if en.Flags&pool.FlagFresh != 0 {
 			sc += 15
+		}
+		if en.Flags&pool.FlagHot != 0 {
+			// Worked from the collector minutes ago.
+			sc += 120
 		}
 		if en.State == pool.StateDead {
 			sc -= 40
@@ -722,8 +736,13 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 			changed = true
 		}
 		if cleanOn && len(clean) > 0 && antiblock.CDNFrontable(c.node) && r.pinReason != "clean" {
-			ip := clean[rand.Intn(min(len(clean), 3))].IP
+			i := rand.Intn(min(len(clean), 3))
+			ip := clean[i].IP
 			r.node, r.pin, r.pinReason, changed = antiblock.Pin(c.node, ip), ip, "clean", true
+			if r.node.Transport == "xhttp" && len(clean) > 1 {
+				r.split = clean[(i+1)%min(len(clean), 4)].IP
+				r.node.SplitDownload = r.split
+			}
 		}
 		if changed {
 			retry = append(retry, r)
@@ -862,6 +881,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	n := c.node
 	e.net.record(protoCodes[n.Proto], n.Style(), true)
 	e.net.recordHello(c.helloCode(), true)
+	e.net.recordNet(n.NetID(), true)
 	e.pool.Update(c.key, func(p *pool.Entry) {
 		p.State = pool.StateOK
 		p.Fails = 0
@@ -901,7 +921,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	if c.hello != 0 {
 		s.Hello = helloFPs[c.fp()]
 	}
-	s.PinIP, s.PinReason = c.pin, c.pinReason
+	s.PinIP, s.PinReason, s.SplitIP = c.pin, c.pinReason, c.split
 	e.scan.Tested++
 	e.scan.recent = append(e.scan.recent, now)
 }
@@ -910,6 +930,7 @@ func (e *Engine) recordFail(c candidate, reason string) {
 	now := time.Now()
 	if en, ok := e.pool.Get(c.key); ok {
 		e.net.record(en.Proto, en.Style, false)
+		e.net.recordNet(en.Net, false)
 	}
 	e.pool.Update(c.key, func(p *pool.Entry) {
 		p.State = pool.StateDead

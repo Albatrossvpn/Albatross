@@ -79,6 +79,30 @@ public final class TunnelService extends VpnService {
     }
 
     private boolean open() {
+        try {
+            tun = builder(true).establish();
+        } catch (Exception e) {
+            // A device that refuses one of the local-network exclusions
+            // still gets a working tunnel, only without them.
+            Log.e(TAG, "the tunnel refused the local-network routes", e);
+            try {
+                tun = builder(false).establish();
+            } catch (Exception e2) {
+                Log.e(TAG, "starting the tunnel failed", e2);
+                return false;
+            }
+        }
+        if (tun == null) return false; // permission was revoked
+        try {
+            Mobile.startTun(tun.getFd());
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "starting the tunnel failed", e);
+            return false;
+        }
+    }
+
+    private Builder builder(boolean lan) {
         Builder b = new Builder()
                 .setSession(getString(R.string.app_name))
                 .setMtu((int) Mobile.MTU)
@@ -92,17 +116,20 @@ public final class TunnelService extends VpnService {
             b.addDisallowedApplication(getPackageName());
         } catch (PackageManager.NameNotFoundException ignored) {
         }
+        if (lan && Build.VERSION.SDK_INT >= 33) {
+            // The local network stays outside the tunnel, so casting to a TV
+            // and finding devices (mDNS, SSDP) keep working.
+            for (String net : Mobile.lanNets().split(",")) {
+                String[] p = net.split("/");
+                try {
+                    b.excludeRoute(new android.net.IpPrefix(java.net.InetAddress.getByName(p[0]), Integer.parseInt(p[1])));
+                } catch (Exception ignored) {
+                }
+            }
+        }
         if (Build.VERSION.SDK_INT >= 29) b.setMetered(false);
         b.setConfigureIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE));
-        try {
-            tun = b.establish();
-            if (tun == null) return false; // permission was revoked
-            Mobile.startTun(tun.getFd());
-            return true;
-        } catch (Exception e) {
-            Log.e(TAG, "starting the tunnel failed", e);
-            return false;
-        }
+        return b;
     }
 
     private void foreground() {

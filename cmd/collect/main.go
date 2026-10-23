@@ -37,6 +37,97 @@ import (
 	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
 )
 
+// hotSize is how many servers hot.txt holds: enough for every phone to find
+// a few that work on its network, small enough to fetch in a moment.
+const hotSize = 300
+
+// newSize bounds new.txt: the latest additions to fresh.txt, which apps
+// fetch often instead of downloading all of fresh.txt again.
+const newSize = 4000
+
+// newList is fresh minus what the last run published, newest first, with
+// the last new.txt's servers that are still listed after them.
+func newList(fresh, prevFresh, prevNew []string, max int) []string {
+	old := map[string]bool{}
+	for _, l := range prevFresh {
+		old[l] = true
+	}
+	was := map[string]bool{}
+	for _, l := range prevNew {
+		was[l] = true
+	}
+	var added, kept []string
+	for _, l := range fresh {
+		switch {
+		case was[l]:
+			kept = append(kept, l)
+		case !old[l]:
+			added = append(added, l)
+		}
+	}
+	out := append(added, kept...)
+	return out[:min(len(out), max)]
+}
+
+func readLines(path string) []string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(b))
+}
+
+// refreshHot re-tests the servers listed in path (the last hot.txt and the
+// top of fresh.txt) and writes the ones that still work to hot.txt. It runs
+// between full collections so the list the apps try first stays current.
+func refreshHot(path, out string, n int) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var list []*entry
+	seen := map[string]bool{}
+	for _, l := range strings.Fields(string(b)) {
+		nd, err := node.ParseLink(l)
+		if err != nil || seen[nd.Key()] {
+			continue
+		}
+		seen[nd.Key()] = true
+		e := &entry{link: l, proto: nd.Proto}
+		if !nd.UDPBased() {
+			e.endpoint = nd.Endpoint()
+		}
+		list = append(list, e)
+	}
+	passed, _ := realTest(list, n)
+	sort.SliceStable(list, func(i, j int) bool {
+		di, oki := passed[list[i]]
+		dj, okj := passed[list[j]]
+		if oki != okj {
+			return oki
+		}
+		return di < dj
+	})
+	hot := hotList(list, passed, hotSize)
+	checkIran(hot)
+	if len(hot) == 0 {
+		log.Print("nothing passed; hot.txt left as it was")
+		return
+	}
+	if err := os.WriteFile(filepath.Join(out, "hot.txt"), []byte(strings.Join(links(hot), "\n")+"\n"), 0o644); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("wrote %d hot servers", len(hot))
+}
+
+func links(es []*entry) []string {
+	out := make([]string, len(es))
+	for i, e := range es {
+		out[i] = e.link
+	}
+	return out
+}
+
 type entry struct {
 	link     string
 	fresh    bool
@@ -46,12 +137,16 @@ type entry struct {
 }
 
 type meta struct {
-	Updated time.Time      `json:"updated"`
-	Sources int            `json:"sources"`
-	Reached int            `json:"reached"`
-	Found   int            `json:"found"`
-	Dead    int            `json:"dead"`
-	Files   map[string]int `json:"files"`
+	Updated time.Time `json:"updated"`
+	Sources int       `json:"sources"`
+	Reached int       `json:"reached"`
+	Found   int       `json:"found"`
+	Dead    int       `json:"dead"`
+	// Tested servers were connected through with the real cores; Passed
+	// of them worked and lead fresh.txt, fastest first.
+	Tested int            `json:"tested"`
+	Passed int            `json:"passed"`
+	Files  map[string]int `json:"files"`
 	// Schemes counts every link scheme seen in the sources, usable or
 	// not, so protocols the apps cannot run yet show up here.
 	Schemes map[string]int `json:"schemes"`
@@ -60,6 +155,13 @@ type meta struct {
 	// Channels counts the usable servers each Telegram channel posted;
 	// channels that stay at zero can be dropped from the lists.
 	Channels map[string]int `json:"channels"`
+	// Yield is the same count for every other source, so a link that still
+	// answers but carries nothing usable shows up too.
+	Yield map[string]int `json:"yield"`
+	// IranChecked hot addresses were tried from Globalping probes inside
+	// Iran; IranOpen of them answered there.
+	IranChecked int `json:"iran_checked"`
+	IranOpen    int `json:"iran_open"`
 }
 
 var schemeRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]{1,20})://[^\s"'<>]{8,}`)
@@ -71,7 +173,14 @@ func main() {
 	probeConc := flag.Int("probe-concurrency", 1000, "parallel reachability probes")
 	maxFresh := flag.Int("max-fresh", 60000, "most servers in fresh.txt; the rest go to the other files")
 	limit := flag.Int("limit", 0, "use only the first N sources (for tests)")
+	real := flag.Int("real", 8000, "connect through this many of the fresh servers with the cores in SING_BOX and XRAY; 0 skips")
+	prev := flag.String("prev", "", "directory holding the last published lists, for new.txt")
+	hotFrom := flag.String("hot-from", "", "only rewrite hot.txt in -out from the servers listed in this file that pass the real test")
 	flag.Parse()
+	if *hotFrom != "" {
+		refreshHot(*hotFrom, *out, *real)
+		return
+	}
 
 	srcs := sources.Collected()
 	if *limit > 0 && *limit < len(srcs) {
@@ -90,7 +199,7 @@ func main() {
 	var mu sync.Mutex
 	byKey := map[uint64]*entry{}
 	reached := 0
-	schemes, channels := map[string]int{}, map[string]int{}
+	schemes, channels, yield := map[string]int{}, map[string]int{}, map[string]int{}
 	seenLinks := map[uint64]bool{}
 	ctx := context.Background()
 	sem := make(chan struct{}, 32)
@@ -153,6 +262,8 @@ func main() {
 			}
 			if s.Kind == sources.KindTelegram {
 				channels[s.URL] = usable
+			} else {
+				yield[s.Label()] = usable
 			}
 		}(s)
 	}
@@ -188,20 +299,24 @@ func main() {
 	for _, e := range list {
 		protocols[e.proto]++
 	}
-	var fresh, rest []string
+	var freshE, restE []*entry
 	for _, e := range list {
-		if e.fresh && len(fresh) < *maxFresh {
-			fresh = append(fresh, e.link)
+		if e.fresh && len(freshE) < *maxFresh {
+			freshE = append(freshE, e)
 		} else {
-			rest = append(rest, e.link)
+			restE = append(restE, e)
 		}
 	}
+	passed, tested := realTest(freshE, *real)
+	freshE, failedE := orderFresh(freshE, passed, tested)
+	restE = append(failedE, restE...)
+	fresh, rest := links(freshE), links(restE)
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		log.Fatal(err)
 	}
-	m := meta{Updated: time.Now().UTC(), Sources: len(srcs), Reached: reached, Found: len(byKey), Dead: dead, Files: map[string]int{},
-		Schemes: schemes, Protocols: protocols, Channels: channels}
+	m := meta{Updated: time.Now().UTC(), Sources: len(srcs), Reached: reached, Found: len(byKey), Dead: dead, Tested: len(tested), Passed: len(passed), Files: map[string]int{},
+		Schemes: schemes, Protocols: protocols, Channels: channels, Yield: yield}
 	write := func(name string, links []string) {
 		if err := os.WriteFile(filepath.Join(*out, name), []byte(strings.Join(links, "\n")+"\n"), 0o644); err != nil {
 			log.Fatal(err)
@@ -209,6 +324,12 @@ func main() {
 		m.Files[name] = len(links)
 	}
 	write("fresh.txt", fresh)
+	hot := hotList(freshE, passed, hotSize)
+	m.IranChecked, m.IranOpen = checkIran(hot)
+	write("hot.txt", links(hot))
+	if *prev != "" {
+		write("new.txt", newList(fresh, readLines(filepath.Join(*prev, "fresh.txt")), readLines(filepath.Join(*prev, "new.txt")), newSize))
+	}
 	for i := range *shards {
 		lo, hi := len(rest)*i / *shards, len(rest)*(i+1) / *shards
 		write(fmt.Sprintf("all-%d.txt", i+1), rest[lo:hi])

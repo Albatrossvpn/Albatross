@@ -79,6 +79,10 @@ type Node struct {
 	VerifyName string `json:"vcn,omitempty"`
 	Fragment   bool   `json:"fragment,omitempty"` // link asked for TLS ClientHello fragmentation
 	FinalMask  string `json:"fm,omitempty"`       // raw Xray finalmask JSON
+	// SplitDownload, for XHTTP behind Cloudflare, is a second edge IP the
+	// download goes through while uploads use the first, so no single
+	// connection carries a whole exchange for filtering to analyse.
+	SplitDownload string `json:"-"`
 
 	Plugin     string `json:"plugin,omitempty"`
 	PluginOpts string `json:"plugin_opts,omitempty"`
@@ -192,6 +196,27 @@ func (n *Node) UDPBased() bool {
 // Endpoint is host:port used for reachability probes.
 func (n *Node) Endpoint() string {
 	return net.JoinHostPort(n.Server, strconv.Itoa(n.Port))
+}
+
+// NetID names the network a server sits in, for learning which ones a
+// filter blocks: the /24 of an IPv4 address (below 1<<24), otherwise a hash
+// of the name or of the IPv6 /48 (with the top bit set).
+func (n *Node) NetID() uint32 {
+	if ip := net.ParseIP(n.Server); ip != nil {
+		if v4 := ip.To4(); v4 != nil {
+			return binary.BigEndian.Uint32(v4) >> 8
+		}
+		return fnv32(ip[:6]) | 1<<31
+	}
+	return fnv32([]byte(strings.ToLower(n.Server))) | 1<<31
+}
+
+func fnv32(b []byte) uint32 {
+	h := uint32(2166136261)
+	for _, c := range b {
+		h = (h ^ uint32(c)) * 16777619
+	}
+	return h
 }
 
 // Engine picks the core able to run this node, preferring sing-box.

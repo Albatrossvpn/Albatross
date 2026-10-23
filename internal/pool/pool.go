@@ -33,8 +33,9 @@ type Entry struct {
 	Engine   uint8
 	State    uint8
 	Fails    uint8
-	Pop      uint8 // number of sources listing it, saturating
-	Style    uint8 // node.Style
+	Pop      uint8  // number of sources listing it, saturating
+	Style    uint8  // node.Style
+	Net      uint32 // node.NetID
 	Hint     [2]byte
 	Flags    uint8
 }
@@ -44,6 +45,7 @@ const (
 	FlagUDP   uint8 = 1 << iota // a TCP probe says nothing about it
 	FlagFresh                   // listed by a tested or Telegram source
 	FlagPlain                   // no transport encryption
+	FlagHot                     // listed in the collector's hot.txt
 )
 
 // HintCode returns the country hint as a string.
@@ -116,7 +118,7 @@ func (p *Pool) Add(e Entry, link string, sourceScore func(uint16) float64) bool 
 		if sourceScore != nil && sourceScore(e.Source) > sourceScore(cur.Source) {
 			cur.Source = e.Source
 		}
-		cur.Flags |= e.Flags & FlagFresh
+		cur.Flags |= e.Flags & (FlagFresh | FlagHot)
 		if cur.Hint[0] == 0 {
 			cur.Hint = e.Hint
 		}
