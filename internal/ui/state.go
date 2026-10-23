@@ -23,7 +23,8 @@ type state struct {
 	Update     *engine.UpdateInfo      `json:"update,omitempty"`
 	Account    engine.AccountState     `json:"account"`
 	// Share is where other devices reach the proxy (Settings.AllowLAN).
-	Share []string `json:"share,omitempty"`
+	Share    []string `json:"share,omitempty"`
+	SharePAC []string `json:"share_pac,omitempty"`
 }
 
 type conn struct {
@@ -61,7 +62,7 @@ func publicState(s engine.Snapshot) state {
 		Status: s.Status, Message: s.Message, Target: s.Target, TargetName: s.TargetName, TargetFlag: s.TargetFlag,
 		Countries: s.Countries, Settings: publicSettingsOf(s.Settings), Protocols: engine.ProtocolChoices(),
 		Admin: s.Admin, Mobile: s.Mobile, Version: s.Version, Update: s.Update, Account: s.Account,
-		Share: s.Share,
+		Share: s.Share, SharePAC: s.SharePAC,
 	}
 	for _, c := range s.Countries {
 		out.Servers += c.Servers

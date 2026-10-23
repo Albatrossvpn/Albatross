@@ -216,8 +216,9 @@ func (p *Pool) Stats() (total, untested, dead, ok int) {
 // Compact drops candidates that no source has listed for the keep
 // duration (unless they are known to work) and rewrites the file. Beyond
 // limit candidates (0: no limit), the least promising ones go too: those
-// that failed before those never tested, those on few lists before those
-// on many, the longest unseen first; the collector's picks stay.
+// that failed, then those from untested lists, then the rest; within each,
+// those on few lists and the longest unseen first. Servers that worked and
+// the collector's hot list always stay.
 func (p *Pool) Compact(keep time.Duration, limit int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -232,16 +233,18 @@ func (p *Pool) Compact(keep time.Duration, limit int) error {
 	if over := len(p.entries) - len(drop) - limit; limit > 0 && over > 0 {
 		var cand []int
 		for i := range p.entries {
-			if e := &p.entries[i]; !drop[i] && e.State != StateOK && e.Flags&(FlagHot|FlagFresh) == 0 {
+			if e := &p.entries[i]; !drop[i] && e.State != StateOK && e.Flags&FlagHot == 0 {
 				cand = append(cand, i)
 			}
 		}
 		rank := func(e *Entry) (int, uint8, uint32) {
-			alive := 1
+			tier := 2 // from a tested or Telegram list
 			if e.State == StateDead || e.State == StateRejected {
-				alive = 0
+				tier = 0
+			} else if e.Flags&FlagFresh == 0 {
+				tier = 1
 			}
-			return alive, e.Pop, e.SeenAt
+			return tier, e.Pop, e.SeenAt
 		}
 		sort.Slice(cand, func(a, b int) bool {
 			a1, a2, a3 := rank(&p.entries[cand[a]])

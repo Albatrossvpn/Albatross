@@ -96,7 +96,8 @@ function render(s) {
   $("help-row").classList.toggle("hidden", !s.help_available && !s.settings.help_others);
   $("crowd-row").classList.toggle("hidden", !s.crowd_available);
   $("share-note").textContent = s.share && s.share.length
-    ? "Set the proxy on the other device to " + s.share.join(" or ")
+    ? "On the other device, set the Wi-Fi proxy to " + s.share.join(" or ") +
+      (s.share_pac && s.share_pac.length ? ", or its automatic setup (PAC) address to " + s.share_pac[0] : "")
     : "Phones, laptops and TVs on your hotspot or Wi-Fi can use this connection by setting an HTTP or SOCKS proxy";
   $("help-note").textContent = s.helping ? "Helping now. Thank you!" :
     "Lets people in censored countries reach Tor through this computer. Runs only outside Iran on an open network.";

@@ -282,12 +282,13 @@ func (e *Engine) refreshSources(central bool) {
 	total := e.scan.SourcesOK
 	e.mu.Unlock()
 	e.pool.NextCycle()
-	// The longest refresh interval is a day; keep two of them. A phone
-	// never gets through more than a few tens of thousands between
-	// refreshes, so it keeps no more than that.
-	limit := 120000
+	// The longest refresh interval is a day; keep two of them. Only the
+	// best few thousand are ever tested between refreshes, so no more are
+	// kept: servers that worked and the collector's hot list always, then
+	// the rest by how they did and how many lists carry them.
+	limit := 10000
 	if e.opt.Mobile {
-		limit = 30000
+		limit = 2000
 	}
 	e.pool.Compact(48*time.Hour, limit)
 	releaseMemory()
@@ -601,6 +602,11 @@ func (e *Engine) scanPace() (size, chunk int, pause time.Duration) {
 	}
 	if e.settings.Intensity == "low" {
 		pause += 5 * time.Second
+	}
+	if c := e.conn; c != nil && c.heavy() {
+		// The user is moving data: tests would take bandwidth and CPU from
+		// it. Keep a trickle so backups still get found.
+		size, chunk, pause = max(size/4, 12), max(chunk/4, 6), max(pause, 30*time.Second)
 	}
 	return size, chunk, pause
 }
