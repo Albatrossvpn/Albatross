@@ -203,3 +203,7 @@ func (v *vpnProxy) target() string {
 	defer v.mu.Unlock()
 	return v.addr
 }
+
+// LanNets lists the local network's address ranges, comma separated, for
+// the app to leave outside the tunnel.
+func LanNets() string { return strings.Join(engine.LANNets, ",") }
