@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strconv"
 	"sync"
+	"syscall"
 
 	"github.com/xjasonlyu/tun2socks/v2/engine"
 	"golang.org/x/sys/unix"
@@ -35,6 +36,10 @@ func StartTun(fd int32) error {
 	if tunRun {
 		stopLocked()
 	}
+	// Every core the engine starts later (tests, a new group) would
+	// otherwise inherit the tunnel, and Android keeps a VPN up while any
+	// process holds it open: Disconnect would leave it on.
+	syscall.CloseOnExec(int(fd))
 	tunFD = int(fd)
 	return startLocked(addr)
 }
@@ -62,8 +67,9 @@ func startLocked(addr string) error {
 	if tunFD < 0 {
 		return errors.New("no tunnel")
 	}
-	// tun2socks closes the descriptor it is given when it stops.
-	dup, err := unix.Dup(tunFD)
+	// tun2socks closes the descriptor it is given when it stops. The copy
+	// is close-on-exec for the same reason as tunFD (see StartTun).
+	dup, err := unix.FcntlInt(uintptr(tunFD), unix.F_DUPFD_CLOEXEC, 0)
 	if err != nil {
 		return err
 	}

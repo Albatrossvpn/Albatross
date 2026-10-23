@@ -33,7 +33,7 @@ func TestAddLinkCompact(t *testing.T) {
 		p.entries[i].SeenAt -= 3 * 24 * 60
 	}
 	p.Add(Entry{Key: 9}, "link-8", nil)
-	if err := p.Compact(48 * time.Hour); err != nil {
+	if err := p.Compact(48*time.Hour, 0); err != nil {
 		t.Fatal(err)
 	}
 	if p.Len() != 2 {

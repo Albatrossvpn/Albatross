@@ -295,6 +295,39 @@ func (e *Engine) pickGroup(country, home string, exclude map[string]bool, size i
 	return append(group, e.bestServers("", size-len(group), skip)...)
 }
 
+// maxHandshake is the slowest TCP handshake a server may take to be picked
+// while faster ones answer.
+const maxHandshake = 1500 * time.Millisecond
+
+// handshakeRTT opens tries TCP connections to addr at once and reports
+// whether any succeeded and the median time of those that did.
+func handshakeRTT(ctx context.Context, addr string, tries int) (bool, time.Duration) {
+	times := make([]time.Duration, tries)
+	got := make([]bool, tries)
+	var wg sync.WaitGroup
+	for k := range tries {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			start := time.Now()
+			got[k] = tcpAnswers(ctx, addr)
+			times[k] = time.Since(start)
+		}()
+	}
+	wg.Wait()
+	var ok []time.Duration
+	for k := range tries {
+		if got[k] {
+			ok = append(ok, times[k])
+		}
+	}
+	if len(ok) == 0 {
+		return false, 0
+	}
+	sort.Slice(ok, func(a, b int) bool { return ok[a] < ok[b] })
+	return true, ok[len(ok)/2]
+}
+
 // tcpAnswers reports whether addr accepts a TCP connection. Tests replace it.
 var tcpAnswers = func(ctx context.Context, addr string) bool {
 	var d net.Dialer
@@ -311,6 +344,7 @@ var tcpAnswers = func(ctx context.Context, addr string) bool {
 // Servers on UDP cannot be checked this way and are kept.
 func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Server {
 	ok := make([]bool, len(list))
+	rtt := make([]time.Duration, len(list))
 	ctx, cancel := context.WithTimeout(e.ctx, 3*time.Second)
 	defer cancel()
 	var wg sync.WaitGroup
@@ -320,23 +354,64 @@ func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Se
 			ok[i] = nd != nil
 			continue
 		}
+		// The first few get three handshakes at once and the median
+		// counts, so one lucky or unlucky packet does not decide.
+		tries := 1
+		if i < 20 {
+			tries = 3
+		}
 		wg.Add(1)
 		go func(i int, addr string) {
 			defer wg.Done()
-			ok[i] = tcpAnswers(ctx, addr)
+			ok[i], rtt[i] = handshakeRTT(ctx, addr, tries)
 		}(i, nd.Endpoint())
 	}
 	wg.Wait()
+	slow := 0
+	for i := range list {
+		if ok[i] && rtt[i] > maxHandshake {
+			ok[i] = false
+			slow++
+		}
+	}
+	// Servers keep their places, but those reached over TCP are reordered
+	// among themselves by how fast this network reaches them now.
+	var tcp []int
+	for i, s := range list {
+		if ok[i] && !s.Node().UDPBased() {
+			tcp = append(tcp, i)
+		}
+	}
+	byRTT := append([]int(nil), tcp...)
+	sort.SliceStable(byRTT, func(a, b int) bool {
+		return rtt[byRTT[a]]/(20*time.Millisecond) < rtt[byRTT[b]]/(20*time.Millisecond)
+	})
+	order := make([]int, len(list))
+	for i := range order {
+		order[i] = i
+	}
+	for k, i := range tcp {
+		order[i] = byRTT[k]
+	}
 	var out []*Server
 	alive := 0
-	for i, s := range list {
+	for _, i := range order {
 		if !ok[i] {
 			continue
 		}
 		alive++
 		if len(out) < n {
-			out = append(out, s)
+			out = append(out, list[i])
 		}
+	}
+	if alive == 0 && slow > 0 {
+		// Only slow ones answer: a slow server beats none.
+		for i, s := range list {
+			if rtt[i] > maxHandshake && len(out) < n {
+				out = append(out, s)
+			}
+		}
+		return out
 	}
 	if alive == 0 {
 		// Nothing answered: more likely this device's network than every
@@ -345,7 +420,7 @@ func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Se
 	}
 	dead := map[string]bool{}
 	for i, s := range list {
-		if !ok[i] {
+		if !ok[i] && rtt[i] <= maxHandshake {
 			exclude[s.Key] = true
 			nd := s.Node()
 			dead[nd.Endpoint()] = true
@@ -592,9 +667,13 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	// Test the whole group at once and start on the first server to answer;
 	// the rest keep being tested and become the known-good backups.
 	proxy := &url.URL{Scheme: "http", Host: c.proxyAddr}
-	var r tester.Result
+	var r, bestR tester.Result
+	var cur, best *member
 	tried := map[*member]bool{}
-	for try := 0; try < 3 && !r.OK; try++ {
+	// A server that answers slowly is kept only when no other one in the
+	// group does better: a first page after many seconds is not a
+	// connection anyone can use.
+	for try := 0; try < 3 && !(r.OK && r.Delay <= slowPath); try++ {
 		var rest []*member
 		for _, m := range c.members {
 			if !tried[m] {
@@ -611,6 +690,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 			return err
 		}
 		c.keep(actx, m)
+		cur = m
 		// Prove the whole path works before telling anyone it does.
 		r = tester.Probe(actx, proxy, 12*time.Second)
 		if !r.OK {
@@ -620,6 +700,15 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 			c.mu.Lock()
 			m.forged = true
 			c.mu.Unlock()
+		}
+		if r.OK && (best == nil || r.Delay < bestR.Delay) {
+			best, bestR = m, r
+		}
+	}
+	if best != nil && best != cur {
+		if err := c.use(actx, best); err == nil {
+			c.keep(actx, best)
+			r = bestR
 		}
 	}
 	if !r.OK {
@@ -671,6 +760,9 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	e.setStatus(StatusConnected, connectedMessage(c))
 	e.logf("info", "Connected to %s with %d servers in the group (latency %d ms).", exitName(c), len(c.members), c.delay)
 	go e.monitor(mctx, c)
+	if set.AllowLAN {
+		go servePAC(mctx, c.proxyAddr)
+	}
 	// Sources blocked on the direct path (Telegram, GitHub) can now be
 	// read through the VPN.
 	e.triggerRefill()
@@ -800,6 +892,10 @@ type connOptions struct {
 	warp        *warpID // offer WARP through the server in use (watchWarpExit)
 }
 
+// slowPath is the first-page delay through a new connection above which the
+// next server in the group is tried before settling.
+const slowPath = 3 * time.Second
+
 // connectConfig builds the sing-box config for a live connection.
 func connectConfig(s *core.Set, o connOptions) map[string]any {
 	outbounds := append([]any{}, s.Outbounds...)
@@ -910,14 +1006,18 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 	if len(ruleSets) > 0 {
 		route["rule_set"] = ruleSets
 	}
+	remote := map[string]any{"type": "https", "tag": "remote", "server": "1.1.1.1", "detour": "proxy"}
 	dns := map[string]any{
-		"servers": []any{
-			tester.DNSServer(o.localDNS),
-			map[string]any{"type": "https", "tag": "remote", "server": "1.1.1.1", "detour": "proxy"},
-		},
+		"servers":  []any{tester.DNSServer(o.localDNS), remote},
 		"rules":    dnsRules,
 		"final":    "remote",
 		"strategy": "ipv4_only",
+	}
+	if r, ok := findRegion(o.bypass); ok && r.Subnet != "" {
+		// Cloudflare's resolver never passes the subnet on; Google's does.
+		// The subnet is a public block of the region, not this device's.
+		remote["server"] = "8.8.8.8"
+		dns["client_subnet"] = r.Subnet
 	}
 	cfg := map[string]any{
 		"log":       map[string]any{"level": "warn", "timestamp": false},

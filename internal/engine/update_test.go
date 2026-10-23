@@ -1,7 +1,12 @@
 package engine
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"testing"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
@@ -53,5 +58,52 @@ func TestParseVersion(t *testing.T) {
 	b, _ := parseVersion("0.10.0")
 	if !versionLess(a, b) || versionLess(b, a) {
 		t.Error("0.2.9 should be older than 0.10.0")
+	}
+}
+
+func TestInAppUpdate(t *testing.T) {
+	body := []byte("new version")
+	sum := sha256.Sum256(body)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/bad" {
+			w.Write([]byte("tampered"))
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+	old := directUpdateClient
+	directUpdateClient = srv.Client
+	defer func() { directUpdateClient = old }()
+
+	installed := ""
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}, Version: "0.2.1",
+		InstallUpdate: func(path string) error { installed = path; return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	file := UpdateFile{URLs: []string{srv.URL + "/bad", srv.URL + "/good"}, SHA256: hex.EncodeToString(sum[:])}
+	e.applyUpdate(UpdateManifest{LatestVersion: "0.2.2", Files: map[string]UpdateFile{updateKey(false): file}})
+	if u := e.Snapshot().Update; u == nil || !u.InApp {
+		t.Fatalf("update = %+v, want in-app", u)
+	}
+	// The tampered copy is refused; the next address's matches.
+	if err := e.GetUpdate(); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(installed); string(b) != string(body) {
+		t.Fatalf("installed %q", b)
+	}
+	if u := e.Snapshot().Update; u.Progress != 100 || u.Error != "" {
+		t.Fatalf("update = %+v", u)
+	}
+
+	// Without a matching copy nothing is opened.
+	installed = ""
+	file.URLs = []string{srv.URL + "/bad"}
+	e.applyUpdate(UpdateManifest{LatestVersion: "0.2.3", Files: map[string]UpdateFile{updateKey(false): file}})
+	if err := e.GetUpdate(); err == nil || installed != "" {
+		t.Fatalf("err = %v, installed %q", err, installed)
 	}
 }
