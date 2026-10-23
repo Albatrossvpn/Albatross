@@ -79,6 +79,7 @@ type Engine struct {
 	srcStatsByID map[string]SourceStat
 	srcIndex     map[string]int
 	good         map[uint64]*Server
+	net          netLearn // which kinds of server pass on this network
 	conn         *connection
 	proxyMu      sync.Mutex // serializes setProxy and clearProxy
 	proxyOn      bool       // guarded by proxyMu
@@ -171,6 +172,7 @@ func New(opt Options) (*Engine, error) {
 		e.logf("warn", "Could not install the local-site lists: %v", err)
 	}
 	e.loadServers()
+	e.net.load(e.dir)
 	e.loadSourceStats()
 	e.buildSources()
 	return e, nil
@@ -251,8 +253,13 @@ func (e *Engine) poke() {
 // direct traffic (see Options.LocalDNS).
 func (e *Engine) SetLocalDNS(addr string) {
 	e.mu.Lock()
+	moved := e.localDNS != "" && e.localDNS != addr
 	e.localDNS = addr
 	e.mu.Unlock()
+	if moved {
+		// Another network filters differently.
+		e.net.fade()
+	}
 }
 
 func (e *Engine) dns() string {
@@ -311,6 +318,11 @@ func (e *Engine) newTester() tester.Tester {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	t := *e.tester
+	if e.wantConnect && e.conn == nil && e.settings.Intensity == "low" {
+		// Finding a server is what the user is waiting for; a phone
+		// saves its battery once connected, not before.
+		t.Concurrency, t.TCPConcurrency = 32, 128
+	}
 	t.LocalDNS = e.localDNS
 	t.Mobile = e.opt.Mobile
 	return t

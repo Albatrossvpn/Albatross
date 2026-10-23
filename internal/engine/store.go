@@ -117,6 +117,7 @@ func (e *Engine) saveServers() {
 	}
 	e.mu.Unlock()
 	saveJSON(filepath.Join(e.dir, "servers.json"), list)
+	e.net.save(e.dir)
 }
 
 // SourceStat tracks how useful a source has been.
