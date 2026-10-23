@@ -244,7 +244,7 @@ func (n *Node) xraySupported() bool {
 func (n *Node) Validate() error {
 	if n.Proto == "warpplus" {
 		switch n.WPMode {
-		case "warp", "gool":
+		case "warp", "gool", "tor":
 			return nil
 		case "psiphon":
 			if len(n.WPCountry) == 2 {
