@@ -131,8 +131,8 @@ func countIn(es []*entry, m map[*entry]time.Duration) int {
 
 // hotList is the fastest servers that passed, one per address, for the
 // app to try before anything else.
-func hotList(ordered []*entry, passed map[*entry]time.Duration, max int) []string {
-	var out []string
+func hotList(ordered []*entry, passed map[*entry]time.Duration, max int) []*entry {
+	var out []*entry
 	seen := map[string]bool{}
 	for _, e := range ordered {
 		if _, ok := passed[e]; !ok || len(out) >= max {
@@ -144,10 +144,36 @@ func hotList(ordered []*entry, passed map[*entry]time.Duration, max int) []strin
 			}
 			seen[e.endpoint] = true
 		}
-		out = append(out, e.link)
+		out = append(out, e)
 	}
 	return out
 }
+
+// checkIran reorders hot by reachability from inside Iran (see iranReach)
+// and returns how many addresses were checked and how many were open.
+func checkIran(hot []*entry) (checked, open int) {
+	var eps []string
+	for _, e := range hot {
+		if e.endpoint != "" && len(eps) < iranChecks {
+			eps = append(eps, e.endpoint)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	seen := iranReach(ctx, eps, 2)
+	for _, ok := range seen {
+		if ok {
+			open++
+		}
+	}
+	iranFirst(hot, seen)
+	log.Printf("globalping: %d of %d hot addresses answer from Iran", open, len(seen))
+	return len(seen), open
+}
+
+// iranChecks bounds the addresses checked from Iran per run, within the
+// anonymous hourly quota (two probes each).
+const iranChecks = 100
 
 // orderFresh puts the servers that passed first, fastest first, keeps the
 // untested ones after them, and moves those that failed to rest.
