@@ -93,6 +93,9 @@ function render(s) {
   $("n-servers").textContent = num(s.servers);
   $("n-countries").textContent = num(locations);
 
+  $("notice").classList.toggle("hidden", !s.notice);
+  $("notice").textContent = s.notice || "";
+
   const u = s.update;
   $("update-banner").classList.toggle("hidden", !u || u.required);
   $("update-modal").classList.toggle("hidden", !u || !u.required);

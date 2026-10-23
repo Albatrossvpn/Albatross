@@ -898,6 +898,15 @@ func (e *Engine) speedRound(ctx context.Context, c *connection) {
 		}
 	}
 	c.mu.Lock()
+	if tested > 0 && cur < usable && bestSpeed < usable && time.Since(c.slowNet) > time.Hour {
+		// Every server is slow, so the network itself is (Iran throttles
+		// all encrypted traffic at times). Switching would only drop
+		// connections; say so instead.
+		c.slowNet = time.Now()
+		c.mu.Unlock()
+		e.logf("info", "Every server is slow right now (%s at best), so the network itself is slow; staying on %q.", rate(max(cur, bestSpeed)), active.server.Name)
+		return
+	}
 	better := best != nil && bestSpeed >= 2*cur && bestSpeed-cur >= 200<<10
 	if better {
 		c.slowRuns++
