@@ -44,3 +44,20 @@ func TestRegimeBonus(t *testing.T) {
 		t.Errorf("UDP server with UDP: %v", b)
 	}
 }
+
+func TestHelpOnlyOutsideIran(t *testing.T) {
+	e := &Engine{}
+	e.bin.Snowflake = "snowflake-helper"
+	e.reg = regimeState{Regime: regimeFree, Probe: regimeProbe{Country: "DE"}}
+	if !e.helpEligible() {
+		t.Fatal("an open network in Germany should allow helping")
+	}
+	e.reg.Probe.Country = "IR"
+	if e.helpEligible() {
+		t.Fatal("helping must never run in Iran, even on an open network")
+	}
+	e.reg = regimeState{Regime: regimeFiltered, Probe: regimeProbe{Country: "DE"}}
+	if e.helpEligible() {
+		t.Fatal("helping needs an open network")
+	}
+}
