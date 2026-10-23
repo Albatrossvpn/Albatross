@@ -16,7 +16,7 @@ permissions:
 
 env:
   SINGBOX_VERSION: "1.14.3"
-  XRAY_VERSION: "26.10.10"
+  XRAY_VERSION: "26.9.30"
   WARPPLUS_VERSION: "1.2.6"
 
 jobs:
