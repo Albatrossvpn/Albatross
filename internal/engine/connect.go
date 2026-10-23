@@ -342,11 +342,24 @@ func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Se
 		// server at once. Leave the list as it was.
 		return list[:min(n, len(list))]
 	}
+	dead := map[string]bool{}
 	for i, s := range list {
 		if !ok[i] {
 			exclude[s.Key] = true
+			nd := s.Node()
+			dead[nd.Endpoint()] = true
+			e.net.recordNet(nd.NetID(), false)
 		}
 	}
+	// Other configs on an address that did not answer will not answer
+	// either; skip them instead of finding that out one by one.
+	e.mu.Lock()
+	for _, s := range e.good {
+		if nd := s.Node(); nd != nil && dead[nd.Endpoint()] {
+			exclude[s.Key] = true
+		}
+	}
+	e.mu.Unlock()
 	return out
 }
 

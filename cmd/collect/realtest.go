@@ -13,12 +13,17 @@ import (
 	"github.com/cezomagoanlace29861-jpg/vp/internal/tester"
 )
 
-// realTest connects through the first n entries with the real cores, the
-// way the app does, and reports which worked and how fast. A TCP answer
-// alone says little: most such servers no longer complete a handshake, and
+// realTest connects through up to n of list with the real cores, the way
+// the app does, and reports which worked and how fast. A TCP answer alone
+// says little: most such servers no longer complete a handshake, and
 // phones spent minutes finding that out themselves. It needs the cores
 // named by SING_BOX (and XRAY for Xray-only servers); without them it tests
 // nothing.
+//
+// One config per address goes first: an address that is down or blocked
+// fails every config on it, so testing it once leaves the budget for more
+// addresses. Configs sharing an address that passed are tested with what
+// is left; those sharing one that failed count as failed.
 func realTest(list []*entry, n int) (passed map[*entry]time.Duration, tested map[*entry]bool) {
 	sb := os.Getenv("SING_BOX")
 	if sb == "" || n <= 0 {
@@ -31,51 +36,117 @@ func realTest(list []*entry, n int) (passed map[*entry]time.Duration, tested map
 	}
 	defer os.RemoveAll(dir)
 	rt := &core.Runtime{Bin: core.Binaries{SingBox: sb, Xray: os.Getenv("XRAY")}, Dir: dir}
-	byNode := map[*node.Node]*entry{}
-	tested = map[*entry]bool{}
-	var nodes []*node.Node
-	for _, e := range list {
-		if len(nodes) >= n {
-			break
-		}
-		nd, err := node.ParseLink(e.link)
-		if err != nil || nd.Proto == "warpplus" {
-			continue
-		}
-		byNode[nd] = e
-		tested[e] = true
-		nodes = append(nodes, nd)
-	}
+	reps, siblings := byAddress(list)
 	passed = map[*entry]time.Duration{}
+	tested = map[*entry]bool{}
 	var mu sync.Mutex
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Minute)
 	defer cancel()
-	// Several cores at once, each holding a bounded share of the servers.
-	const perCore, cores = 250, 4
-	sem := make(chan struct{}, cores)
-	var wg sync.WaitGroup
-	for lo := 0; lo < len(nodes); lo += perCore {
-		part := nodes[lo:min(lo+perCore, len(nodes))]
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(part []*node.Node) {
-			defer func() { <-sem; wg.Done() }()
-			t := &tester.Tester{Runtime: rt, Concurrency: 64, Timeout: 8 * time.Second}
-			err := t.Batch(ctx, "collect", part, func(r tester.Result) {
-				if r.OK && !r.Tampered {
-					mu.Lock()
-					passed[byNode[r.Node]] = r.Delay
-					mu.Unlock()
-				}
-			})
-			if err != nil && ctx.Err() == nil {
-				log.Printf("batch: %v", err)
+	run := func(es []*entry) {
+		byNode := map[*node.Node]*entry{}
+		var nodes []*node.Node
+		for _, e := range es {
+			nd, err := node.ParseLink(e.link)
+			if err != nil || nd.Proto == "warpplus" {
+				continue
 			}
-		}(part)
+			byNode[nd] = e
+			tested[e] = true
+			nodes = append(nodes, nd)
+		}
+		// Several cores at once, each holding a bounded share of the servers.
+		const perCore, cores = 250, 4
+		sem := make(chan struct{}, cores)
+		var wg sync.WaitGroup
+		for lo := 0; lo < len(nodes); lo += perCore {
+			part := nodes[lo:min(lo+perCore, len(nodes))]
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(part []*node.Node) {
+				defer func() { <-sem; wg.Done() }()
+				t := &tester.Tester{Runtime: rt, Concurrency: 64, Timeout: 8 * time.Second}
+				err := t.Batch(ctx, "collect", part, func(r tester.Result) {
+					if r.OK && !r.Tampered {
+						mu.Lock()
+						passed[byNode[r.Node]] = r.Delay
+						mu.Unlock()
+					}
+				})
+				if err != nil && ctx.Err() == nil {
+					log.Printf("batch: %v", err)
+				}
+			}(part)
+		}
+		wg.Wait()
 	}
-	wg.Wait()
-	log.Printf("real test: %d of %d servers completed a connection", len(passed), len(nodes))
+	if len(reps) > n {
+		reps = reps[:n]
+	}
+	run(reps)
+	var more []*entry
+	for _, r := range reps {
+		if _, ok := passed[r]; ok {
+			more = append(more, siblings[r]...)
+		} else if tested[r] {
+			for _, s := range siblings[r] {
+				tested[s] = true
+			}
+		}
+	}
+	if left := n - len(reps); left > 0 {
+		run(more[:min(left, len(more))])
+	}
+	log.Printf("real test: %d of %d addresses, %d servers in all completed a connection", countIn(reps, passed), len(reps), len(passed))
 	return passed, tested
+}
+
+// byAddress returns the first config of each address, in list order, and
+// the later configs on the same address. UDP servers (no TCP endpoint)
+// each stand alone.
+func byAddress(list []*entry) (reps []*entry, siblings map[*entry][]*entry) {
+	siblings = map[*entry][]*entry{}
+	first := map[string]*entry{}
+	for _, e := range list {
+		if e.endpoint != "" {
+			if r := first[e.endpoint]; r != nil {
+				siblings[r] = append(siblings[r], e)
+				continue
+			}
+			first[e.endpoint] = e
+		}
+		reps = append(reps, e)
+	}
+	return reps, siblings
+}
+
+func countIn(es []*entry, m map[*entry]time.Duration) int {
+	k := 0
+	for _, e := range es {
+		if _, ok := m[e]; ok {
+			k++
+		}
+	}
+	return k
+}
+
+// hotList is the fastest servers that passed, one per address, for the
+// app to try before anything else.
+func hotList(ordered []*entry, passed map[*entry]time.Duration, max int) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, e := range ordered {
+		if _, ok := passed[e]; !ok || len(out) >= max {
+			break
+		}
+		if e.endpoint != "" {
+			if seen[e.endpoint] {
+				continue
+			}
+			seen[e.endpoint] = true
+		}
+		out = append(out, e.link)
+	}
+	return out
 }
 
 // orderFresh puts the servers that passed first, fastest first, keeps the

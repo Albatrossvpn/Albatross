@@ -44,6 +44,10 @@ type Source struct {
 	// Central marks the lists the collector publishes (see cmd/collect):
 	// every other built-in source, already gathered and deduplicated.
 	Central bool `json:"central,omitempty"`
+	// Hot marks the collector's hot.txt; its servers are tested first.
+	Hot bool `json:"hot,omitempty"`
+	// Delta marks the collector's new.txt, the latest additions.
+	Delta bool `json:"delta,omitempty"`
 	// Sealed lists are encrypted with OwnKey (see Open).
 	Sealed bool `json:"sealed,omitempty"`
 }
@@ -103,7 +107,8 @@ const CentralShards = 8
 // OwnBuckets is how many parts the collector splits the own servers into.
 const OwnBuckets = 4
 
-// Central returns the collector's lists: fresh.txt first, then the shards.
+// Central returns the collector's lists: hot.txt and fresh.txt first, then
+// the shards.
 // install is this installation's random number, which picks the parts of
 // the own servers it reads.
 func Central(install uint32) []Source {
@@ -123,6 +128,14 @@ func Central(install uint32) []Source {
 			out[len(out)-1].Sealed = true
 		}
 	}
+	// hot.txt is the few hundred servers that passed the collector's real
+	// test most recently: small, re-tested every 20 minutes, tried first.
+	add("hot.txt", TierPriority)
+	out[len(out)-1].Hot = true
+	// new.txt is what fresh.txt gained lately; phones fetch it often and
+	// the whole fresh.txt rarely.
+	add("new.txt", TierPriority)
+	out[len(out)-1].Delta = true
 	add("fresh.txt", TierPriority)
 	for i := 1; i <= CentralShards; i++ {
 		add(fmt.Sprintf("all-%d.txt", i), TierDeep)
