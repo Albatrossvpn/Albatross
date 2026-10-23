@@ -16,6 +16,8 @@ dl="$dist/downloads"
 rm -rf "$out"
 mkdir -p "$out/core" "$out/licenses" "$dl"
 
+bash "$root/build/snapshot.sh"
+
 # Windows resources (icon, manifest, version info) need a numeric version.
 numeric="$(echo "$VERSION" | sed -E 's/^([0-9]+)\.([0-9]+)\.([0-9]+).*/\1.\2.\3.0/')"
 [[ "$numeric" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.0$ ]] || numeric="0.0.0.0"

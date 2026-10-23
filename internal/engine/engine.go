@@ -385,10 +385,10 @@ func (e *Engine) buildSources() {
 	var list []sources.Source
 	builtin := e.opt.Sources
 	if builtin == nil {
-		builtin = sources.Builtin()
+		builtin = append(sources.Central(), sources.Builtin()...)
 	}
 	for _, s := range builtin {
-		if s.Tier == sources.TierDeep && !e.settings.DeepSources {
+		if s.Tier == sources.TierDeep && !s.Central && !e.settings.DeepSources {
 			s.Enabled = false
 		}
 		if disabled[s.ID] {
