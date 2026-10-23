@@ -53,24 +53,25 @@ type connection struct {
 	cancel      context.CancelFunc
 	wake        chan struct{} // asks the monitor to check the active server now
 
-	mu       sync.Mutex
-	active   *member
-	sticky   *member // where stickyDomains go; moves only when it fails
-	delay    int
-	exitIP   string
-	exitCC   string
-	up       int64
-	down     int64
-	upRate   int64
-	dnRate   int64
-	lastBusy time.Time // last second that carried traffic
-	waiting  time.Time // when data went out with nothing back since
-	healthy  bool
-	switched time.Time // last time the member in use changed
-	speedAt  time.Time // last speed round
-	slowRuns int       // speed rounds in a row that found a much faster backup
-	slowNet  time.Time // when the whole network was last found slow
-	errs     []logErr  // recent failed connections, for watchLog
+	mu         sync.Mutex
+	active     *member
+	sticky     *member // where stickyDomains go; moves only when it fails
+	fasterSeen *member // the faster member the last sweep found
+	delay      int
+	exitIP     string
+	exitCC     string
+	up         int64
+	down       int64
+	upRate     int64
+	dnRate     int64
+	lastBusy   time.Time // last second that carried traffic
+	waiting    time.Time // when data went out with nothing back since
+	healthy    bool
+	switched   time.Time // last time the member in use changed
+	speedAt    time.Time // last speed round
+	slowRuns   int       // speed rounds in a row that found a much faster backup
+	slowNet    time.Time // when the whole network was last found slow
+	errs       []logErr  // recent failed connections, for watchLog
 }
 
 // member is one server of a live group.
