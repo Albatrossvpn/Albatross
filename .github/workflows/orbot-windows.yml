@@ -72,6 +72,7 @@ jobs:
           mkdir -p tor-bundle && tar -xzf "$f" -C tor-bundle
           echo "TOR_BUNDLE_VERSION=$V" >> "$GITHUB_ENV"
           find tor-bundle -maxdepth 3 | sort
+          cat tor-bundle/tor/pluggable_transports/pt_config.json
 
       - name: Download wintun
         run: |
