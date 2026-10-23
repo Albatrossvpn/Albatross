@@ -101,8 +101,10 @@ jobs:
       - name: Package
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          # The account service addresses (repository variable); empty builds an app without sign-in.
-          ACCOUNT_URL: ${{ vars.ACCOUNT_URL }}
+          # The account service addresses (repository variable ACCOUNT_URL)
+          # turn sign-in on. Accounts are on hold, so builds leave it empty
+          # and the app connects without signing in.
+          ACCOUNT_URL: ""
           # Opens the list of the project's own servers (deploy/server).
           OWN_KEY: ${{ secrets.OWN_KEY }}
         run: bash build/package.sh
@@ -138,7 +140,7 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
       - name: Build APKs
         env:
-          ACCOUNT_URL: ${{ vars.ACCOUNT_URL }}
+          ACCOUNT_URL: ""  # accounts on hold; see the Windows build
           OWN_KEY: ${{ secrets.OWN_KEY }}
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ALBATROSS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}

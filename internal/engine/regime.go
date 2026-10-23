@@ -92,6 +92,10 @@ var (
 	regimeForeign  = "https://speed.cloudflare.com/__down?bytes=16384"
 	regimeGoogle   = "https://www.google.com/generate_204"
 	regimeBlocked  = "https://www.youtube.com/generate_204"
+	// A second blocked site on another network (Meta's) must open too: one
+	// lucky request through a leaky filter used to switch the app to its
+	// lightest settings on a filtered network.
+	regimeBlocked2 = "https://www.instagram.com/"
 	regimeEdge     = "104.16.132.229:443" // a Cloudflare edge
 	regimeSTUN     = "stun.l.google.com:19302"
 	regimeName     = "www.youtube.com"
@@ -142,6 +146,19 @@ func (e *Engine) probeRegime(ctx context.Context) (regime, regimeProbe) {
 		}
 		return true
 	}
+	// opens reports whether a site answers at all over verified TLS.
+	opens := func(u string) bool {
+		req, err := http.NewRequestWithContext(ctx, http.MethodHead, u, nil)
+		if err != nil {
+			return false
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return false
+		}
+		resp.Body.Close()
+		return resp.StatusCode < 500
+	}
 	set(&p.Domestic, func() bool {
 		var d net.Dialer
 		for _, a := range regimeDomestic {
@@ -154,7 +171,9 @@ func (e *Engine) probeRegime(ctx context.Context) (regime, regimeProbe) {
 	})
 	set(&p.Foreign, func() bool { return get(regimeForeign, http.StatusOK) })
 	set(&p.Google, func() bool { return get(regimeGoogle, http.StatusNoContent) })
-	set(&p.Blocked, func() bool { return get(regimeBlocked, http.StatusNoContent) })
+	set(&p.Blocked, func() bool {
+		return get(regimeBlocked, http.StatusNoContent) && opens(regimeBlocked2)
+	})
 	set(&p.RandomSNI, func() bool { return randomSNIReaches(ctx, regimeEdge) })
 	set(&p.Poisoned, func() bool { return e.poisoned(ctx) })
 	set(&p.UDP, func() bool { return stunAnswers(ctx, regimeSTUN) })

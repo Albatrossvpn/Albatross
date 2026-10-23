@@ -1,0 +1,55 @@
+name: Hot servers
+
+# Between full collections, re-test the servers the apps try first, so
+# hot.txt never lists servers that stopped working an hour ago.
+on:
+  schedule:
+    - cron: "11,26,56 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  hot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/checkout@v4
+        with:
+          ref: servers
+          path: published
+      - name: Cores
+        env:
+          SINGBOX_VERSION: "1.14.3"
+          XRAY_VERSION: "26.9.30"
+        run: |
+          mkdir -p /tmp/cores && cd /tmp/cores
+          curl -fsSL --retry 4 -o sb.tgz "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-amd64.tar.gz"
+          tar xzf sb.tgz --strip-components=1
+          curl -fsSL --retry 4 -o x.zip "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip"
+          unzip -o x.zip xray
+      - name: Test
+        env:
+          SING_BOX: /tmp/cores/sing-box
+          XRAY: /tmp/cores/xray
+        run: |
+          cat published/hot.txt published/fresh.txt 2>/dev/null | head -n 4000 > "$RUNNER_TEMP/try.txt"
+          go run ./cmd/collect -hot-from "$RUNNER_TEMP/try.txt" -real 1500 -out published
+      - name: Publish
+        working-directory: published
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add hot.txt
+          git diff --cached --quiet && exit 0
+          git commit -qm "Hot servers $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:servers

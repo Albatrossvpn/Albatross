@@ -109,7 +109,6 @@ configv2rayforfree
 minovpnch
 netmellianti
 v2ray_outlineir
-configshub
 golf_vpn
 realvpnmaster
 red2ray
@@ -177,7 +176,6 @@ proxymelimon
 raydikalx
 tunelprov2
 cloudcityy
-configwireguard
 easy_free_vpn
 f_nirevil
 freeshadowsock
@@ -187,7 +185,6 @@ msv2raynp
 mt_team_iran
 netazadchannel
 next_serverpanel
-shadowproxy66
 v_2rey
 vmessorg
 filter5050
@@ -209,7 +206,6 @@ proxysudo
 ssrsub
 v2rayan
 vip_vpn_2022
-fox_vpn66
 grizzlyvpn
 iranvpnet
 kilid_stor
@@ -218,7 +214,6 @@ magickey_shop
 magicvpn_shop
 migping
 v2rayfree1
-clash_verge_re
 free_httpcustom
 freebaipiao
 godv2rang

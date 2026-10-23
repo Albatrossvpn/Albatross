@@ -13,6 +13,11 @@ type SingBoxOptions struct {
 	// Spoof sends a forged ClientHello with this allowed SNI first, which
 	// fools whitelist filters. Needs administrator rights.
 	Spoof string
+	// LineMbps is the speed measured on this network (0 = unknown). Hysteria2
+	// servers without their own numbers are asked to send at about this
+	// rate (Brutal), which holds up on lossy mobile lines where the default
+	// congestion control backs off.
+	LineMbps int
 }
 
 // SingBox returns the sing-box object for this node. WireGuard and OpenVPN
@@ -61,11 +66,19 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 		if n.Obfs == "salamander" || n.ObfsPassword != "" {
 			out["obfs"] = map[string]any{"type": "salamander", "password": n.ObfsPassword}
 		}
-		if n.UpMbps > 0 {
-			out["up_mbps"] = n.UpMbps
+		up, down := n.UpMbps, n.DownMbps
+		if up <= 0 && down <= 0 && o.LineMbps > 0 {
+			// A little above what was measured, since the measurement went
+			// through servers slower than the line; upload is rarely
+			// measured and usually far slower.
+			down = min(max(o.LineMbps*5/4, 10), 1000)
+			up = min(max(o.LineMbps/4, 5), 50)
 		}
-		if n.DownMbps > 0 {
-			out["down_mbps"] = n.DownMbps
+		if up > 0 {
+			out["up_mbps"] = up
+		}
+		if down > 0 {
+			out["down_mbps"] = down
 		}
 		out["tls"] = n.sbQUICTLS(nil)
 	case "hysteria":

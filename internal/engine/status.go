@@ -3,6 +3,7 @@ package engine
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"net"
 	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
@@ -35,6 +36,9 @@ type Snapshot struct {
 	Helping       bool `json:"helping"`
 	// CrowdAvailable says this build has a service to share stats with.
 	CrowdAvailable bool `json:"crowd_available"`
+	// Share lists where other devices (a hotspot's, the same Wi-Fi's) can
+	// reach this device's HTTP and SOCKS proxy, when sharing is on.
+	Share []string `json:"share,omitempty"`
 }
 
 // ScanInfo is scan progress.
@@ -88,6 +92,7 @@ func (e *Engine) Snapshot() Snapshot {
 		HelpAvailable:  e.helpEligible(),
 		Helping:        e.helper != nil && !e.helper.Exited(),
 		CrowdAvailable: len(e.crowdURLs) > 0,
+		Share:          e.shareAddrs(),
 		Target:         e.target,
 		TargetName:     countryName(e.target),
 		TargetFlag:     geo.Flag(e.target),
@@ -150,3 +155,25 @@ type noProxy struct{}
 func (noProxy) Set(string, []string) error { return nil }
 func (noProxy) Clear() error               { return nil }
 func (noProxy) Owned(string) bool          { return false }
+
+// shareAddrs are this device's local-network addresses with the proxy
+// port, while the proxy is open to other devices.
+func (e *Engine) shareAddrs() []string {
+	if !e.settings.AllowLAN || e.conn == nil {
+		return nil
+	}
+	_, port, err := net.SplitHostPort(e.conn.proxyAddr)
+	if err != nil {
+		return nil
+	}
+	addrs, _ := net.InterfaceAddrs()
+	var out []string
+	for _, a := range addrs {
+		ip, ok := a.(*net.IPNet)
+		if !ok || ip.IP.To4() == nil || !ip.IP.IsPrivate() || ip.IP.To4()[1] == 19 && ip.IP.To4()[0] == 172 {
+			continue
+		}
+		out = append(out, net.JoinHostPort(ip.IP.String(), port))
+	}
+	return out
+}
