@@ -49,6 +49,7 @@ type connection struct {
 
 	mu       sync.Mutex
 	active   *member
+	sticky   *member // where stickyDomains go; moves only when it fails
 	delay    int
 	exitIP   string
 	exitCC   string
@@ -488,6 +489,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 			run.Stop()
 			return err
 		}
+		c.keep(e.ctx, m)
 		// Prove the whole path works before telling anyone it does.
 		r = tester.Probe(e.ctx, proxy, 12*time.Second)
 		if !r.OK {
@@ -515,7 +517,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	}
 	c.exitIP, c.exitCC, c.delay, c.healthy = r.ExitIP, r.Country, int(r.Delay/time.Millisecond), true
 	if set.Mode == "proxy" {
-		bypass := []string{"localhost", "127.*", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*", "172.30.*", "172.31.*", "192.168.*", "<local>"}
+		bypass := []string{"localhost", "127.*", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*", "172.30.*", "172.31.*", "192.168.*", "169.254.*", "<local>"}
 		if r, ok := findRegion(set.Bypass); ok {
 			for _, s := range r.Suffixes {
 				bypass = append(bypass, "*"+s)
@@ -682,6 +684,10 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 			"type": "selector", "tag": "proxy", "outbounds": s.Tags, "default": s.Tags[0],
 			"interrupt_exist_connections": false,
 		},
+		map[string]any{
+			"type": "selector", "tag": "sticky", "outbounds": s.Tags, "default": s.Tags[0],
+			"interrupt_exist_connections": false,
+		},
 		map[string]any{"type": "direct", "tag": "direct"},
 	)
 	inbounds := []any{map[string]any{"type": "mixed", "tag": "mixed-in", "listen": o.listen, "listen_port": o.port}}
@@ -704,6 +710,9 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 			"type": "tun", "tag": "tun-in", "interface_name": "Albatross",
 			"address": []string{"172.19.0.1/30", "fdfe:dcba:9876::1/126"},
 			"mtu":     9000, "auto_route": true, "strict_route": true, "stack": "mixed",
+			// The local network never enters the tunnel, so casting to a
+			// TV and finding printers keep working.
+			"route_exclude_address": LANNets,
 		})
 	}
 	var ruleSets []any
@@ -711,6 +720,7 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		map[string]any{"action": "sniff"},
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
 		map[string]any{"ip_is_private": true, "outbound": "direct"},
+		map[string]any{"ip_cidr": LANNets, "outbound": "direct"},
 	)
 	if o.tun {
 		// Our own app and the cores' test instances must not loop
@@ -751,6 +761,9 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 			map[string]any{"network": "tcp", "port": []int{21, 23, 25, 80, 110, 143}, "action": "reject"},
 		)
 	}
+	// Sites that sign people out when their address changes keep one exit
+	// for the whole connection.
+	rules = append(rules, map[string]any{"domain_suffix": stickyDomains, "outbound": "sticky"})
 	route := map[string]any{
 		"rules": rules,
 		"final": "proxy",
@@ -842,4 +855,25 @@ func (e *Engine) connInfo() *ConnInfo {
 		info.Server, info.Proto = c.servers[0].Name, c.servers[0].Proto
 	}
 	return info
+}
+
+// LANNets are the local network's addresses, which never go through a
+// server: private, link-local, multicast (mDNS, SSDP) and broadcast. The
+// tunnel's own 172.19.0.0/16 is left out of 172.16.0.0/12.
+var LANNets = []string{
+	"10.0.0.0/8", "172.16.0.0/15", "172.18.0.0/16", "172.20.0.0/14", "172.24.0.0/13",
+	"192.168.0.0/16", "169.254.0.0/16", "224.0.0.0/4", "255.255.255.255/32",
+	"fe80::/10", "fc00::/7", "ff00::/8",
+}
+
+// stickyDomains are sites that sign people out, or ask them to prove who
+// they are, when their address changes: banks, payments, exchanges,
+// accounts and AI services.
+var stickyDomains = []string{
+	"accounts.google.com", "myaccount.google.com", "login.microsoftonline.com", "login.live.com",
+	"appleid.apple.com", "icloud.com", "paypal.com", "wise.com", "revolut.com",
+	"binance.com", "okx.com", "bybit.com", "kucoin.com", "coinbase.com", "kraken.com",
+	"chatgpt.com", "openai.com", "claude.ai", "anthropic.com", "gemini.google.com",
+	"instagram.com", "facebook.com", "x.com", "twitter.com", "linkedin.com",
+	"github.com", "steampowered.com", "steamcommunity.com", "web.telegram.org",
 }

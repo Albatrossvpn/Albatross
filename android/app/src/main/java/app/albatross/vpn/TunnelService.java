@@ -92,6 +92,17 @@ public final class TunnelService extends VpnService {
             b.addDisallowedApplication(getPackageName());
         } catch (PackageManager.NameNotFoundException ignored) {
         }
+        if (Build.VERSION.SDK_INT >= 33) {
+            // The local network stays outside the tunnel, so casting to a TV
+            // and finding devices (mDNS, SSDP) keep working.
+            for (String net : Mobile.lanNets().split(",")) {
+                String[] p = net.split("/");
+                try {
+                    b.excludeRoute(new android.net.IpPrefix(java.net.InetAddress.getByName(p[0]), Integer.parseInt(p[1])));
+                } catch (Exception ignored) {
+                }
+            }
+        }
         if (Build.VERSION.SDK_INT >= 29) b.setMetered(false);
         b.setConfigureIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE));
         try {
