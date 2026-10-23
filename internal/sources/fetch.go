@@ -151,6 +151,9 @@ func (f *Fetcher) get(ctx context.Context, a attempt, etag, lastMod string) (str
 		return "", cacheMeta{}, false, err
 	}
 	req.Header.Set("User-Agent", userAgent)
+	if strings.HasPrefix(a.url, githubAPI) {
+		req.Header.Set("Accept", "application/vnd.github.raw")
+	}
 	if etag != "" {
 		req.Header.Set("If-None-Match", etag)
 	}
@@ -244,13 +247,27 @@ func Mirrors(u string) []string {
 		return nil
 	}
 	owner, repo, branch, path := m[1], m[2], m[3], m[4]
-	return []string{
+	out := []string{
 		fmt.Sprintf("https://cdn.jsdelivr.net/gh/%s/%s@%s/%s", owner, repo, branch, path),
 		fmt.Sprintf("https://fastly.jsdelivr.net/gh/%s/%s@%s/%s", owner, repo, branch, path),
 		fmt.Sprintf("https://raw.githack.com/%s/%s/%s/%s", owner, repo, branch, path),
 		fmt.Sprintf("https://gcore.jsdelivr.net/gh/%s/%s@%s/%s", owner, repo, branch, path),
 	}
+	// api.github.com stayed open through Iran's allowlist periods while
+	// github.com and raw were closed. Anonymous use allows 60 requests an
+	// hour per address, so only the app's own files go this way.
+	if strings.EqualFold(owner+"/"+repo, ownRepo) {
+		out = append(out, fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", owner, repo, path, branch))
+	}
+	return out
 }
+
+// ownRepo is the app's own repository, where the collector publishes.
+const ownRepo = "cezomagoanlace29861-jpg/vp"
+
+// githubAPI is the prefix of api.github.com contents URLs, which return
+// the raw file when asked for it.
+const githubAPI = "https://api.github.com/repos/"
 
 func (f *Fetcher) paths(s Source) (body, meta string) {
 	base := filepath.Join(f.CacheDir, string(s.Kind)+"-"+s.ID)
