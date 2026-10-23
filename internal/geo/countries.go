@@ -8,193 +8,190 @@ import "strings"
 type Country struct {
 	Code string `json:"code"`
 	EN   string `json:"en"`
-	FA   string `json:"fa"`
 }
 
-// countries is "CODE|English name|Persian name", one per line.
-const countries = `AD|Andorra|آندورا
-AE|United Arab Emirates|امارات
-AF|Afghanistan|افغانستان
-AG|Antigua and Barbuda|آنتیگوا و باربودا
-AL|Albania|آلبانی
-AM|Armenia|ارمنستان
-AO|Angola|آنگولا
-AR|Argentina|آرژانتین
-AT|Austria|اتریش
-AU|Australia|استرالیا
-AZ|Azerbaijan|جمهوری آذربایجان
-BA|Bosnia and Herzegovina|بوسنی و هرزگوین
-BB|Barbados|باربادوس
-BD|Bangladesh|بنگلادش
-BE|Belgium|بلژیک
-BF|Burkina Faso|بورکینافاسو
-BG|Bulgaria|بلغارستان
-BH|Bahrain|بحرین
-BJ|Benin|بنین
-BN|Brunei|برونئی
-BO|Bolivia|بولیوی
-BR|Brazil|برزیل
-BS|Bahamas|باهاما
-BT|Bhutan|بوتان
-BW|Botswana|بوتسوانا
-BY|Belarus|بلاروس
-BZ|Belize|بلیز
-CA|Canada|کانادا
-CD|DR Congo|کنگو
-CH|Switzerland|سوئیس
-CI|Ivory Coast|ساحل عاج
-CL|Chile|شیلی
-CM|Cameroon|کامرون
-CN|China|چین
-CO|Colombia|کلمبیا
-CR|Costa Rica|کاستاریکا
-CU|Cuba|کوبا
-CV|Cape Verde|کیپ ورد
-CY|Cyprus|قبرس
-CZ|Czechia|چک
-DE|Germany|آلمان
-DJ|Djibouti|جیبوتی
-DK|Denmark|دانمارک
-DO|Dominican Republic|جمهوری دومینیکن
-DZ|Algeria|الجزایر
-EC|Ecuador|اکوادور
-EE|Estonia|استونی
-EG|Egypt|مصر
-ES|Spain|اسپانیا
-ET|Ethiopia|اتیوپی
-FI|Finland|فنلاند
-FJ|Fiji|فیجی
-FR|France|فرانسه
-GA|Gabon|گابن
-GB|United Kingdom|انگلستان
-GE|Georgia|گرجستان
-GH|Ghana|غنا
-GI|Gibraltar|جبل‌الطارق
-GL|Greenland|گرینلند
-GR|Greece|یونان
-GT|Guatemala|گواتمالا
-GU|Guam|گوام
-HK|Hong Kong|هنگ کنگ
-HN|Honduras|هندوراس
-HR|Croatia|کرواسی
-HT|Haiti|هائیتی
-HU|Hungary|مجارستان
-ID|Indonesia|اندونزی
-IE|Ireland|ایرلند
-IL|Israel|اسرائیل
-IM|Isle of Man|جزیره من
-IN|India|هند
-IQ|Iraq|عراق
-IR|Iran|ایران
-IS|Iceland|ایسلند
-IT|Italy|ایتالیا
-JE|Jersey|جرزی
-JM|Jamaica|جامائیکا
-JO|Jordan|اردن
-JP|Japan|ژاپن
-KE|Kenya|کنیا
-KG|Kyrgyzstan|قرقیزستان
-KH|Cambodia|کامبوج
-KR|South Korea|کره جنوبی
-KW|Kuwait|کویت
-KY|Cayman Islands|جزایر کیمن
-KZ|Kazakhstan|قزاقستان
-LA|Laos|لائوس
-LB|Lebanon|لبنان
-LI|Liechtenstein|لیختن‌اشتاین
-LK|Sri Lanka|سریلانکا
-LT|Lithuania|لیتوانی
-LU|Luxembourg|لوکزامبورگ
-LV|Latvia|لتونی
-LY|Libya|لیبی
-MA|Morocco|مراکش
-MC|Monaco|موناکو
-MD|Moldova|مولداوی
-ME|Montenegro|مونته‌نگرو
-MG|Madagascar|ماداگاسکار
-MK|North Macedonia|مقدونیه شمالی
-ML|Mali|مالی
-MM|Myanmar|میانمار
-MN|Mongolia|مغولستان
-MO|Macao|ماکائو
-MT|Malta|مالت
-MU|Mauritius|موریس
-MV|Maldives|مالدیو
-MX|Mexico|مکزیک
-MY|Malaysia|مالزی
-MZ|Mozambique|موزامبیک
-NA|Namibia|نامیبیا
-NC|New Caledonia|کالدونیای جدید
-NG|Nigeria|نیجریه
-NI|Nicaragua|نیکاراگوئه
-NL|Netherlands|هلند
-NO|Norway|نروژ
-NP|Nepal|نپال
-NZ|New Zealand|نیوزیلند
-OM|Oman|عمان
-PA|Panama|پاناما
-PE|Peru|پرو
-PG|Papua New Guinea|پاپوآ گینه نو
-PH|Philippines|فیلیپین
-PK|Pakistan|پاکستان
-PL|Poland|لهستان
-PR|Puerto Rico|پورتوریکو
-PS|Palestine|فلسطین
-PT|Portugal|پرتغال
-PY|Paraguay|پاراگوئه
-QA|Qatar|قطر
-RE|Réunion|رئونیون
-RO|Romania|رومانی
-RS|Serbia|صربستان
-RU|Russia|روسیه
-RW|Rwanda|رواندا
-SA|Saudi Arabia|عربستان
-SC|Seychelles|سیشل
-SD|Sudan|سودان
-SE|Sweden|سوئد
-SG|Singapore|سنگاپور
-SI|Slovenia|اسلوونی
-SK|Slovakia|اسلواکی
-SN|Senegal|سنگال
-SO|Somalia|سومالی
-SV|El Salvador|السالوادور
-SY|Syria|سوریه
-TG|Togo|توگو
-TH|Thailand|تایلند
-TJ|Tajikistan|تاجیکستان
-TM|Turkmenistan|ترکمنستان
-TN|Tunisia|تونس
-TR|Turkey|ترکیه
-TT|Trinidad and Tobago|ترینیداد و توباگو
-TW|Taiwan|تایوان
-TZ|Tanzania|تانزانیا
-UA|Ukraine|اوکراین
-UG|Uganda|اوگاندا
-US|United States|آمریکا
-UY|Uruguay|اروگوئه
-UZ|Uzbekistan|ازبکستان
-VE|Venezuela|ونزوئلا
-VG|British Virgin Islands|جزایر ویرجین بریتانیا
-VN|Vietnam|ویتنام
-YE|Yemen|یمن
-ZA|South Africa|آفریقای جنوبی
-ZM|Zambia|زامبیا
-ZW|Zimbabwe|زیمبابوه`
+// countries is "CODE|English name", one per line.
+const countries = `AD|Andorra
+AE|United Arab Emirates
+AF|Afghanistan
+AG|Antigua and Barbuda
+AL|Albania
+AM|Armenia
+AO|Angola
+AR|Argentina
+AT|Austria
+AU|Australia
+AZ|Azerbaijan
+BA|Bosnia and Herzegovina
+BB|Barbados
+BD|Bangladesh
+BE|Belgium
+BF|Burkina Faso
+BG|Bulgaria
+BH|Bahrain
+BJ|Benin
+BN|Brunei
+BO|Bolivia
+BR|Brazil
+BS|Bahamas
+BT|Bhutan
+BW|Botswana
+BY|Belarus
+BZ|Belize
+CA|Canada
+CD|DR Congo
+CH|Switzerland
+CI|Ivory Coast
+CL|Chile
+CM|Cameroon
+CN|China
+CO|Colombia
+CR|Costa Rica
+CU|Cuba
+CV|Cape Verde
+CY|Cyprus
+CZ|Czechia
+DE|Germany
+DJ|Djibouti
+DK|Denmark
+DO|Dominican Republic
+DZ|Algeria
+EC|Ecuador
+EE|Estonia
+EG|Egypt
+ES|Spain
+ET|Ethiopia
+FI|Finland
+FJ|Fiji
+FR|France
+GA|Gabon
+GB|United Kingdom
+GE|Georgia
+GH|Ghana
+GI|Gibraltar
+GL|Greenland
+GR|Greece
+GT|Guatemala
+GU|Guam
+HK|Hong Kong
+HN|Honduras
+HR|Croatia
+HT|Haiti
+HU|Hungary
+ID|Indonesia
+IE|Ireland
+IL|Israel
+IM|Isle of Man
+IN|India
+IQ|Iraq
+IR|Iran
+IS|Iceland
+IT|Italy
+JE|Jersey
+JM|Jamaica
+JO|Jordan
+JP|Japan
+KE|Kenya
+KG|Kyrgyzstan
+KH|Cambodia
+KR|South Korea
+KW|Kuwait
+KY|Cayman Islands
+KZ|Kazakhstan
+LA|Laos
+LB|Lebanon
+LI|Liechtenstein
+LK|Sri Lanka
+LT|Lithuania
+LU|Luxembourg
+LV|Latvia
+LY|Libya
+MA|Morocco
+MC|Monaco
+MD|Moldova
+ME|Montenegro
+MG|Madagascar
+MK|North Macedonia
+ML|Mali
+MM|Myanmar
+MN|Mongolia
+MO|Macao
+MT|Malta
+MU|Mauritius
+MV|Maldives
+MX|Mexico
+MY|Malaysia
+MZ|Mozambique
+NA|Namibia
+NC|New Caledonia
+NG|Nigeria
+NI|Nicaragua
+NL|Netherlands
+NO|Norway
+NP|Nepal
+NZ|New Zealand
+OM|Oman
+PA|Panama
+PE|Peru
+PG|Papua New Guinea
+PH|Philippines
+PK|Pakistan
+PL|Poland
+PR|Puerto Rico
+PS|Palestine
+PT|Portugal
+PY|Paraguay
+QA|Qatar
+RE|Réunion
+RO|Romania
+RS|Serbia
+RU|Russia
+RW|Rwanda
+SA|Saudi Arabia
+SC|Seychelles
+SD|Sudan
+SE|Sweden
+SG|Singapore
+SI|Slovenia
+SK|Slovakia
+SN|Senegal
+SO|Somalia
+SV|El Salvador
+SY|Syria
+TG|Togo
+TH|Thailand
+TJ|Tajikistan
+TM|Turkmenistan
+TN|Tunisia
+TR|Turkey
+TT|Trinidad and Tobago
+TW|Taiwan
+TZ|Tanzania
+UA|Ukraine
+UG|Uganda
+US|United States
+UY|Uruguay
+UZ|Uzbekistan
+VE|Venezuela
+VG|British Virgin Islands
+VN|Vietnam
+YE|Yemen
+ZA|South Africa
+ZM|Zambia
+ZW|Zimbabwe`
 
 var (
 	byCode = map[string]Country{}
-	// nameToCode maps lower-case English and Persian names and common
-	// aliases to codes.
+	// nameToCode maps lower-case names and common aliases to codes.
 	nameToCode = map[string]string{}
 )
 
 func init() {
 	for _, line := range strings.Split(countries, "\n") {
 		p := strings.Split(line, "|")
-		c := Country{Code: p[0], EN: p[1], FA: p[2]}
+		c := Country{Code: p[0], EN: p[1]}
 		byCode[c.Code] = c
 		nameToCode[strings.ToLower(c.EN)] = c.Code
-		nameToCode[c.FA] = c.Code
 	}
 	for alias, code := range map[string]string{
 		"usa": "US", "america": "US", "united states of america": "US", "uk": "GB", "england": "GB", "britain": "GB",
@@ -209,8 +206,6 @@ func init() {
 		"bucharest": "RO", "kyiv": "UA", "riga": "LV", "tallinn": "EE", "vilnius": "LT", "oslo": "NO",
 		"copenhagen": "DK", "dublin": "IE", "brussels": "BE", "prague": "CZ", "budapest": "HU", "sofia": "BG",
 		"tehran": "IR", "yerevan": "AM", "tbilisi": "GE", "baku": "AZ", "almaty": "KZ", "taipei": "TW",
-		"آمریکا": "US", "امریکا": "US", "انگلیس": "GB", "هلند": "NL", "امارات متحده عربی": "AE",
-		"کره": "KR", "ترکیه": "TR", "روسیه": "RU", "آلمان": "DE", "فرانسه": "FR", "فنلاند": "FI",
 	} {
 		nameToCode[alias] = code
 	}
@@ -221,7 +216,7 @@ func Lookup(code string) (Country, bool) {
 	c, ok := byCode[strings.ToUpper(code)]
 	if !ok && len(code) == 2 {
 		up := strings.ToUpper(code)
-		return Country{Code: up, EN: up, FA: up}, false
+		return Country{Code: up, EN: up}, false
 	}
 	return c, ok
 }
