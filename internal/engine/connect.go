@@ -81,6 +81,8 @@ type member struct {
 	speed   float64 // download bytes per second at the last speed test
 	speedAt time.Time
 	soaked  int8 // endurance check: 1 passed, -1 failed, 0 not run
+	// forged: the server showed a forged certificate; it is never used.
+	forged bool
 }
 
 func (c *connection) ready() bool {
@@ -490,6 +492,11 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		r = tester.Probe(e.ctx, proxy, 12*time.Second)
 		if !r.OK {
 			e.noteResult(c, m, 0, false)
+		}
+		if r.Tampered && e.distrust(m.server.key64, m.server.Name) {
+			c.mu.Lock()
+			m.forged = true
+			c.mu.Unlock()
 		}
 	}
 	if !r.OK {

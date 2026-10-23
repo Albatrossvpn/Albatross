@@ -17,7 +17,7 @@ const (
 	StateNew      uint8 = iota // never tested
 	StateDead                  // unreachable (TCP probe or real test failed)
 	StateOK                    // worked at the last test
-	StateRejected              // the core refused its config
+	StateRejected              // the core refused its config, or it forged a certificate; never tested again
 )
 
 // Entry is the in-memory record of one candidate. Keep it small.
