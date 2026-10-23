@@ -133,12 +133,12 @@ jobs:
           # Opens the list of the project's own servers (deploy/server).
           OWN_KEY: ${{ secrets.OWN_KEY }}
         run: bash build/package.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Albatross-folder
           path: dist/Albatross
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Albatross-portable-${{ steps.version.outputs.version }}
           path: dist/*.zip
@@ -192,7 +192,7 @@ jobs:
           signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist/*arm64-v8a.apk | grep -m1 'SHA-256' | awk '{print $NF}')"
           echo "APK signer SHA-256: $signer"
           echo "- APK signer SHA-256: \`$signer\`" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Albatross-android-${{ env.VERSION }}
           path: dist/*.apk
@@ -302,7 +302,7 @@ jobs:
             if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f after install" }
           }
           "installed OK: $dir"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Albatross-Setup-${{ env.VERSION }}
           path: dist/Albatross-Setup-*.exe
