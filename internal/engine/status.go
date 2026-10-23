@@ -1,0 +1,152 @@
+package engine
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"time"
+
+	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
+	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+)
+
+// Snapshot is everything the main screen shows.
+type Snapshot struct {
+	Status     string        `json:"status"`
+	Message    string        `json:"message"`
+	Target     string        `json:"target"`
+	TargetName string        `json:"target_name"`
+	TargetFlag string        `json:"target_flag"`
+	Conn       *ConnInfo     `json:"conn"`
+	Countries  []CountryInfo `json:"countries"`
+	Scan       ScanInfo      `json:"scan"`
+	Settings   Settings      `json:"settings"`
+	Admin      bool          `json:"admin"`
+	Version    string        `json:"version"`
+	Cores      CoreInfo      `json:"cores"`
+	WorkingNow int           `json:"working_now"`
+	TotalGood  int           `json:"total_good"`
+}
+
+// ScanInfo is scan progress.
+type ScanInfo struct {
+	Phase        string `json:"phase"`
+	Candidates   int    `json:"candidates"`
+	Untested     int    `json:"untested"`
+	Dead         int    `json:"dead"`
+	Testing      int    `json:"testing"`
+	PerMinute    int    `json:"per_minute"`
+	SourcesTotal int    `json:"sources_total"`
+	SourcesDone  int    `json:"sources_done"`
+	SourcesOK    int    `json:"sources_ok"`
+	SourceCount  int    `json:"source_count"`
+	LastRefresh  int64  `json:"last_refresh"`
+	Downloaded   int64  `json:"downloaded"`
+	Found        int    `json:"found"`
+}
+
+// CoreInfo says which cores are installed.
+type CoreInfo struct {
+	SingBox  bool `json:"sing_box"`
+	Xray     bool `json:"xray"`
+	WarpPlus bool `json:"warp_plus"`
+}
+
+// Snapshot returns the current state for the UI.
+func (e *Engine) Snapshot() Snapshot {
+	countries := e.Countries()
+	now := time.Now()
+	e.mu.Lock()
+	total, untested, dead := e.poolStats[0], e.poolStats[1], e.poolStats[2]
+	working := 0
+	for _, s := range e.good {
+		if s.usable(now) {
+			working++
+		}
+	}
+	enabled := 0
+	for _, s := range e.srcs {
+		if s.Enabled {
+			enabled++
+		}
+	}
+	snap := Snapshot{
+		Status:     e.status,
+		Message:    e.message,
+		Target:     e.target,
+		TargetName: countryName(e.target),
+		TargetFlag: geo.Flag(e.target),
+		Countries:  countries,
+		Settings:   e.settings,
+		Version:    e.opt.Version,
+		Cores:      CoreInfo{SingBox: e.bin.SingBox != "", Xray: e.bin.Xray != "", WarpPlus: e.bin.WarpPlus != ""},
+		WorkingNow: working,
+		TotalGood:  len(e.good),
+		Scan: ScanInfo{
+			Phase: e.scan.Phase, Candidates: total, Untested: untested, Dead: dead, Testing: e.scan.Testing,
+			PerMinute: len(e.scan.recent), SourcesTotal: e.scan.SourcesTotal, SourcesDone: e.scan.SourcesDone,
+			SourcesOK: e.scan.SourcesOK, SourceCount: enabled, LastRefresh: e.scan.LastRefresh.Unix(),
+			Found: e.scan.Found,
+		},
+	}
+	if e.target == "" {
+		snap.TargetFlag = "⚡"
+	}
+	e.mu.Unlock()
+	snap.Scan.Downloaded = e.fetcher.BytesDownloaded()
+	snap.Admin = e.opt.IsAdmin()
+	snap.Conn = e.connInfo()
+	return snap
+}
+
+// SetTarget changes the chosen country without connecting.
+func (e *Engine) SetTarget(country string) {
+	e.mu.Lock()
+	e.target = country
+	e.settings.Country = country
+	e.mu.Unlock()
+	e.poke()
+}
+
+// Refresh downloads all sources again now.
+func (e *Engine) Refresh() {
+	e.mu.Lock()
+	for i := range e.srcStats {
+		e.srcStats[i].Fetched = time.Time{}
+	}
+	e.mu.Unlock()
+	methodsMu.Lock()
+	methodsTested = map[string]time.Time{}
+	methodsMu.Unlock()
+	e.triggerRefill()
+}
+
+// Import adds servers the user pasted (links, a subscription body, or a
+// Clash profile) and tests them first.
+func (e *Engine) Import(text string) (int, error) {
+	e.mu.Lock()
+	idx, ok := e.srcIndex["__import__"]
+	if !ok {
+		idx = len(e.srcs)
+		e.srcIndex["__import__"] = idx
+		e.srcs = append(e.srcs, importSource)
+		e.srcStats = append(e.srcStats, SourceStat{})
+	}
+	e.mu.Unlock()
+	added := e.ingest(idx, importSource, text, nil)
+	e.poke()
+	return added, nil
+}
+
+var importSource = sources.Source{ID: "__import__", Kind: sources.KindSubscription, URL: "imported", Tier: sources.TierUser}
+
+func randomToken() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+type noProxy struct{}
+
+func (noProxy) Set(string, []string) error { return nil }
+func (noProxy) Clear() error               { return nil }
+func (noProxy) Owned(string) bool          { return false }
