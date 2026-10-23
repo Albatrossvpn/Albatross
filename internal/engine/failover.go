@@ -876,6 +876,14 @@ func (c *connection) speed(ctx context.Context, m *member, size int) (float64, e
 	return float64(n) / max(took.Seconds(), 0.05), nil
 }
 
+// noteLine learns the line speed from a result. Hysteria servers are left
+// out: they send at the speed asked for, which comes from this number.
+func (e *Engine) noteLine(m *member, bps float64) {
+	if p := m.server.Proto; p != "hysteria2" && p != "hysteria" {
+		e.net.recordLine(bps)
+	}
+}
+
 // noteSpeed records a speed result on m.
 func (c *connection) noteSpeed(m *member, bps float64) {
 	c.mu.Lock()
@@ -906,6 +914,7 @@ func (e *Engine) speedRound(ctx context.Context, c *connection) {
 		return
 	}
 	c.noteSpeed(active, cur)
+	e.noteLine(active, cur)
 	if cur >= fastEnough {
 		c.mu.Lock()
 		c.slowRuns = 0
@@ -931,6 +940,7 @@ func (e *Engine) speedRound(ctx context.Context, c *connection) {
 			continue
 		}
 		c.noteSpeed(b, s)
+		e.noteLine(b, s)
 		if s > bestSpeed {
 			best, bestSpeed = b, s
 		}

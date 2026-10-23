@@ -38,6 +38,8 @@ type BuildOptions struct {
 	FragmentFor func(*node.Node) bool
 	// Spoof is the allowed SNI for forged ClientHellos ("" = off).
 	Spoof string
+	// LineMbps is the measured line speed (see node.SingBoxOptions).
+	LineMbps int
 	// OnLine, when set, receives every line the cores of this run print.
 	OnLine func(core, line string)
 	// warpPorts maps warp-plus nodes to the SOCKS port their process
@@ -64,7 +66,7 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 		if o.FragmentFor != nil {
 			frag = frag || o.FragmentFor(n)
 		}
-		obj, ep := n.SingBox(tag, node.SingBoxOptions{Fragment: frag, Spoof: o.Spoof})
+		obj, ep := n.SingBox(tag, node.SingBoxOptions{Fragment: frag, Spoof: o.Spoof, LineMbps: o.LineMbps})
 		if ep {
 			s.Endpoints = append(s.Endpoints, obj)
 			s.epIdx = append(s.epIdx, i)
