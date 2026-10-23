@@ -442,20 +442,22 @@ func (e *Engine) checkActive(ctx context.Context, c *connection, urgent bool) bo
 		return false
 	}
 	m := c.activeMember()
-	timeout := 4 * time.Second
+	c.mu.Lock()
+	usual := time.Duration(m.delay) * time.Millisecond
+	c.mu.Unlock()
+	// Servers that answer in seconds are common on filtered networks; a
+	// fixed limit would call them dead on every check.
+	timeout := min(max(4*time.Second, 2*usual+time.Second), 10*time.Second)
 	if urgent {
 		// A server that usually answers in 300 ms and has not in 1.5 s is
-		// not coming back; slow ones get up to 3 s.
-		c.mu.Lock()
-		usual := time.Duration(m.delay) * time.Millisecond
-		c.mu.Unlock()
-		timeout = min(max(3*usual+500*time.Millisecond, 1500*time.Millisecond), 3*time.Second)
+		// not coming back.
+		timeout = min(max(3*usual+500*time.Millisecond, 1500*time.Millisecond), max(3*time.Second, 2*usual))
 	}
 	d, ok, reached := c.test(ctx, m, timeout)
 	if reached && !ok && ctx.Err() == nil {
 		// A second try rules out one lost request, or a busy server
 		// answering a little late.
-		d, ok, reached = c.test(ctx, m, max(timeout, 3*time.Second))
+		d, ok, reached = c.test(ctx, m, min(max(timeout, 3*time.Second, 2*usual+time.Second), 10*time.Second))
 	}
 	if ctx.Err() != nil {
 		return false
@@ -470,40 +472,9 @@ func (e *Engine) checkActive(ctx context.Context, c *connection, urgent bool) bo
 		c.mu.Lock()
 		c.healthy, c.delay = true, d
 		c.mu.Unlock()
-		e.rotateEarly(ctx, c, m)
 		return true
 	}
 	return e.failover(ctx, c, m)
-}
-
-// rotateEarly moves new connections to a backup when the server in use is
-// near the age at which filtering usually cuts servers of its style on this
-// network (it marks flows and kills them after a while). Open connections
-// stay where they are.
-func (e *Engine) rotateEarly(ctx context.Context, c *connection, m *member) {
-	life, ok := e.net.life(m.style())
-	if !ok || life > 2*time.Hour {
-		return
-	}
-	c.mu.Lock()
-	age := time.Since(c.switched)
-	c.mu.Unlock()
-	if age < max(stayAtLeast, life*8/10) {
-		return
-	}
-	for _, b := range c.backups(map[*member]bool{m: true}) {
-		c.mu.Lock()
-		good := b.soaked >= 0 && b.country == m.country && b.server != m.server
-		c.mu.Unlock()
-		if !good {
-			continue
-		}
-		if c.use(ctx, b) == nil {
-			e.logf("info", "Server %q has been in use for %s, near the %s servers like it usually last here; new connections now go to %q.",
-				m.server.Name, age.Round(time.Minute), life.Round(time.Minute), b.server.Name)
-		}
-		return
-	}
 }
 
 // style is the wire style of the member's server.
@@ -613,6 +584,11 @@ func (e *Engine) switched(ctx context.Context, c *connection, from, to *member) 
 		c.keep(ctx, to)
 	}
 	e.setStatus(StatusConnected, connectedMessage(c))
+	if from == to {
+		// It missed the checks but answered the race: a pause, not a drop.
+		e.logf("info", "Server %q paused and answered again.", from.server.Name)
+		return
+	}
 	e.logf("info", "Server %q dropped; switched at once to ready server %q in the same location.", from.server.Name, to.server.Name)
 	go e.refreshExit(ctx, c)
 }
