@@ -5,6 +5,9 @@ package sources
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
 	"crypto/sha1"
 	_ "embed"
 	"encoding/hex"
@@ -40,6 +43,8 @@ type Source struct {
 	// Central marks the lists the collector publishes (see cmd/collect):
 	// every other built-in source, already gathered and deduplicated.
 	Central bool `json:"central,omitempty"`
+	// Sealed lists are encrypted with OwnKey (see Open).
+	Sealed bool `json:"sealed,omitempty"`
 }
 
 // Label is a short human-readable name.
@@ -101,11 +106,63 @@ func Central() []Source {
 		u := CentralBase + name
 		out = append(out, Source{ID: ID(KindSubscription, u), Kind: KindSubscription, URL: u, Tier: tier, Builtin: true, Enabled: true, Central: true})
 	}
+	if ownKey() != nil {
+		add("own.bin", TierPriority)
+		out[len(out)-1].Sealed = true
+	}
 	add("fresh.txt", TierPriority)
 	for i := 1; i <= CentralShards; i++ {
 		add(fmt.Sprintf("all-%d.txt", i), TierDeep)
 	}
 	return out
+}
+
+// OwnKey (hex, 32 bytes) decrypts own.bin, the list of the project's own
+// servers (deploy/server). It is set at build time; without it the list is
+// not read. It only keeps public collectors from picking those servers up
+// and overloading them; it is not a secret from someone who unpacks the app.
+var OwnKey string
+
+func ownKey() []byte {
+	k, err := hex.DecodeString(OwnKey)
+	if err != nil || len(k) != 32 {
+		return nil
+	}
+	return k
+}
+
+// Seal encrypts a list with key (AES-256-GCM, nonce first).
+func Seal(key []byte, text string) ([]byte, error) {
+	g, err := gcm(key)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, g.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	return g.Seal(nonce, nonce, []byte(text), nil), nil
+}
+
+// Open decrypts what Seal made with OwnKey, or returns "".
+func Open(data string) string {
+	g, err := gcm(ownKey())
+	if err != nil || len(data) < g.NonceSize() {
+		return ""
+	}
+	b, err := g.Open(nil, []byte(data[:g.NonceSize()]), []byte(data[g.NonceSize():]), nil)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}
+
+func gcm(key []byte) (cipher.AEAD, error) {
+	c, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(c)
 }
 
 // Collected returns every source the collector reads: the built-in ones
