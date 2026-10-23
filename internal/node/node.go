@@ -441,8 +441,29 @@ func (n *Node) Style() uint8 {
 	case "kcp", "quic":
 		tr = 6
 	}
-	return sec*8 + tr + 1 // 0 means unknown
+	return sec*8 + tr + 1 + n.portClass()<<5 // 0 means unknown
 }
+
+// portClass groups ports the way filtering treats them: 443 is watched
+// hardest, Cloudflare's other HTTPS ports and the plain-HTTP ports less.
+func (n *Node) portClass() uint8 {
+	switch n.Port {
+	case 443:
+		return 1
+	case 2053, 2083, 2087, 2096, 8443:
+		return 2
+	case 80, 8080, 8880, 2052, 2082, 2086, 2095:
+		return 3
+	case 0:
+		return 0
+	}
+	return 4
+}
+
+// StyleWire and StylePort split a Style code into its security and
+// transport part and its port class.
+func StyleWire(s uint8) uint8 { return s & 31 }
+func StylePort(s uint8) uint8 { return s >> 5 }
 
 // fp is the uTLS fingerprint to use: the link's own, else the app's pick.
 func (n *Node) fp() string {
