@@ -1,13 +1,13 @@
 module github.com/cezomagoanlace29861-jpg/vp
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
 	github.com/xjasonlyu/tun2socks/v2 v2.6.0
 	golang.org/x/mobile v0.0.0-20260209203831-923679eb55af
 	golang.org/x/net v0.55.0
-	golang.org/x/sys v0.45.0
+	golang.org/x/sys v0.49.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
