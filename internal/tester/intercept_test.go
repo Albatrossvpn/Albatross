@@ -28,13 +28,14 @@ func connectProxy(t *testing.T) *url.URL {
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
-		w.WriteHeader(http.StatusOK)
-		conn, _, err := w.(http.Hijacker).Hijack()
+		conn, rw, err := w.(http.Hijacker).Hijack()
 		if err != nil {
 			up.Close()
 			return
 		}
-		go func() { io.Copy(up, conn); up.Close() }()
+		io.WriteString(conn, "HTTP/1.1 200 OK\r\n\r\n")
+		// The server may already have read the start of the handshake.
+		go func() { io.Copy(up, rw.Reader); up.Close() }()
 		io.Copy(conn, up)
 		conn.Close()
 	}))
