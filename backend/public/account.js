@@ -1,11 +1,6 @@
 import { $, api, esc, fmtBytes, fmtDate, fmtTime, frame, meter, toast } from "/site.js";
 
-const KEY = "session";
-const store = {
-  get() { try { return localStorage.getItem(KEY) || ""; } catch { return ""; } },
-  set(v) { try { v ? localStorage.setItem(KEY, v) : localStorage.removeItem(KEY); } catch {} },
-};
-let token = store.get();
+let token = "";
 let info;
 
 const reasons = {
@@ -33,7 +28,6 @@ function renderTurnstile() {
 }
 
 function signedOut() {
-  store.set("");
   token = "";
   $("#auth").classList.remove("hidden");
   $("#dash").classList.add("hidden");
@@ -72,7 +66,6 @@ async function load() {
 
 function start(r) {
   token = r.token;
-  store.set(token);
   render(r.account);
 }
 
