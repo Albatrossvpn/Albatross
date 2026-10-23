@@ -41,3 +41,9 @@ func TestDistrust(t *testing.T) {
 		t.Fatal("the server is still offered")
 	}
 }
+
+func TestCountryNamesAreEnglish(t *testing.T) {
+	if got := countryName("DE"); got != "Germany" {
+		t.Fatalf("countryName(DE) = %q; the interface is English", got)
+	}
+}

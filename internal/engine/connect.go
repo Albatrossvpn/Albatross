@@ -179,7 +179,7 @@ func countryName(code string) string {
 		return "Fastest location"
 	}
 	c, _ := geo.Lookup(code)
-	return c.FA
+	return c.EN
 }
 
 // connectLoop keeps trying until a group in country is up. home keeps a
