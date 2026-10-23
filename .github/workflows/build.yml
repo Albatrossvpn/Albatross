@@ -1,18 +1,36 @@
 name: Build
 
 on:
+  # Branches are built through their pull requests; one run per change.
   push:
-    branches: ["**", "!servers"]
+    branches: ["main"]
     tags: ["v*"]
+    paths-ignore: ["update.json"]
   pull_request:
+  # Every night, so a broken core, list or Tor change shows up without
+  # anyone looking.
+  schedule:
+    - cron: "17 1 * * *"
   workflow_dispatch:
     inputs:
       release:
         description: "Publish a release with this version (e.g. 0.2.0); the run creates the v<version> tag"
         required: false
+      force_update:
+        description: "Older versions stop connecting until updated"
+        type: boolean
+        default: true
+      update_message:
+        description: "Shown with the update in installed copies (English)"
+        required: false
 
 permissions:
   contents: write
+
+# A newer push to the same pull request or branch makes the older run moot.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   SINGBOX_VERSION: "1.14.3"
@@ -68,7 +86,14 @@ jobs:
           E2E_UPSTREAM: direct
         run: |
           export E2E_HOST_IP="$(hostname -I | awk '{print $1}')"
-          go test -count=1 -timeout 15m ./...
+          set -o pipefail
+          # Nightly: is the bundled Iranian address list still complete?
+          if [ "$GITHUB_EVENT_NAME" = schedule ]; then export RIPE_CHECK=1; fi
+          # One line per package in the run's summary, so a reader needs no log.
+          rc=0
+          go test -count=1 -timeout 15m ./... 2>&1 | tee /tmp/test.log || rc=$?
+          { echo "### Go tests"; grep -E '^(ok|FAIL|---)|RIPE IR' /tmp/test.log | sed 's/^/    /'; } >> "$GITHUB_STEP_SUMMARY" || true
+          exit $rc
       - name: Android tunnel path
         # Makes a TUN device the way Android's VpnService does, so it needs root.
         env:
@@ -136,7 +161,7 @@ jobs:
         run: |
           sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           yes | "$sdk" --licenses > /dev/null || true
-          "$sdk" "platforms;android-35" "build-tools;35.0.0" "ndk;27.3.13750724" > /dev/null
+          "$sdk" "platforms;android-36" "build-tools;36.0.0" "ndk;27.3.13750724" > /dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
       - name: Build APKs
         env:
@@ -146,14 +171,27 @@ jobs:
           ALBATROSS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ALBATROSS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ALBATROSS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          RELEASE: ${{ inputs.release }}
         run: |
-          # Without a key in the repository secrets the APKs get a debug key.
+          # Without a key in the repository secrets the APKs get the runner's
+          # debug key, which is new on every run: Android then refuses to
+          # install the next version over the old one. Fine for test builds,
+          # never for a release.
+          if [ -z "$KEYSTORE_BASE64" ] && { [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; }; then
+            echo "::error::A release needs the ANDROID_KEYSTORE_BASE64 secret, or users must uninstall to update."
+            exit 1
+          fi
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/albatross.jks"
             export ALBATROSS_KEYSTORE="$RUNNER_TEMP/albatross.jks"
           fi
           bash build/android/build.sh
-          "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging dist/*arm64-v8a.apk | head -3
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging dist/*arm64-v8a.apk | head -3
+          # Which key signed it: the release key's digest stays the same
+          # from one version to the next.
+          signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist/*arm64-v8a.apk | grep -m1 'SHA-256' | awk '{print $NF}')"
+          echo "APK signer SHA-256: $signer"
+          echo "- APK signer SHA-256: \`$signer\`" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: Albatross-android-${{ env.VERSION }}
@@ -295,6 +333,52 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.build.outputs.version }}
+          # 0.3.1 and earlier were signed with a throwaway key; Android
+          # installs the first build signed with the release key only after
+          # the old app is removed.
+          body: |
+            Android: if you have 0.3.1 or older, uninstall it before installing this version (one time only). Later updates install over it.
           files: |
             dist/*.zip
             dist/*.apk
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: repo
+      # Installed copies learn of the new version from update.json, with
+      # each platform's installer and SHA-256 so they update in place.
+      - name: Tell installed copies
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build.outputs.version }}
+          FORCE: ${{ github.event_name != 'workflow_dispatch' || inputs.force_update }}
+          MESSAGE: ${{ inputs.update_message }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" > rel.json
+          python3 - <<'PY'
+          import json, os
+          v = os.environ["VERSION"]
+          rel = json.load(open("rel.json"))
+          keys = {"android-arm64-v8a.apk": "android-arm64-v8a", "android-x86_64.apk": "android-x86_64", "Setup-": "windows"}
+          files = {}
+          for a in rel["assets"]:
+              for part, key in keys.items():
+                  if part in a["name"] and (a.get("digest") or "").startswith("sha256:"):
+                      files[key] = {"urls": [a["browser_download_url"]], "sha256": a["digest"][7:]}
+          path = "repo/update.json"
+          m = json.load(open(path))
+          m["latest_version"] = v
+          if os.environ["FORCE"] == "true":
+              m["min_version"] = v
+          m["message"] = os.environ.get("MESSAGE", "")
+          m["files"] = files
+          with open(path, "w") as f:
+              json.dump(m, f, indent=2)
+              f.write("\n")
+          print(json.dumps(m, indent=2))
+          PY
+          cd repo
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Tell installed copies about $VERSION" && git push origin HEAD:main
+          echo "- Released v$VERSION; update.json points at it (forced: $FORCE)." >> "$GITHUB_STEP_SUMMARY"

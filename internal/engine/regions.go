@@ -10,12 +10,19 @@ type region struct {
 	Code     string   // ISO 3166-1 code, the value of Settings.Bypass
 	Name     string   // shown in the settings
 	Suffixes []string // top-level domains that always belong to the region
+	// Subnet is a block of the region's addresses sent along with DNS
+	// lookups (EDNS client subnet), so sites that answer each country with
+	// its own servers name their servers in the region; those then match
+	// the region's address list and open directly on the first visit.
+	// Without it they name servers near the VPN server and the site sees
+	// a foreign visitor, which many of them refuse.
+	Subnet string
 }
 
 // regions are the choices, in the order they are listed.
 var regions = []region{
 	{Code: "CN", Name: "China", Suffixes: []string{".cn", ".xn--fiqs8s", ".xn--fiqz9s"}},
-	{Code: "IR", Name: "Iran", Suffixes: []string{".ir", ".xn--mgba3a4f16a"}},
+	{Code: "IR", Name: "Iran", Suffixes: []string{".ir", ".xn--mgba3a4f16a"}, Subnet: "2.176.0.0/24"}, // TCI
 }
 
 func findRegion(code string) (region, bool) {

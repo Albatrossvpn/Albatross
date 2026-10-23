@@ -1,0 +1,33 @@
+name: CodeQL
+
+# Free security scanning of the Go engine, the Android app and the web UI.
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+  schedule:
+    - cron: "41 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        if: matrix.language == 'go'
+        with:
+          go-version-file: go.mod
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/autobuild@v3
+        if: matrix.language == 'go'
+      - uses: github/codeql-action/analyze@v3

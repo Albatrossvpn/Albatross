@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -61,7 +62,17 @@ func main() {
 			only = append(only, src)
 		}
 	}
+	quit := func() {}
 	eng, err := engine.New(engine.Options{
+		// The installer replaces this copy; it closes the app itself, but
+		// quitting first lets the system proxy be put back cleanly.
+		InstallUpdate: func(path string) error {
+			if err := exec.Command(path).Start(); err != nil {
+				return err
+			}
+			go quit()
+			return nil
+		},
 		Sources:   only,
 		DataDir:   dir,
 		AppDirs:   []string{platform.ExeDir()},
@@ -79,7 +90,7 @@ func main() {
 
 	var once sync.Once
 	done := make(chan struct{})
-	quit := func() { once.Do(func() { close(done) }) }
+	quit = func() { once.Do(func() { close(done) }) }
 
 	srv, url, err := ui.Start(eng, ui.Hooks{
 		Quit: quit,
