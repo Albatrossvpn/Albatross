@@ -98,19 +98,23 @@ type Engine struct {
 	target       string // country the user wants ("" = fastest anywhere)
 	wantConnect  bool   // keep trying to connect until a server is found
 	connGen      int    // bumped by every user connect/disconnect; stale loops exit
-	poolStats    [4]int // total, untested, dead, ok; refreshed by statsLoop
-	scan         scanState
-	logs         []LogLine
-	localDNS     string
-	reg          regimeState   // the network's filtering regime (regime.go)
-	regNet       string        // the network reg was probed on
-	notice       string        // a message for the user that outlives status changes
-	install      uint32        // this installation's random number (installNumber)
-	helper       *core.Process // the "Help others" Snowflake proxy (help.go)
-	update       *UpdateInfo   // a newer version, from update.json
-	uiSeen       time.Time     // last time the UI asked for a snapshot
-	countries    []CountryInfo // cached for countryCache
-	countriesAt  time.Time
+	// startMu lets one connection attempt run at a time: two at once each
+	// start a core on the proxy port and the second finds it taken.
+	startMu     sync.Mutex
+	attempt     context.CancelFunc // cancels the attempt in progress; under mu
+	poolStats   [4]int             // total, untested, dead, ok; refreshed by statsLoop
+	scan        scanState
+	logs        []LogLine
+	localDNS    string
+	reg         regimeState   // the network's filtering regime (regime.go)
+	regNet      string        // the network reg was probed on
+	notice      string        // a message for the user that outlives status changes
+	install     uint32        // this installation's random number (installNumber)
+	helper      *core.Process // the "Help others" Snowflake proxy (help.go)
+	update      *UpdateInfo   // a newer version, from update.json
+	uiSeen      time.Time     // last time the UI asked for a snapshot
+	countries   []CountryInfo // cached for countryCache
+	countriesAt time.Time
 
 	ctx    context.Context
 	cancel context.CancelFunc
