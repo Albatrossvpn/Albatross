@@ -23,6 +23,9 @@ type Binaries struct {
 	SingBox  string
 	Xray     string
 	WarpPlus string
+	Tor      string
+	// Snowflake is the Snowflake proxy for "Help others" (tools/snowflake).
+	Snowflake string
 }
 
 // Locate finds the cores next to the app or in its data directory.
@@ -47,7 +50,24 @@ func Locate(dirs ...string) Binaries {
 		}
 		return ""
 	}
-	return Binaries{SingBox: find("sing-box"), Xray: find("xray"), WarpPlus: find("warp-plus")}
+	tor := ""
+	// The Tor Expert Bundle keeps tor and its transports in a folder of
+	// their own.
+	for _, d := range dirs {
+		if p := filepath.Join(d, "core", "tor", "tor"+exe); fileExists(p) {
+			tor = p
+			break
+		}
+	}
+	if tor == "" {
+		tor = find("tor")
+	}
+	return Binaries{SingBox: find("sing-box"), Xray: find("xray"), WarpPlus: find("warp-plus"), Tor: tor, Snowflake: find("snowflake-helper")}
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }
 
 // Process is a running core.

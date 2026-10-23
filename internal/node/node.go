@@ -64,15 +64,21 @@ type Node struct {
 	SNI         string   `json:"sni,omitempty"`
 	ALPN        []string `json:"alpn,omitempty"`
 	Fingerprint string   `json:"fp,omitempty"`
-	Insecure    bool     `json:"insecure,omitempty"`
-	PublicKey   string   `json:"pbk,omitempty"`
-	ShortID     string   `json:"sid,omitempty"`
-	SpiderX     string   `json:"spx,omitempty"`
-	ECH         string   `json:"ech,omitempty"`
-	PinnedCert  string   `json:"pcs,omitempty"`
-	VerifyName  string   `json:"vcn,omitempty"`
-	Fragment    bool     `json:"fragment,omitempty"` // link asked for TLS ClientHello fragmentation
-	FinalMask   string   `json:"fm,omitempty"`       // raw Xray finalmask JSON
+	// HelloFP is the browser ClientHello the app picked for a server whose
+	// link names none; it is not part of the link.
+	HelloFP string `json:"-"`
+	// TryECH asks the core to look up the server's ECH config over DNS
+	// (Cloudflare publishes one for most sites) when the link has none.
+	TryECH     bool   `json:"-"`
+	Insecure   bool   `json:"insecure,omitempty"`
+	PublicKey  string `json:"pbk,omitempty"`
+	ShortID    string `json:"sid,omitempty"`
+	SpiderX    string `json:"spx,omitempty"`
+	ECH        string `json:"ech,omitempty"`
+	PinnedCert string `json:"pcs,omitempty"`
+	VerifyName string `json:"vcn,omitempty"`
+	Fragment   bool   `json:"fragment,omitempty"` // link asked for TLS ClientHello fragmentation
+	FinalMask  string `json:"fm,omitempty"`       // raw Xray finalmask JSON
 
 	Plugin     string `json:"plugin,omitempty"`
 	PluginOpts string `json:"plugin_opts,omitempty"`
@@ -244,7 +250,7 @@ func (n *Node) xraySupported() bool {
 func (n *Node) Validate() error {
 	if n.Proto == "warpplus" {
 		switch n.WPMode {
-		case "warp", "gool":
+		case "warp", "gool", "tor":
 			return nil
 		case "psiphon":
 			if len(n.WPCountry) == 2 {
@@ -435,5 +441,34 @@ func (n *Node) Style() uint8 {
 	case "kcp", "quic":
 		tr = 6
 	}
-	return sec*8 + tr + 1 // 0 means unknown
+	return sec*8 + tr + 1 + n.portClass()<<5 // 0 means unknown
+}
+
+// portClass groups ports the way filtering treats them: 443 is watched
+// hardest, Cloudflare's other HTTPS ports and the plain-HTTP ports less.
+func (n *Node) portClass() uint8 {
+	switch n.Port {
+	case 443:
+		return 1
+	case 2053, 2083, 2087, 2096, 8443:
+		return 2
+	case 80, 8080, 8880, 2052, 2082, 2086, 2095:
+		return 3
+	case 0:
+		return 0
+	}
+	return 4
+}
+
+// StyleWire and StylePort split a Style code into its security and
+// transport part and its port class.
+func StyleWire(s uint8) uint8 { return s & 31 }
+func StylePort(s uint8) uint8 { return s >> 5 }
+
+// fp is the uTLS fingerprint to use: the link's own, else the app's pick.
+func (n *Node) fp() string {
+	if n.Fingerprint != "" {
+		return n.Fingerprint
+	}
+	return n.HelloFP
 }

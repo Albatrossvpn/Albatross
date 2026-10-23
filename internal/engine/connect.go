@@ -62,6 +62,7 @@ type connection struct {
 	switched time.Time // last time the member in use changed
 	speedAt  time.Time // last speed round
 	slowRuns int       // speed rounds in a row that found a much faster backup
+	slowNet  time.Time // when the whole network was last found slow
 	errs     []logErr  // recent failed connections, for watchLog
 }
 
@@ -79,6 +80,7 @@ type member struct {
 	checked time.Time
 	speed   float64 // download bytes per second at the last speed test
 	speedAt time.Time
+	soaked  int8 // endurance check: 1 passed, -1 failed, 0 not run
 }
 
 func (c *connection) ready() bool {

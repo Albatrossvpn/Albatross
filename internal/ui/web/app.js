@@ -93,6 +93,13 @@ function render(s) {
   $("n-servers").textContent = num(s.servers);
   $("n-countries").textContent = num(locations);
 
+  $("help-row").classList.toggle("hidden", !s.help_available && !s.settings.help_others);
+  $("crowd-row").classList.toggle("hidden", !s.crowd_available);
+  $("help-note").textContent = s.helping ? "Helping now. Thank you!" :
+    "Lets people in censored countries reach Tor through this computer. Runs only outside Iran on an open network.";
+  $("notice").classList.toggle("hidden", !s.notice);
+  $("notice").textContent = s.notice || "";
+
   const u = s.update;
   $("update-banner").classList.toggle("hidden", !u || u.required);
   $("update-modal").classList.toggle("hidden", !u || !u.required);
@@ -270,9 +277,39 @@ $("row-bypass").addEventListener("click", () => openSheet("bypass"));
 $("row-privacy").addEventListener("click", () => openSheet("privacy"));
 $("row-killswitch").addEventListener("click", () => api("POST", "/api/vpn-settings").catch((e) => toast(e.message)));
 $("sheet-backdrop").addEventListener("click", closeSheet);
+
+// ---------- Share ----------
+
+$("row-share").addEventListener("click", () => {
+  $("share-code").value = "";
+  $("share-modal").classList.remove("hidden");
+});
+$("share-close").addEventListener("click", () => $("share-modal").classList.add("hidden"));
+$("share-send").addEventListener("click", async () => {
+  try {
+    const r = await api("POST", "/api/share");
+    $("share-code").value = r.code;
+    if (r.sent) return; // the system share sheet took it
+    $("share-code").select();
+    const copied = await navigator.clipboard?.writeText(r.code).then(() => true, () => false) || document.execCommand("copy");
+    toast(copied ? "Code copied. Paste it to your friend." : "Copy the code and send it to your friend.");
+  } catch (e) {
+    toast(e.message);
+  }
+});
+$("share-add").addEventListener("click", async () => {
+  try {
+    const r = await api("POST", "/api/share/import", { code: $("share-code").value });
+    toast(r.added > 0 ? `${r.added} servers added; testing them now.` : "Those servers are already known.");
+    if (r.added > 0) $("share-modal").classList.add("hidden");
+  } catch (e) {
+    toast(e.message);
+  }
+});
+$("row-share-app").addEventListener("click", () => api("POST", "/api/share/app").catch((e) => toast(e.message)));
 $("country-search").addEventListener("input", renderSheet);
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { closeSheet(); $("admin-modal").classList.add("hidden"); }
+  if (e.key === "Escape") { closeSheet(); $("admin-modal").classList.add("hidden"); $("share-modal").classList.add("hidden"); }
 });
 
 $("sheet-list").addEventListener("click", async (e) => {
@@ -309,7 +346,7 @@ document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("cli
 // ---------- Settings ----------
 
 let settingsBusy = false;
-const toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system"];
+const toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats"];
 
 function fillSettings(st) {
   for (const k of toggles) $("set-" + k).checked = !!st[k];

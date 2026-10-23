@@ -37,6 +37,10 @@ type Platform interface {
 	OpenVPNSettings()
 	// Quit closes the app.
 	Quit()
+	// ShareText opens the system share sheet with text.
+	ShareText(text string)
+	// ShareApp opens the system share sheet with the app's installer.
+	ShareApp()
 }
 
 var (
@@ -90,6 +94,8 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 	s, u, err := ui.Start(e, ui.Hooks{
 		Quit:            func() { go p.Quit() },
 		OpenURL:         func(link string) error { p.OpenURL(link); return nil },
+		ShareText:       func(text string) error { p.ShareText(text); return nil },
+		ShareApp:        func() error { p.ShareApp(); return nil },
 		OpenVPNSettings: func() error { p.OpenVPNSettings(); return nil },
 	}, 0)
 	if err != nil {

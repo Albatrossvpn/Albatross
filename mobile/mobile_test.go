@@ -303,3 +303,5 @@ func (p *fakeVPN) close() {
 func (p *fakeVPN) OpenURL(string)   {}
 func (p *fakeVPN) OpenVPNSettings() {}
 func (p *fakeVPN) Quit()            {}
+func (p *fakeVPN) ShareText(string) {}
+func (p *fakeVPN) ShareApp()        {}

@@ -4,6 +4,8 @@ package engine
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
@@ -66,11 +68,15 @@ type Engine struct {
 	rt   *core.Runtime
 	pool *pool.Pool
 
-	acct     *account.Client // nil when this build has no accounts
-	fetcher  *sources.Fetcher
-	tester   *tester.Tester
-	resolver *antiblock.Resolver
-	cf       *antiblock.Scanner
+	acct *account.Client // nil when this build has no accounts
+	// crowdURLs are the account service's addresses, which also collect
+	// crowd stats (crowd.go); crowdAt is when tests were last reported.
+	crowdURLs []string
+	crowdAt   time.Time
+	fetcher   *sources.Fetcher
+	tester    *tester.Tester
+	resolver  *antiblock.Resolver
+	cf        *antiblock.Scanner
 
 	mu           sync.Mutex
 	settings     Settings
@@ -92,6 +98,11 @@ type Engine struct {
 	scan         scanState
 	logs         []LogLine
 	localDNS     string
+	reg          regimeState   // the network's filtering regime (regime.go)
+	regNet       string        // the network reg was probed on
+	notice       string        // a message for the user that outlives status changes
+	install      uint32        // this installation's random number (installNumber)
+	helper       *core.Process // the "Help others" Snowflake proxy (help.go)
 	update       *UpdateInfo   // a newer version, from update.json
 	uiSeen       time.Time     // last time the UI asked for a snapshot
 	countries    []CountryInfo // cached for countryCache
@@ -145,9 +156,10 @@ func New(opt Options) (*Engine, error) {
 		localDNS:     opt.LocalDNS,
 	}
 	e.settings = loadSettings(e.dir, opt.Mobile)
+	e.install = installNumber(e.dir)
 	e.target = e.settings.Country
 	e.bin = core.Locate(append(opt.AppDirs, e.dir)...)
-	e.rt = &core.Runtime{Bin: e.bin, Dir: filepath.Join(e.dir, "run")}
+	e.rt = &core.Runtime{Bin: e.bin, Dir: filepath.Join(e.dir, "run"), TorBridges: e.torBridges}
 	p, err := pool.Open(filepath.Join(e.dir, "pool.dat"))
 	if err != nil {
 		return nil, err
@@ -163,6 +175,7 @@ func New(opt Options) (*Engine, error) {
 	e.fetcher = &sources.Fetcher{Direct: direct, Proxy: e.proxyClient, CacheDir: filepath.Join(e.dir, "cache")}
 	if urls := accountURLs(opt); len(urls) > 0 {
 		e.acct = account.New(urls, account.SessionPath(e.dir), e.anyClient)
+		e.crowdURLs = urls
 	}
 	e.tester = &tester.Tester{Runtime: e.rt}
 	e.resolver = &antiblock.Resolver{Client: e.anyClient}
@@ -173,6 +186,7 @@ func New(opt Options) (*Engine, error) {
 	}
 	e.loadServers()
 	e.net.load(e.dir)
+	e.loadRegime()
 	e.net.use(opt.LocalDNS)
 	e.loadSourceStats()
 	e.buildSources()
@@ -214,6 +228,8 @@ func (e *Engine) Close() {
 		e.cancel()
 	}
 	e.wg.Wait()
+	e.rt.StopTor()
+	e.stopHelp()
 	e.saveServers()
 	e.saveSourceStats()
 	e.saveStates()
@@ -260,6 +276,10 @@ func (e *Engine) SetLocalDNS(addr string) {
 	e.mu.Unlock()
 	// Another network filters differently.
 	e.net.use(addr)
+	if moved {
+		// Probe the new network's regime (the refresh loop sees it due).
+		e.triggerRefill()
+	}
 	if moved && c != nil {
 		// Connections made over the old network are gone; check the
 		// server in use now so traffic recovers at once.
@@ -368,6 +388,12 @@ func (e *Engine) UpdateSettings(s Settings) error {
 		return ErrNeedAdmin
 	}
 	saveJSON(filepath.Join(e.dir, "settings.json"), e.Settings())
+	if s.ShareStats && !old.ShareStats {
+		go e.crowdLookup(e.ctx)
+	}
+	if old.HelpOthers != s.HelpOthers {
+		go e.updateHelp()
+	}
 	if old.DeepSources != s.DeepSources || len(old.UserSources) != len(s.UserSources) || len(old.DisabledSources) != len(s.DisabledSources) {
 		e.buildSources()
 		e.triggerRefill()
@@ -395,6 +421,22 @@ func (e *Engine) triggerRefill() {
 	}
 }
 
+// installNumber returns this installation's random number, made once and
+// kept in the data folder. It never leaves the device.
+func installNumber(dir string) uint32 {
+	path := filepath.Join(dir, "install.id")
+	if b, err := os.ReadFile(path); err == nil && len(b) == 8 {
+		if v, err := strconv.ParseUint(string(b), 16, 32); err == nil {
+			return uint32(v)
+		}
+	}
+	var b [4]byte
+	rand.Read(b[:])
+	v := binary.BigEndian.Uint32(b[:])
+	os.WriteFile(path, []byte(fmt.Sprintf("%08x", v)), 0o644)
+	return v
+}
+
 // buildSources rebuilds the source list from built-ins and settings.
 func (e *Engine) buildSources() {
 	e.mu.Lock()
@@ -406,7 +448,7 @@ func (e *Engine) buildSources() {
 	var list []sources.Source
 	builtin := e.opt.Sources
 	if builtin == nil {
-		builtin = append(sources.Central(), sources.Builtin()...)
+		builtin = append(sources.Central(e.install), sources.Builtin()...)
 	}
 	for _, s := range builtin {
 		if s.Tier == sources.TierDeep && !s.Central && !e.settings.DeepSources {

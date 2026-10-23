@@ -33,6 +33,10 @@ P_SS=8388            # Shadowsocks 2022 (TCP and UDP)
 P_HY2=443            # Hysteria 2 + Salamander (UDP), hops over HOP_RANGE
 HOP_RANGE="20000:40000"
 P_TUIC=8444          # TUIC v5 (UDP)
+P_HTTP=80            # VMess (AEAD) + HTTPUpgrade, no TLS: looks like plain HTTP
+# UDP 53 also lands on Hysteria 2: in the June 2025 shutdown it was the
+# only UDP port that still got out.
+P_HY2_DNS=53
 
 log() { echo "== $*" >&2; }
 need_root() { [ "$DRY_RUN" = 1 ] || [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }; }
@@ -112,6 +116,11 @@ certificate() {
   ln -sf "/etc/letsencrypt/live/$DOMAIN/privkey.pem" "$KEY"
   mkdir -p /etc/letsencrypt/renewal-hooks/deploy
   printf '#!/bin/sh\nsystemctl restart albatross-sing-box albatross-xray\n' >/etc/letsencrypt/renewal-hooks/deploy/albatross
+  # Renewal needs port 80, which the HTTP inbound holds.
+  mkdir -p /etc/letsencrypt/renewal-hooks/pre /etc/letsencrypt/renewal-hooks/post
+  printf '#!/bin/sh\nsystemctl stop albatross-sing-box\n' >/etc/letsencrypt/renewal-hooks/pre/albatross
+  printf '#!/bin/sh\nsystemctl start albatross-sing-box\n' >/etc/letsencrypt/renewal-hooks/post/albatross
+  chmod 755 /etc/letsencrypt/renewal-hooks/pre/albatross /etc/letsencrypt/renewal-hooks/post/albatross
   chmod 755 /etc/letsencrypt/renewal-hooks/deploy/albatross
 }
 
@@ -144,6 +153,9 @@ singbox_config() {
     {"type": "hysteria2", "tag": "hy2", "listen": "::", "listen_port": $P_HY2,
      "users": [{"password": "$PASS"}],
      "obfs": {"type": "salamander", "password": "$OBFS"}, $tls},
+    {"type": "vmess", "tag": "http", "listen": "::", "listen_port": $P_HTTP,
+     "users": [{"uuid": "$UUID", "alterId": 0}],
+     "transport": {"type": "httpupgrade", "path": "$WS_PATH"}},
     {"type": "tuic", "tag": "tuic", "listen": "::", "listen_port": $P_TUIC,
      "users": [{"uuid": "$UUID", "password": "$PASS"}],
      "congestion_control": "bbr", $tls}
@@ -180,7 +192,9 @@ xray_config() {
   }],
   "outbounds": [{"protocol": "freedom", "tag": "direct"},
                 {"protocol": "blackhole", "tag": "block"}],
-  "routing": {"rules": [{"ip": ["geoip:private"], "outboundTag": "block"}]}
+  "routing": {"rules": [{"ip": ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+                                 "172.16.0.0/12", "192.168.0.0/16", "fc00::/7", "fe80::/10", "::1/128"],
+                          "outboundTag": "block"}]}
 }
 EOF
 }
@@ -224,9 +238,13 @@ firewall() {
   for p in $P_SS $P_HY2 $P_TUIC $HOP_RANGE; do
     iptables -C INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$p" -j ACCEPT
   done
-  # Hysteria 2 port hopping: the whole range lands on its one port.
-  iptables -t nat -C PREROUTING -p udp --dport "$HOP_RANGE" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null ||
-    iptables -t nat -A PREROUTING -p udp --dport "$HOP_RANGE" -j REDIRECT --to-ports "$P_HY2"
+  # Hysteria 2 port hopping: the whole range, and UDP 53, land on its one
+  # port.
+  for r in "$HOP_RANGE" "$P_HY2_DNS"; do
+    iptables -C INPUT -p udp --dport "$r" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$r" -j ACCEPT
+    iptables -t nat -C PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null ||
+      iptables -t nat -A PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2"
+  done
   netfilter-persistent save >/dev/null 2>&1 || true
   # Faster on lossy, long routes such as Iran to Europe.
   cat >/etc/sysctl.d/90-albatross.conf <<EOF
@@ -247,22 +265,27 @@ vless://$UUID@$h:$P_XHTTP?security=reality&sni=$REALITY_DEST&fp=chrome&pbk=$REAL
 trojan://$PASS@$DOMAIN:$P_TROJAN?security=tls&sni=$DOMAIN&fp=chrome&type=tcp#$n-Trojan
 vless://$UUID@$DOMAIN:$P_WS?security=tls&sni=$DOMAIN&fp=chrome&type=ws&host=$DOMAIN&path=$(urlenc "$WS_PATH")#$n-WS
 vless://$UUID@$DOMAIN:$P_GRPC?security=tls&sni=$DOMAIN&fp=chrome&type=grpc&serviceName=$GRPC_NAME#$n-gRPC
-$(vmess_link)
+$(vmess_link "$DOMAIN" "$P_UPGRADE" tls Albatross-HTTPUpgrade)
+$(vmess_link "$h" "$P_HTTP" "" Albatross-HTTP80)
 anytls://$PASS@$DOMAIN:$P_ANYTLS?sni=$DOMAIN#$n-AnyTLS
 ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_SS#$n-SS2022
-hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS&mport=$hop#$n-Hysteria2
+hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS&mport=$P_HY2_DNS,$hop#$n-Hysteria2
 tuic://$UUID:$PASS@$DOMAIN:$P_TUIC?sni=$DOMAIN&alpn=h3&congestion_control=bbr#$n-TUIC
 EOF
 }
 
 urlenc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$1"; }
 
+# vmess_link host port tls|"" name. Without TLS the content is still
+# encrypted end to end by VMess's AEAD; only the outer layer is plain HTTP.
 vmess_link() {
-  python3 - "$UUID" "$DOMAIN" "$P_UPGRADE" "$WS_PATH" <<'PY'
+  python3 - "$UUID" "$1" "$2" "$WS_PATH" "$3" "$4" <<'PY'
 import base64, json, sys
-uuid, host, port, path = sys.argv[1:]
-v = {"v": "2", "ps": "Albatross-HTTPUpgrade", "add": host, "port": port, "id": uuid, "aid": "0",
-     "scy": "auto", "net": "httpupgrade", "host": host, "path": path, "tls": "tls", "sni": host, "fp": "chrome"}
+uuid, host, port, path, tls, name = sys.argv[1:]
+v = {"v": "2", "ps": name, "add": host, "port": port, "id": uuid, "aid": "0",
+     "scy": "aes-128-gcm", "net": "httpupgrade", "host": host, "path": path, "tls": tls}
+if tls:
+    v.update(sni=host, fp="chrome")
 print("vmess://" + base64.b64encode(json.dumps(v, separators=(",", ":")).encode()).decode())
 PY
 }

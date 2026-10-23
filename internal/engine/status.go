@@ -27,6 +27,14 @@ type Snapshot struct {
 	Update     *UpdateInfo   `json:"update,omitempty"`
 	TotalGood  int           `json:"total_good"`
 	Account    AccountState  `json:"account"`
+	Notice     string        `json:"notice,omitempty"`
+	Network    string        `json:"network,omitempty"` // the filtering regime found here
+	// HelpAvailable says "Help others" can run on this network; Helping
+	// that it does.
+	HelpAvailable bool `json:"help_available"`
+	Helping       bool `json:"helping"`
+	// CrowdAvailable says this build has a service to share stats with.
+	CrowdAvailable bool `json:"crowd_available"`
 }
 
 // ScanInfo is scan progress.
@@ -73,19 +81,24 @@ func (e *Engine) Snapshot() Snapshot {
 		}
 	}
 	snap := Snapshot{
-		Status:     e.status,
-		Message:    e.message,
-		Target:     e.target,
-		TargetName: countryName(e.target),
-		TargetFlag: geo.Flag(e.target),
-		Countries:  countries,
-		Settings:   e.settings,
-		Version:    e.opt.Version,
-		Mobile:     e.opt.Mobile,
-		Update:     e.update,
-		Cores:      CoreInfo{SingBox: e.bin.SingBox != "", Xray: e.bin.Xray != "", WarpPlus: e.bin.WarpPlus != ""},
-		WorkingNow: working,
-		TotalGood:  len(e.good),
+		Status:         e.status,
+		Message:        e.message,
+		Notice:         e.notice,
+		Network:        string(e.reg.Regime),
+		HelpAvailable:  e.helpEligible(),
+		Helping:        e.helper != nil && !e.helper.Exited(),
+		CrowdAvailable: len(e.crowdURLs) > 0,
+		Target:         e.target,
+		TargetName:     countryName(e.target),
+		TargetFlag:     geo.Flag(e.target),
+		Countries:      countries,
+		Settings:       e.settings,
+		Version:        e.opt.Version,
+		Mobile:         e.opt.Mobile,
+		Update:         e.update,
+		Cores:          CoreInfo{SingBox: e.bin.SingBox != "", Xray: e.bin.Xray != "", WarpPlus: e.bin.WarpPlus != ""},
+		WorkingNow:     working,
+		TotalGood:      len(e.good),
 		Scan: ScanInfo{
 			Phase: e.scan.Phase, Candidates: total, Untested: untested, Dead: dead, Testing: e.scan.Testing,
 			PerMinute: len(e.scan.recent), SourcesTotal: e.scan.SourcesTotal, SourcesDone: e.scan.SourcesDone,

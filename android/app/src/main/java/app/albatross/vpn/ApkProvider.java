@@ -1,0 +1,62 @@
+package app.albatross.vpn;
+
+import android.content.ContentProvider;
+import android.content.ContentValues;
+import android.database.Cursor;
+import android.database.MatrixCursor;
+import android.net.Uri;
+import android.os.ParcelFileDescriptor;
+import android.provider.OpenableColumns;
+
+import java.io.File;
+import java.io.FileNotFoundException;
+
+/** Serves the app's own installer to the app that the user shares it with. */
+public final class ApkProvider extends ContentProvider {
+    static final String AUTHORITY = "app.albatross.vpn.apk";
+    static final String NAME = "Albatross.apk";
+    static final Uri URI = Uri.parse("content://" + AUTHORITY + "/" + NAME);
+    private static final String TYPE = "application/vnd.android.package-archive";
+
+    private File apk() {
+        return new File(getContext().getApplicationInfo().sourceDir);
+    }
+
+    @Override
+    public boolean onCreate() {
+        return true;
+    }
+
+    @Override
+    public String getType(Uri uri) {
+        return TYPE;
+    }
+
+    @Override
+    public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
+        if (!NAME.equals(uri.getLastPathSegment()) || !"r".equals(mode)) throw new FileNotFoundException();
+        return ParcelFileDescriptor.open(apk(), ParcelFileDescriptor.MODE_READ_ONLY);
+    }
+
+    @Override
+    public Cursor query(Uri uri, String[] projection, String selection, String[] args, String sort) {
+        MatrixCursor c = new MatrixCursor(new String[] {OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE});
+        c.addRow(new Object[] {NAME, apk().length()});
+        return c;
+    }
+
+    @Override
+    public Uri insert(Uri uri, ContentValues values) {
+        return null;
+    }
+
+    @Override
+    public int delete(Uri uri, String selection, String[] args) {
+        return 0;
+    }
+
+    @Override
+    public int update(Uri uri, ContentValues values, String selection, String[] args) {
+        return 0;
+    }
+}
