@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"time"
 )
@@ -30,7 +29,7 @@ const (
 // soak reports whether one connection through m lasts soakFor while
 // carrying at least soakMin bytes.
 func (c *connection) soak(ctx context.Context, m *member) bool {
-	proxy := &url.URL{Scheme: "http", User: url.UserPassword(m.tag, c.clashSecret), Host: c.probeAddr}
+	proxy := c.memberProxy(m)
 	tr := &http.Transport{Proxy: http.ProxyURL(proxy), MaxConnsPerHost: 1, MaxIdleConnsPerHost: 1, IdleConnTimeout: 2 * soakFor}
 	defer tr.CloseIdleConnections()
 	client := &http.Client{Transport: tr, Timeout: 15 * time.Second}
@@ -90,6 +89,9 @@ func (e *Engine) soakBackups(ctx context.Context, c *connection) {
 			return
 		}
 		done[next] = true
+		if e.checkIntercept(ctx, c, next) {
+			continue
+		}
 		ok := c.soak(ctx, next)
 		if ctx.Err() != nil {
 			return
