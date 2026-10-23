@@ -33,7 +33,7 @@ func TestByAddressAndHotList(t *testing.T) {
 		t.Fatalf("reps %v siblings %v", reps, sib)
 	}
 	passed := map[*entry]time.Duration{a1: 1, a2: 2, u: 3}
-	if got := hotList([]*entry{a1, a2, u, b}, passed, 10); len(got) != 2 || got[0] != "a1" || got[1] != "u" {
+	if got := hotList([]*entry{a1, a2, u, b}, passed, 10); len(got) != 2 || got[0] != a1 || got[1] != u {
 		t.Fatalf("hot %v", got)
 	}
 }
@@ -41,6 +41,14 @@ func TestByAddressAndHotList(t *testing.T) {
 func TestNewList(t *testing.T) {
 	got := newList([]string{"a", "b", "c", "d"}, []string{"a", "b", "c"}, []string{"b", "x"}, 10)
 	if strings.Join(got, ",") != "d,b" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestIranFirst(t *testing.T) {
+	a, b, c := &entry{link: "a", endpoint: "a:1"}, &entry{link: "b", endpoint: "b:1"}, &entry{link: "c", endpoint: "c:1"}
+	got := links(iranFirst([]*entry{a, b, c}, map[string]bool{"a:1": false, "c:1": true}))
+	if strings.Join(got, "") != "cba" {
 		t.Fatalf("got %v", got)
 	}
 }
