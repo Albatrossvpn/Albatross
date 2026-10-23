@@ -147,7 +147,7 @@ func New(opt Options) (*Engine, error) {
 	e.settings = loadSettings(e.dir, opt.Mobile)
 	e.target = e.settings.Country
 	e.bin = core.Locate(append(opt.AppDirs, e.dir)...)
-	e.rt = &core.Runtime{Bin: e.bin, Dir: filepath.Join(e.dir, "run")}
+	e.rt = &core.Runtime{Bin: e.bin, Dir: filepath.Join(e.dir, "run"), TorBridges: e.torBridges}
 	p, err := pool.Open(filepath.Join(e.dir, "pool.dat"))
 	if err != nil {
 		return nil, err
@@ -214,6 +214,7 @@ func (e *Engine) Close() {
 		e.cancel()
 	}
 	e.wg.Wait()
+	e.rt.StopTor()
 	e.saveServers()
 	e.saveSourceStats()
 	e.saveStates()
