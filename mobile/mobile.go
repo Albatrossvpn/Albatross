@@ -169,7 +169,9 @@ func (v *vpnProxy) Set(addr string, _ []string) error {
 func (v *vpnProxy) Clear() error {
 	v.mu.Lock()
 	on, p := v.on, v.platform
-	v.on = false
+	// Forgetting the address makes StartTun fail, so a tunnel Android
+	// brings back by itself (Always-on VPN) cannot reach a dead proxy.
+	v.on, v.addr = false, ""
 	v.mu.Unlock()
 	StopTun()
 	if on && p != nil {

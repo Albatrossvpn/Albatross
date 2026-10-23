@@ -488,15 +488,25 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 				bypass = append(bypass, "*"+s)
 			}
 		}
-		if err := e.opt.SysProxy.Set(c.proxyAddr, bypass); err != nil {
+		switch err := e.setProxy(gen, c.proxyAddr, bypass); {
+		case errors.Is(err, errStale):
+			run.Stop()
+			return err
+		case err != nil:
 			e.logf("warn", "Could not set the system proxy: %v", err)
-		} else {
+		default:
 			c.sysProxy = true
 		}
 	}
 	mctx, mcancel := context.WithCancel(e.ctx)
 	c.cancel = mcancel
 	e.mu.Lock()
+	if e.connGen != gen {
+		// The user disconnected while this connection was being made.
+		e.mu.Unlock()
+		e.stopConn(c, true)
+		return errStale
+	}
 	e.conn = c
 	e.mu.Unlock()
 	e.setStatus(StatusConnected, connectedMessage(c))
@@ -533,7 +543,40 @@ func (e *Engine) Disconnect() {
 	if c != nil {
 		e.stopConn(c, true)
 	}
+	// Between a dropped connection and its replacement there is no
+	// connection to stop, but the VPN (the system proxy on Windows) is
+	// still up; it must go too.
+	e.clearProxy()
 	e.setStatus(StatusIdle, "")
+}
+
+// setProxy points the system (on Android, the VPN) at addr unless the user
+// disconnected since connection attempt gen began. proxyMu makes the check
+// and the change one step, so a disconnect cannot slip in between.
+func (e *Engine) setProxy(gen int, addr string, bypass []string) error {
+	e.proxyMu.Lock()
+	defer e.proxyMu.Unlock()
+	e.mu.Lock()
+	stale := e.connGen != gen
+	e.mu.Unlock()
+	if stale {
+		return errStale
+	}
+	if err := e.opt.SysProxy.Set(addr, bypass); err != nil {
+		return err
+	}
+	e.proxyOn = true
+	return nil
+}
+
+// clearProxy undoes setProxy, if it is in effect.
+func (e *Engine) clearProxy() {
+	e.proxyMu.Lock()
+	defer e.proxyMu.Unlock()
+	if e.proxyOn {
+		e.opt.SysProxy.Clear()
+		e.proxyOn = false
+	}
 }
 
 func (e *Engine) stopConn(c *connection, clearProxy bool) {
@@ -541,7 +584,7 @@ func (e *Engine) stopConn(c *connection, clearProxy bool) {
 		c.cancel()
 	}
 	if c.sysProxy && clearProxy {
-		e.opt.SysProxy.Clear()
+		e.clearProxy()
 	}
 	c.running.Stop()
 	e.mu.Lock()

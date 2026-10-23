@@ -80,6 +80,8 @@ type Engine struct {
 	srcIndex     map[string]int
 	good         map[uint64]*Server
 	conn         *connection
+	proxyMu      sync.Mutex // serializes setProxy and clearProxy
+	proxyOn      bool       // guarded by proxyMu
 	status       string
 	message      string
 	target       string // country the user wants ("" = fastest anywhere)

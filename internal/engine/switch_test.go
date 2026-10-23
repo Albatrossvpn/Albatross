@@ -1,8 +1,11 @@
 package engine
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
 )
 
 func poked(c *connection) bool {
@@ -104,5 +107,39 @@ func TestFasterRespectsStayAndSpeed(t *testing.T) {
 	quick.speed, quick.speedAt = 20<<10, time.Now()
 	if c.faster() != nil {
 		t.Fatal("swapped to a member measured slow")
+	}
+}
+
+type fakeProxy struct{ sets, clears int }
+
+func (f *fakeProxy) Set(string, []string) error { f.sets++; return nil }
+func (f *fakeProxy) Clear() error               { f.clears++; return nil }
+func (f *fakeProxy) Owned(string) bool          { return false }
+
+// Disconnecting while a dropped connection is being replaced must still
+// take the VPN down, and a replacement finished after the disconnect must
+// not bring it back.
+func TestDisconnectWhileReconnecting(t *testing.T) {
+	p := &fakeProxy{}
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}, SysProxy: p})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	gen := e.connGen
+	if err := e.setProxy(gen, "127.0.0.1:1", nil); err != nil {
+		t.Fatal(err)
+	}
+	// The connection dropped and its replacement is not up yet: e.conn is nil.
+	e.Disconnect()
+	if p.clears != 1 {
+		t.Fatalf("disconnect while reconnecting cleared the VPN %d times, want 1", p.clears)
+	}
+	if err := e.setProxy(gen, "127.0.0.1:1", nil); !errors.Is(err, errStale) || p.sets != 1 {
+		t.Fatalf("a replacement started before the disconnect turned the VPN back on (err %v, %d sets)", err, p.sets)
+	}
+	e.Disconnect()
+	if p.clears != 1 {
+		t.Fatal("a second disconnect cleared a VPN that was already off")
 	}
 }
