@@ -25,6 +25,9 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Collect
+        env:
+          OWN_SERVERS: ${{ secrets.OWN_SERVERS }}
+          OWN_KEY: ${{ secrets.OWN_KEY }}
         run: go run ./cmd/collect -out "$RUNNER_TEMP/servers"
       - name: Publish
         working-directory: ${{ runner.temp }}/servers

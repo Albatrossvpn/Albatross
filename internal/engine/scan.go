@@ -285,6 +285,9 @@ var parseSlots = make(chan struct{}, 2)
 
 // ingest parses a source body and adds its nodes to the pool.
 func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint64][2]uint32) int {
+	if s.Sealed {
+		text = sources.Open(text)
+	}
 	parseSlots <- struct{}{}
 	defer func() { <-parseSlots }()
 	scores := e.sourceScores()

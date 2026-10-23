@@ -101,6 +101,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           # The account service addresses (repository variable); empty builds an app without sign-in.
           ACCOUNT_URL: ${{ vars.ACCOUNT_URL }}
+          # Opens the list of the project's own servers (deploy/server).
+          OWN_KEY: ${{ secrets.OWN_KEY }}
         run: bash build/package.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -135,6 +137,7 @@ jobs:
       - name: Build APKs
         env:
           ACCOUNT_URL: ${{ vars.ACCOUNT_URL }}
+          OWN_KEY: ${{ secrets.OWN_KEY }}
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ALBATROSS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ALBATROSS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
