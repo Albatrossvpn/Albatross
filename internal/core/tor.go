@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -255,8 +256,17 @@ func torKeys(a, b map[string][]string) []string {
 	return keys
 }
 
+// embeddedPT is the Android bundle's pt_config.json, which
+// build/android/build.sh copies here before building: Android installs
+// only lib*.so files beside tor, so the file cannot ship there. The
+// committed copy is empty.
+//
+//go:embed torpt/pt_config.json
+var embeddedPT []byte
+
 // loadPTConfig finds pt_config.json beside tor, as the Tor Expert Bundle
-// lays it out (tor/pluggable_transports/) or flat in the same folder.
+// lays it out (tor/pluggable_transports/) or flat in the same folder, or
+// else the one built in, with the transports beside tor.
 func loadPTConfig(torBin string) (*ptConfig, string) {
 	d := filepath.Dir(torBin)
 	for _, dir := range []string{filepath.Join(d, torPTDir), d, filepath.Join(filepath.Dir(d), torPTDir)} {
@@ -268,6 +278,10 @@ func loadPTConfig(torBin string) (*ptConfig, string) {
 		if json.Unmarshal(b, &c) == nil && len(c.PluggableTransports) > 0 {
 			return &c, dir
 		}
+	}
+	var c ptConfig
+	if json.Unmarshal(embeddedPT, &c) == nil && len(c.PluggableTransports) > 0 {
+		return &c, d
 	}
 	return nil, ""
 }
@@ -292,7 +306,11 @@ func ptLine(s, dir, torDir string) (string, bool) {
 		exe += ".exe"
 	}
 	if st, err := os.Stat(exe); err != nil || st.IsDir() {
-		return "", false
+		// Android ships executables as lib<name>.so (see Locate).
+		exe = filepath.Join(filepath.Dir(exe), "lib"+strings.ReplaceAll(filepath.Base(exe), "-", "")+".so")
+		if st, err := os.Stat(exe); err != nil || st.IsDir() {
+			return "", false
+		}
 	}
 	if rel, err := filepath.Rel(torDir, exe); err == nil && !strings.HasPrefix(rel, "..") {
 		exe = rel

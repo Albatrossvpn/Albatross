@@ -136,13 +136,6 @@ jobs:
           yes | "$sdk" --licenses > /dev/null || true
           "$sdk" "platforms;android-35" "build-tools;35.0.0" "ndk;27.3.13750724" > /dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
-      - name: Tor for Android (layout check)
-        run: |
-          sudo apt-get install -y -qq file > /dev/null
-          for p in android-aarch64 android-x86_64; do
-            bash build/tor.sh "$p" "/tmp/tor-$p"
-            find "/tmp/tor-$p" -type f -exec file {} \;
-          done
       - name: Build APKs
         env:
           ACCOUNT_URL: ${{ vars.ACCOUNT_URL }}
