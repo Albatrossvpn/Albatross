@@ -267,3 +267,9 @@ textarea:focus, .search:focus, .field input:focus { border-color: var(--accent);
 .login-card .wide { width: 100%; padding: 12px; }
 .form-error { min-height: 18px; color: var(--bad); font-size: 13px; }
 .link { background: none; border: 0; color: var(--accent); font: inherit; cursor: pointer; padding: 6px; }
+
+#share-code {
+  width: 100%; box-sizing: border-box; margin: 4px 0 12px; padding: 10px; border-radius: 10px;
+  border: 1px solid var(--line, #8884); background: transparent; color: inherit;
+  font: 12px/1.4 ui-monospace, Consolas, monospace; resize: vertical; word-break: break-all;
+}

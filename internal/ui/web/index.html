@@ -78,6 +78,14 @@
           <span class="t-body"><b>Block connections without VPN</b><small>Opens the system VPN settings (Always-on VPN)</small></span>
           <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
         </button>
+        <button class="row" id="row-share">
+          <span class="t-body"><b>Share servers with a friend</b><small>Pass working servers on by Bluetooth or any messenger, even without internet</small></span>
+          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+        <button class="row mobile-only" id="row-share-app">
+          <span class="t-body"><b>Share the app</b><small>Send this app's installer to a friend's phone</small></span>
+          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
         <button class="row" id="row-privacy">
           <span class="t-body"><b>Privacy</b><small>What is protected and what is not</small></span>
           <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
@@ -129,6 +137,20 @@
       <div class="row-end">
         <button class="btn" id="admin-cancel">Not now</button>
         <button class="btn primary" id="admin-ok">Restart as administrator</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pass servers from hand to hand -->
+  <div class="modal-backdrop hidden" id="share-modal">
+    <div class="modal">
+      <h3>Share servers</h3>
+      <p>Send this code to a friend; their app adds the servers in it. Or paste a code you got.</p>
+      <textarea id="share-code" rows="4" spellcheck="false" placeholder="albatross1:…"></textarea>
+      <div class="row-end">
+        <button class="btn" id="share-close">Close</button>
+        <button class="btn" id="share-add">Add from code</button>
+        <button class="btn primary" id="share-send">Send my servers</button>
       </div>
     </div>
   </div>

@@ -66,6 +66,34 @@ final class Bridge implements Platform {
     }
 
     @Override
+    public void shareText(String text) {
+        main.post(() -> {
+            Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text);
+            share(send);
+        });
+    }
+
+    @Override
+    public void shareApp() {
+        main.post(() -> {
+            Intent send = new Intent(Intent.ACTION_SEND)
+                    .setType("application/vnd.android.package-archive")
+                    .putExtra(Intent.EXTRA_STREAM, ApkProvider.URI)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            share(send);
+        });
+    }
+
+    // Bluetooth and Quick Share appear in the share sheet and work without
+    // any internet.
+    private void share(Intent send) {
+        try {
+            app.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
     public void openVPNSettings() {
         main.post(() -> {
             try {
