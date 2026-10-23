@@ -46,12 +46,16 @@ type entry struct {
 }
 
 type meta struct {
-	Updated time.Time      `json:"updated"`
-	Sources int            `json:"sources"`
-	Reached int            `json:"reached"`
-	Found   int            `json:"found"`
-	Dead    int            `json:"dead"`
-	Files   map[string]int `json:"files"`
+	Updated time.Time `json:"updated"`
+	Sources int       `json:"sources"`
+	Reached int       `json:"reached"`
+	Found   int       `json:"found"`
+	Dead    int       `json:"dead"`
+	// Tested servers were connected through with the real cores; Passed
+	// of them worked and lead fresh.txt, fastest first.
+	Tested int            `json:"tested"`
+	Passed int            `json:"passed"`
+	Files  map[string]int `json:"files"`
 	// Schemes counts every link scheme seen in the sources, usable or
 	// not, so protocols the apps cannot run yet show up here.
 	Schemes map[string]int `json:"schemes"`
@@ -71,6 +75,7 @@ func main() {
 	probeConc := flag.Int("probe-concurrency", 1000, "parallel reachability probes")
 	maxFresh := flag.Int("max-fresh", 60000, "most servers in fresh.txt; the rest go to the other files")
 	limit := flag.Int("limit", 0, "use only the first N sources (for tests)")
+	real := flag.Int("real", 8000, "connect through this many of the fresh servers with the cores in SING_BOX and XRAY; 0 skips")
 	flag.Parse()
 
 	srcs := sources.Collected()
@@ -188,19 +193,30 @@ func main() {
 	for _, e := range list {
 		protocols[e.proto]++
 	}
-	var fresh, rest []string
+	var freshE, restE []*entry
 	for _, e := range list {
-		if e.fresh && len(fresh) < *maxFresh {
-			fresh = append(fresh, e.link)
+		if e.fresh && len(freshE) < *maxFresh {
+			freshE = append(freshE, e)
 		} else {
-			rest = append(rest, e.link)
+			restE = append(restE, e)
 		}
 	}
+	passed, tested := realTest(freshE, *real)
+	freshE, failedE := orderFresh(freshE, passed, tested)
+	restE = append(failedE, restE...)
+	links := func(es []*entry) []string {
+		out := make([]string, len(es))
+		for i, e := range es {
+			out[i] = e.link
+		}
+		return out
+	}
+	fresh, rest := links(freshE), links(restE)
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
 		log.Fatal(err)
 	}
-	m := meta{Updated: time.Now().UTC(), Sources: len(srcs), Reached: reached, Found: len(byKey), Dead: dead, Files: map[string]int{},
+	m := meta{Updated: time.Now().UTC(), Sources: len(srcs), Reached: reached, Found: len(byKey), Dead: dead, Tested: len(tested), Passed: len(passed), Files: map[string]int{},
 		Schemes: schemes, Protocols: protocols, Channels: channels}
 	write := func(name string, links []string) {
 		if err := os.WriteFile(filepath.Join(*out, name), []byte(strings.Join(links, "\n")+"\n"), 0o644); err != nil {

@@ -37,8 +37,10 @@ const (
 	quietFor = 3 * time.Minute
 	// stayAtLeast is how long a member stays in use before it is swapped
 	// for a better one; a member that stops answering is left at once.
-	// Each swap changes the exit address, which can sign users out.
-	stayAtLeast = 3 * time.Minute
+	// Each swap changes the exit address, which can sign users out, and
+	// delays of seconds on filtered networks are noisy enough to make two
+	// servers look faster in turn.
+	stayAtLeast = 20 * time.Minute
 )
 
 // Speed tests: real downloads through one member, made only while traffic
@@ -648,11 +650,13 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 	if !c.idle() {
 		// Speed tests take seconds; health checks must not wait for them.
 		go e.speedRound(ctx, c)
-	} else if b := c.faster(); b != nil && c.use(ctx, b) == nil {
+	} else if b := c.faster(); b != nil && c.confirmFaster(b) && c.use(ctx, b) == nil {
 		c.mu.Lock()
 		d := b.delay
 		c.mu.Unlock()
 		e.logf("info", "A faster server was found in this group: %q (%d ms).", b.server.Name, d)
+	} else if b == nil {
+		c.confirmFaster(nil)
 	}
 	// A group younger than refreshAfter is left alone, so a country whose
 	// servers keep failing does not restart the core over and over. The
@@ -664,6 +668,19 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 		return false
 	}
 	return true
+}
+
+// confirmFaster reports whether b was also the faster member at the last
+// sweep: one lucky measurement is not reason enough to change the exit.
+func (c *connection) confirmFaster(b *member) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	same := b != nil && c.fasterSeen == b
+	c.fasterSeen = b
+	if same {
+		c.fasterSeen = nil
+	}
+	return same
 }
 
 // faster returns a live member clearly faster than the one in use. It is
