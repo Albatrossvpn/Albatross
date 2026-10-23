@@ -380,6 +380,7 @@ type candidate struct {
 	good      *Server
 	frag      bool   // fragment the TLS ClientHello
 	hello     int8   // 1 + index into helloFPs when the app picks the ClientHello
+	ech       bool   // look the server's ECH config up over DNS
 	pin       string // connect to this IP instead of resolving the name
 	pinReason string
 }
@@ -692,6 +693,11 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 		// The second try changes the ClientHello: fragmented, unless that
 		// clearly does worse on this network, else another browser's.
 		switch {
+		case !r.ech && r.node.Security == "tls" && r.node.ECH == "" && antiblock.CDNFrontable(r.node):
+			// Behind a CDN, ECH hides the name SNI filtering looks for.
+			n := *r.node
+			n.TryECH = true
+			r.node, r.ech, changed = &n, true, true
 		case frag == "auto" && !r.frag && r.node.Security == "tls" && !r.node.UDPBased() && (r.hello == 0 || !learned.fragHurts(r.fp())):
 			r.frag, changed = true, true
 		case r.hello != 0:
@@ -871,6 +877,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	s.Fails = 0
 	s.OKCount++
 	s.Fragment = c.frag
+	s.ECH = c.ech
 	s.Hello = ""
 	if c.hello != 0 {
 		s.Hello = helloFPs[c.fp()]

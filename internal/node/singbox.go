@@ -235,6 +235,14 @@ func (n *Node) sbTLS(o SingBoxOptions) map[string]any {
 	if len(alpn) > 0 {
 		t["alpn"] = alpn
 	}
+	ech := n.TryECH && n.Security == "tls" && n.ECH == ""
+	if ech {
+		// The real name travels encrypted inside a hello for the CDN's
+		// public name, so SNI filtering sees nothing to block. uTLS cannot
+		// do ECH; Go's own TLS stack does.
+		t["ech"] = map[string]any{"enabled": true}
+		fp = ""
+	}
 	if fp != "" {
 		t["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
 	}
@@ -246,7 +254,7 @@ func (n *Node) sbTLS(o SingBoxOptions) map[string]any {
 		if fp == "" {
 			t["utls"] = map[string]any{"enabled": true, "fingerprint": "chrome"}
 		}
-	} else {
+	} else if !ech {
 		if n.Fragment || o.Fragment {
 			t["fragment"] = true
 		}
