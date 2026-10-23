@@ -6,18 +6,27 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // netLearn keeps track of which protocols and wire styles (see node.Style)
-// pass on the current network. Filtering differs between networks and over
-// time: one day only Reality gets through, another day WebSocket over TLS
-// does. Tests of the kinds that work are moved to the front, so a working
-// server is found sooner without the user picking anything.
+// pass, separately for each network the device uses (told apart by the
+// network's resolver: each operator and each home router has its own).
+// Filtering differs between operators and over time: one day only Reality
+// gets through, another day WebSocket over TLS does. Tests of the kinds
+// that work are moved to the front, so a working server is found sooner
+// without the user picking anything.
 type netLearn struct {
-	mu    sync.Mutex
+	mu   sync.Mutex
+	Nets map[string]*netTable `json:"nets"`
+	cur  string
+}
+
+type netTable struct {
 	Proto [16]passRate `json:"proto"`
 	Style [32]passRate `json:"style"`
 	All   passRate     `json:"all"`
+	Used  time.Time    `json:"used"`
 }
 
 type passRate struct {
@@ -29,9 +38,66 @@ type passRate struct {
 // last few thousand tests decide.
 const learnDecay = 0.9995
 
+// maxNets bounds how many networks are remembered.
+const maxNets = 16
+
+// table returns the current network's table. Callers hold l.mu.
+func (l *netLearn) table() *netTable {
+	if l.Nets == nil {
+		l.Nets = map[string]*netTable{}
+	}
+	t := l.Nets[l.cur]
+	if t == nil {
+		t = &netTable{}
+		l.Nets[l.cur] = t
+	}
+	return t
+}
+
+// use switches to the network whose resolver is key. A network seen for the
+// first time starts from a fifth of what the last one taught: filtering is
+// national as much as it is per operator.
+func (l *netLearn) use(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if key == l.cur {
+		return
+	}
+	prev := l.table()
+	l.cur = key
+	if _, ok := l.Nets[key]; ok {
+		return
+	}
+	t := *prev
+	t.scale(0.2)
+	l.Nets[key] = &t
+	for len(l.Nets) > maxNets {
+		oldest := ""
+		for k, n := range l.Nets {
+			if k != l.cur && (oldest == "" || n.Used.Before(l.Nets[oldest].Used)) {
+				oldest = k
+			}
+		}
+		delete(l.Nets, oldest)
+	}
+}
+
+func (t *netTable) scale(f float64) {
+	sc := func(r *passRate) { r.OK *= f; r.N *= f }
+	sc(&t.All)
+	for i := range t.Proto {
+		sc(&t.Proto[i])
+	}
+	for i := range t.Style {
+		sc(&t.Style[i])
+	}
+}
+
 func (l *netLearn) record(proto, style uint8, ok bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	t := l.table()
+	t.Used = time.Now()
 	add := func(r *passRate) {
 		r.OK *= learnDecay
 		r.N *= learnDecay
@@ -40,27 +106,12 @@ func (l *netLearn) record(proto, style uint8, ok bool) {
 			r.OK++
 		}
 	}
-	add(&l.All)
-	if int(proto) < len(l.Proto) {
-		add(&l.Proto[proto])
+	add(&t.All)
+	if int(proto) < len(t.Proto) {
+		add(&t.Proto[proto])
 	}
-	if int(style) < len(l.Style) {
-		add(&l.Style[style])
-	}
-}
-
-// fade keeps only a fifth of what was learned, for when the device moved
-// to another network.
-func (l *netLearn) fade() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	scale := func(r *passRate) { r.OK *= 0.2; r.N *= 0.2 }
-	scale(&l.All)
-	for i := range l.Proto {
-		scale(&l.Proto[i])
-	}
-	for i := range l.Style {
-		scale(&l.Style[i])
+	if int(style) < len(t.Style) {
+		add(&t.Style[style])
 	}
 }
 
@@ -73,19 +124,20 @@ type learnedView struct {
 func (l *netLearn) snapshot() learnedView {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	t := l.table()
 	var v learnedView
-	base := (l.All.OK + 1) / (l.All.N + 2)
+	base := (t.All.OK + 1) / (t.All.N + 2)
 	// A kind with few tests counts as average until it has more.
 	const k = 30
 	lift := func(r passRate) float64 {
 		got := (r.OK + k*base) / (r.N + k)
 		return math.Max(-75, math.Min(75, 25*math.Log2(got/base)))
 	}
-	for i := range l.Proto {
-		v.proto[i] = lift(l.Proto[i])
+	for i := range t.Proto {
+		v.proto[i] = lift(t.Proto[i])
 	}
-	for i := range l.Style {
-		v.style[i] = lift(l.Style[i])
+	for i := range t.Style {
+		v.style[i] = lift(t.Style[i])
 	}
 	return v
 }
