@@ -34,6 +34,7 @@ type Entry struct {
 	State    uint8
 	Fails    uint8
 	Pop      uint8 // number of sources listing it, saturating
+	Style    uint8 // node.Style
 	Hint     [2]byte
 	Flags    uint8
 }
