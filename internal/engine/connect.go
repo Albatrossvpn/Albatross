@@ -134,6 +134,7 @@ func (e *Engine) Connect(country string) error {
 	e.settings.Connected = true
 	e.wantConnect = true
 	e.connGen++
+	e.cancelAttempt()
 	gen := e.connGen
 	mode := e.settings.Mode
 	e.mu.Unlock()
@@ -169,6 +170,7 @@ func (e *Engine) ConnectServer(key string) error {
 	e.settings.Connected = true
 	e.wantConnect = true
 	e.connGen++
+	e.cancelAttempt()
 	gen := e.connGen
 	e.mu.Unlock()
 	saveJSON(filepath.Join(e.dir, "settings.json"), e.Settings())
@@ -233,8 +235,11 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 		if err == nil {
 			return nil
 		}
-		if errors.Is(err, errStale) {
-			return err
+		e.mu.Lock()
+		stale := e.connGen != gen
+		e.mu.Unlock()
+		if stale || errors.Is(err, errStale) {
+			return errStale
 		}
 		e.logf("warn", "Connection attempt failed: %v", err)
 		for _, s := range picks {
@@ -352,6 +357,16 @@ var (
 	errServers = errors.New("servers failed")
 )
 
+// cancelAttempt stops a connection attempt that a newer connect or a
+// disconnect made stale, so its core frees the proxy port at once. Called
+// with mu held.
+func (e *Engine) cancelAttempt() {
+	if e.attempt != nil {
+		e.attempt()
+		e.attempt = nil
+	}
+}
+
 // portFree reports whether a local TCP port can be bound.
 func portFree(listen string, port int) bool {
 	l, err := net.Listen("tcp", net.JoinHostPort(listen, strconv.Itoa(port)))
@@ -364,7 +379,16 @@ func portFree(listen string, port int) bool {
 
 // start runs the cores for a group of servers and switches over to them.
 func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) error {
+	e.startMu.Lock()
+	defer e.startMu.Unlock()
 	e.mu.Lock()
+	if e.connGen != gen {
+		e.mu.Unlock()
+		return errStale
+	}
+	actx, acancel := context.WithCancel(e.ctx)
+	defer acancel()
+	e.attempt = acancel
 	set := e.settings
 	old := e.conn
 	e.mu.Unlock()
@@ -393,10 +417,6 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		listen = "0.0.0.0"
 	}
 	proxyPort := set.ProxyPort
-	// The old core can take a moment to release the port after it stops.
-	for i := 0; i < 30 && old != nil && !portFree(listen, proxyPort); i++ {
-		time.Sleep(100 * time.Millisecond)
-	}
 	if !portFree(listen, proxyPort) {
 		// Another program (often another VPN client) holds the port.
 		if p, err := core.FreePorts(1); err == nil {
@@ -438,7 +458,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	if set.SpoofSNI != "" && e.opt.IsAdmin() {
 		build.Spoof = set.SpoofSNI
 	}
-	ctx, cancel := context.WithTimeout(e.ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(actx, 30*time.Second)
 	defer cancel()
 	run, err := e.rt.Run(ctx, "connect", nodes, build, func(s *core.Set) map[string]any {
 		return connectConfig(s, opts)
@@ -484,18 +504,18 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 				rest = append(rest, m)
 			}
 		}
-		m := e.race(e.ctx, c, rest, 8*time.Second)
+		m := e.race(actx, c, rest, 8*time.Second)
 		if m == nil {
 			break
 		}
 		tried[m] = true
-		if err := c.use(e.ctx, m); err != nil {
+		if err := c.use(actx, m); err != nil {
 			run.Stop()
 			return err
 		}
-		c.keep(e.ctx, m)
+		c.keep(actx, m)
 		// Prove the whole path works before telling anyone it does.
-		r = tester.Probe(e.ctx, proxy, 12*time.Second)
+		r = tester.Probe(actx, proxy, 12*time.Second)
 		if !r.OK {
 			e.noteResult(c, m, 0, false)
 		}
@@ -507,6 +527,9 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	}
 	if !r.OK {
 		run.Stop()
+		if actx.Err() != nil && e.ctx.Err() == nil {
+			return errStale // a newer connect or a disconnect took over
+		}
 		if len(tried) == 0 {
 			return fmt.Errorf("%w: no server in the group answered", errServers)
 		}
@@ -583,6 +606,7 @@ func (e *Engine) disconnect(byUser bool) {
 	e.mu.Lock()
 	e.wantConnect = false
 	e.connGen++
+	e.cancelAttempt()
 	c := e.conn
 	wasOn := e.settings.Connected
 	if byUser {
