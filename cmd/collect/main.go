@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -210,6 +211,22 @@ func main() {
 	for i := range *shards {
 		lo, hi := len(rest)*i / *shards, len(rest)*(i+1) / *shards
 		write(fmt.Sprintf("all-%d.txt", i+1), rest[lo:hi])
+	}
+	// The project's own servers (deploy/server) go out sealed, so public
+	// collectors do not pick them up and overload them.
+	if own, key := os.Getenv("OWN_SERVERS"), os.Getenv("OWN_KEY"); own != "" && key != "" {
+		k, err := hex.DecodeString(key)
+		if err != nil || len(k) != 32 {
+			log.Fatal("OWN_KEY must be 64 hex digits")
+		}
+		sealed, err := sources.Seal(k, own)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(*out, "own.bin"), sealed, 0o644); err != nil {
+			log.Fatal(err)
+		}
+		m.Files["own.bin"] = len(strings.Fields(own))
 	}
 	b, _ := json.MarshalIndent(m, "", "  ")
 	if err := os.WriteFile(filepath.Join(*out, "meta.json"), b, 0o644); err != nil {
