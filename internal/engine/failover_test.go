@@ -265,3 +265,21 @@ func TestReachableKeepsLiveServers(t *testing.T) {
 		t.Fatalf("offline: got %v, exclude %v", got, exclude)
 	}
 }
+
+func TestGroupSpreadsAcrossNetworks(t *testing.T) {
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	now := time.Now()
+	for i, host := range []string{"1.2.3.1", "1.2.3.2", "1.2.3.3", "5.6.7.8"} {
+		link := fmt.Sprintf("vless://b831381d-6324-4d53-ad4f-8cda48b30811@%s:443?security=tls&sni=a.example&type=ws#s%d", host, i)
+		n, _ := node.ParseLink(link)
+		e.good[node.Key64(n.Key())] = &Server{Key: n.Key(), Link: link, Name: fmt.Sprint("s", i), Country: "DE", Delay: 100 + i, LastOK: now, TestedAt: now}
+	}
+	g := e.pickGroup("DE", "", nil, 3)
+	if len(g) != 3 || g[0].Name != "s0" || g[2].Name != "s3" {
+		t.Fatalf("group %v %v %v", g[0].Name, g[1].Name, g[2].Name)
+	}
+}

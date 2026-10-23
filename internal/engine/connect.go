@@ -398,30 +398,47 @@ func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, o
 	sort.Slice(list, func(i, j int) bool { return list[i].rank(now) < list[j].rank(now) })
 	// WireGuard peers sharing a private key fight over one session, and each
 	// warp-plus method is a whole process; keep the group light.
+	//
+	// Backups that share a network, or a protocol, transport and port, tend
+	// to be cut together by the same block, so the first pass takes at most
+	// two from one network and two of one kind, the second drops the limit
+	// on kinds, and the last fills what is left in plain rank order.
 	var out []*Server
+	taken := map[*Server]bool{}
 	keys := map[string]bool{}
+	nets := map[uint32]int{}
+	kinds := map[string]int{}
 	warpPlus := 0
-	for _, s := range list {
-		if len(out) >= n {
-			break
-		}
-		nd := s.Node()
-		if nd == nil {
-			continue
-		}
-		if nd.Proto == "wireguard" {
-			if keys[nd.PrivateKey] {
+	for pass := 0; pass < 3; pass++ {
+		for _, s := range list {
+			if len(out) >= n {
+				break
+			}
+			nd := s.Node()
+			if nd == nil || taken[s] {
 				continue
 			}
-			keys[nd.PrivateKey] = true
-		}
-		if nd.Proto == "warpplus" {
-			if warpPlus >= 1 {
+			kind := nd.Proto + "/" + nd.Transport + "/" + nd.Security + "/" + strconv.Itoa(nd.Port)
+			if pass < 2 && nets[nd.NetID()] >= 2 || pass == 0 && kinds[kind] >= 2 {
 				continue
 			}
-			warpPlus++
+			if nd.Proto == "wireguard" {
+				if keys[nd.PrivateKey] {
+					continue
+				}
+				keys[nd.PrivateKey] = true
+			}
+			if nd.Proto == "warpplus" {
+				if warpPlus >= 1 {
+					continue
+				}
+				warpPlus++
+			}
+			taken[s] = true
+			nets[nd.NetID()]++
+			kinds[kind]++
+			out = append(out, s)
 		}
-		out = append(out, s)
 	}
 	return out
 }
@@ -530,6 +547,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		Fragment:    set.Fragment == "on",
 		FragmentFor: func(n *node.Node) bool { return fragFor[n] },
 		OnLine:      c.watchLog,
+		LineMbps:    e.net.lineMbps(),
 	}
 	if set.SpoofSNI != "" && e.opt.IsAdmin() {
 		build.Spoof = set.SpoofSNI

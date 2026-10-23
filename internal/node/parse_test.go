@@ -216,3 +216,14 @@ func TestNamesHaveNoPersian(t *testing.T) {
 		t.Fatalf("a Persian-only name became %q", n.Name)
 	}
 }
+
+func TestHysteria2AsksForLineSpeed(t *testing.T) {
+	n := mustParse(t, "hy2://pass@example.com:443?sni=example.com#h")
+	out, _ := n.SingBox("x", SingBoxOptions{LineMbps: 40})
+	if out["down_mbps"] != 50 || out["up_mbps"] != 10 {
+		t.Fatalf("up %v down %v", out["up_mbps"], out["down_mbps"])
+	}
+	if out, _ := n.SingBox("x", SingBoxOptions{}); out["down_mbps"] != nil {
+		t.Fatal("asked for a speed nobody measured")
+	}
+}
