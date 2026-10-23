@@ -47,7 +47,12 @@ func TestTorBootstrap(t *testing.T) {
 	t.Logf("bootstrapped in %v", time.Since(start).Round(time.Second))
 	proxy, _ := url.Parse("socks5://127.0.0.1:" + strconv.Itoa(port))
 	c := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}, Timeout: time.Minute}
+	// A fresh circuit's first exit sometimes drops the request; Tor
+	// builds another for the next one.
 	resp, err := c.Get("https://check.torproject.org/api/ip")
+	for i := 0; err != nil && i < 3; i++ {
+		resp, err = c.Get("https://check.torproject.org/api/ip")
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
