@@ -29,10 +29,15 @@ func TestTorBootstrap(t *testing.T) {
 	r := &Runtime{Bin: Binaries{Tor: filepath.Join(dir, "tor", "tor"+exe)}, Dir: t.TempDir(),
 		OnLine: func(_, l string) { lines = append(lines, l) }}
 	defer r.StopTor()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	// Bridges on the live Tor network are sometimes slow; like the app, a
+	// slow bootstrap carries on into the next attempt.
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Minute)
 	defer cancel()
 	start := time.Now()
 	port, err := r.acquireTor(ctx)
+	for err != nil && ctx.Err() == nil && time.Since(start) < 5*time.Minute {
+		port, err = r.acquireTor(ctx)
+	}
 	if err != nil {
 		for _, l := range lines {
 			t.Log(l)
