@@ -208,7 +208,7 @@ func (e *Engine) Start() {
 
 // Close disconnects, stops all work and saves state.
 func (e *Engine) Close() {
-	e.Disconnect()
+	e.disconnect(false)
 	if e.cancel != nil {
 		e.cancel()
 	}
@@ -343,6 +343,7 @@ func (e *Engine) UpdateSettings(s Settings) error {
 		s.ProxyPort = old.ProxyPort
 	}
 	s.Country = e.target
+	s.Connected = old.Connected
 	s.normalize()
 	if e.opt.Mobile {
 		s.Mode = "proxy"

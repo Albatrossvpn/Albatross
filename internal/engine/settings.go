@@ -42,6 +42,9 @@ type Settings struct {
 	SecureOnly bool `json:"secure_only"`
 	// Country is the last chosen country ("" means the fastest anywhere).
 	Country string `json:"country"`
+	// Connected says the user left the VPN on: the last thing they did was
+	// connect, not disconnect. Android's Always-on VPN resumes it.
+	Connected bool `json:"connected,omitempty"`
 	// AutoConnect connects when the app starts.
 	AutoConnect bool `json:"auto_connect"`
 	// StartWithSystem launches the app at login.
