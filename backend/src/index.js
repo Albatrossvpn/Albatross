@@ -67,6 +67,8 @@ async function route(request, env, url) {
     case "POST admin/users/bulk": return adminBulk(request, env);
     case "GET admin/settings": return adminSettings(request, env);
     case "PUT admin/settings": return adminSaveSettings(request, env);
+    case "POST stats": return crowdReport(request, env);
+    case "GET stats": return crowdSummary(request, env, url);
   }
   if (admin) {
     const id = Number(admin[1]);
@@ -451,4 +453,79 @@ async function adminSaveSettings(request, env) {
   }
   if (stmts.length) await env.DB.batch(stmts);
   return json(await settings(env));
+}
+
+// ---------- Crowd learning ----------
+//
+// Apps whose users turned on "Share anonymous connection stats" report, a
+// few times a day, how many tests of each kind of connection passed on their
+// operator's network. A new install on that operator then starts with the
+// order that works there. Reports carry no device or server details, and no
+// address is stored: the rate limit keeps only a keyed hash of it, for a day.
+
+const CROWD_KINDS = { proto: 16, style: 32, hello: 16, port: 8 };
+const CROWD_DAYS = 14;
+// An operator's numbers are published only once this many reports came in,
+// so no one report can be told apart.
+const CROWD_MIN_REPORTS = 3;
+
+async function crowdReport(request, env) {
+  const b = await body(request);
+  const asn = b.asn;
+  if (!Number.isInteger(asn) || asn < 1 || asn > 4294967295) throw new HttpError(400, "Bad request.");
+  const rows = [];
+  for (const [kind, size] of Object.entries(CROWD_KINDS)) {
+    const list = b[kind] ?? [];
+    if (!Array.isArray(list) || list.length > size) throw new HttpError(400, "Bad request.");
+    for (const r of list) {
+      if (!Array.isArray(r) || r.length !== 3 || !r.every(Number.isInteger)) throw new HttpError(400, "Bad request.");
+      const [code, ok, n] = r;
+      if (code < 0 || code >= size || n < 1 || ok < 0 || ok > n) throw new HttpError(400, "Bad request.");
+      // One report counts for at most 500 tests of a kind.
+      const scale = Math.min(1, 500 / n);
+      rows.push([kind, code, Math.round(ok * scale), Math.round(n * scale)]);
+    }
+  }
+  const limit = "stats:" + (await clientTag(request, env));
+  if (await blocked(env, limit, 6, DAY)) throw new HttpError(429, "Too many reports.");
+  await count(env, limit, DAY);
+  const day = Math.floor(now() / DAY);
+  const stmts = rows.map(([kind, code, ok, n]) =>
+    env.DB.prepare(
+      `INSERT INTO crowd (asn, kind, code, day, ok, n) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+       ON CONFLICT (asn, kind, code, day) DO UPDATE SET ok = ok + ?5, n = n + ?6`,
+    ).bind(asn, kind, code, day, ok, n));
+  stmts.push(
+    env.DB.prepare(
+      `INSERT INTO crowd_reports (asn, day, reports) VALUES (?1, ?2, 1)
+       ON CONFLICT (asn, day) DO UPDATE SET reports = reports + 1`,
+    ).bind(asn, day),
+    env.DB.prepare("DELETE FROM crowd WHERE day < ?1").bind(day - CROWD_DAYS),
+    env.DB.prepare("DELETE FROM crowd_reports WHERE day < ?1").bind(day - CROWD_DAYS),
+  );
+  await env.DB.batch(stmts);
+  return json({ ok: true });
+}
+
+// GET stats lists what passes on each network (by ASN) that enough
+// installs reported. With ?asn=self it gives only the asker's own network,
+// and says which one that is (an app cannot tell its ASN by itself).
+async function crowdSummary(request, env, url) {
+  const self = request.cf?.asn ?? 0;
+  const only = url.searchParams.get("asn") === "self" ? self : 0;
+  const since = Math.floor(now() / DAY) - CROWD_DAYS;
+  const { results: enough } = await env.DB.prepare(
+    "SELECT asn FROM crowd_reports WHERE day >= ?1 GROUP BY asn HAVING SUM(reports) >= ?2",
+  ).bind(since, CROWD_MIN_REPORTS).all();
+  const keep = new Set(enough.map((r) => r.asn));
+  const { results } = await env.DB.prepare(
+    "SELECT asn, kind, code, SUM(ok) AS ok, SUM(n) AS n FROM crowd WHERE day >= ?1 GROUP BY asn, kind, code",
+  ).bind(since).all();
+  const out = {};
+  for (const r of results) {
+    if (!keep.has(r.asn) || (only && r.asn !== only)) continue;
+    const a = (out[r.asn] ??= {});
+    (a[r.kind] ??= []).push([r.code, r.ok, r.n]);
+  }
+  return json({ asn: self, asns: out });
 }
