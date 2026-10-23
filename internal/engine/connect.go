@@ -544,10 +544,8 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
 		clashSecret: c.clashSecret, probeAddr: c.probeAddr, exe: e.opt.ExeName, localDNS: e.dns(), mobile: e.opt.Mobile,
 	}
-	if set.WarpExit {
-		opts.warp = e.warpExit()
-		c.warp = opts.warp != nil
-	}
+	opts.warp = e.warpExit()
+	c.warp = opts.warp != nil
 	build := core.BuildOptions{
 		Fragment:    set.Fragment == "on",
 		FragmentFor: func(n *node.Node) bool { return fragFor[n] },
@@ -799,7 +797,7 @@ type connOptions struct {
 	exe         string
 	localDNS    string
 	mobile      bool
-	warp        *warpID // run WARP through the server in use (Settings.WarpExit)
+	warp        *warpID // offer WARP through the server in use (watchWarpExit)
 }
 
 // connectConfig builds the sing-box config for a live connection.
