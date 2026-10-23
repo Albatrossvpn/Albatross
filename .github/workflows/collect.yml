@@ -31,6 +31,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: servers
+          path: prev
       - name: Cores
         env:
           SINGBOX_VERSION: "1.14.3"
@@ -48,7 +53,7 @@ jobs:
           XRAY: /tmp/cores/xray
           OWN_SERVERS: ${{ secrets.OWN_SERVERS }}
           OWN_KEY: ${{ secrets.OWN_KEY }}
-        run: go run ./cmd/collect -out "$RUNNER_TEMP/servers"
+        run: go run ./cmd/collect -prev prev -out "$RUNNER_TEMP/servers"
       - name: Publish
         working-directory: ${{ runner.temp }}/servers
         run: |

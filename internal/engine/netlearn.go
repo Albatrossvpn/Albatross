@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -40,9 +41,12 @@ type netTable struct {
 	// Pend counts tests since the last crowd report (crowd.go); ASN is the
 	// network's operator as the crowd service saw it, and Seeded says the
 	// crowd's numbers were already added to this table.
-	Pend   crowdCounts `json:"pend"`
-	ASN    uint32      `json:"asn,omitempty"`
-	Seeded bool        `json:"seeded,omitempty"`
+	// Net is per server network (node.NetID): the /24s and names this
+	// operator blocks, so their other servers are tried last.
+	Net    map[uint32]*passRate `json:"net,omitempty"`
+	Pend   crowdCounts          `json:"pend"`
+	ASN    uint32               `json:"asn,omitempty"`
+	Seeded bool                 `json:"seeded,omitempty"`
 }
 
 // lifeRate is a running average of lifetimes in minutes over N deaths.
@@ -93,6 +97,8 @@ func (l *netLearn) use(key string) {
 	t := *prev
 	t.scale(0.2)
 	t.Pend, t.ASN, t.Seeded = crowdCounts{}, 0, false
+	// Blocked ranges differ between operators; each learns its own.
+	t.Net = nil
 	l.Nets[key] = &t
 	for len(l.Nets) > maxNets {
 		oldest := ""
@@ -164,13 +170,52 @@ func (l *netLearn) record(proto, style uint8, ok bool) {
 	}
 }
 
+// maxNetIDs bounds the networks remembered per operator; the least
+// tested are forgotten first.
+const maxNetIDs = 4000
+
+// recordNet counts a test of a server in network id (node.NetID).
+func (l *netLearn) recordNet(id uint32, ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	t := l.table()
+	if t.Net == nil {
+		t.Net = map[uint32]*passRate{}
+	}
+	r := t.Net[id]
+	if r == nil {
+		if len(t.Net) >= maxNetIDs {
+			var ids []uint32
+			for k := range t.Net {
+				ids = append(ids, k)
+			}
+			sort.Slice(ids, func(i, j int) bool { return t.Net[ids[i]].N < t.Net[ids[j]].N })
+			for _, k := range ids[:maxNetIDs/4] {
+				delete(t.Net, k)
+			}
+		}
+		r = &passRate{}
+		t.Net[id] = r
+	}
+	// No decay here: each network sees few tests, and a block lasts.
+	r.N++
+	if ok {
+		r.OK++
+	}
+}
+
 // learnedView is a copy for scoring without holding the lock.
 type learnedView struct {
 	proto [16]float64
 	style [32]float64
 	hello [16]float64
 	port  [8]float64
+	net   map[uint32]float64
 }
+
+// netBonus lifts servers in networks that pass here and sinks those in
+// networks that keep failing (blocked ranges).
+func (v learnedView) netBonus(id uint32) float64 { return v.net[id] }
 
 func (l *netLearn) snapshot() learnedView {
 	l.mu.Lock()
@@ -195,6 +240,12 @@ func (l *netLearn) snapshot() learnedView {
 	}
 	for i := range t.Port {
 		v.port[i] = lift(t.Port[i])
+	}
+	// A network has few tests, so a few say a lot.
+	v.net = make(map[uint32]float64, len(t.Net))
+	for id, r := range t.Net {
+		got := (r.OK + 3*base) / (r.N + 3)
+		v.net[id] = math.Max(-75, math.Min(40, 25*math.Log2(got/base)))
 	}
 	return v
 }
