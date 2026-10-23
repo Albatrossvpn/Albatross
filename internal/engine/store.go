@@ -62,6 +62,9 @@ func (s *Server) runNode() *node.Node {
 	return antiblock.Pin(n, s.PinIP)
 }
 
+// matches reports whether the server uses the chosen protocol ("" = any).
+func (s *Server) matches(protocol string) bool { return protocol == "" || s.Proto == protocol }
+
 // usable reports whether the server is worth connecting to now.
 func (s *Server) usable(now time.Time) bool {
 	return s.Fails < 3 && now.Sub(s.LastOK) < 6*time.Hour
@@ -114,6 +117,7 @@ func (e *Engine) saveServers() {
 	}
 	e.mu.Unlock()
 	saveJSON(filepath.Join(e.dir, "servers.json"), list)
+	e.net.save(e.dir)
 }
 
 // SourceStat tracks how useful a source has been.

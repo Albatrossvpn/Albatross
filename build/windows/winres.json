@@ -8,10 +8,10 @@
     "#1": {
       "0409": {
         "identity": {
-          "name": "Azadrah.VPN",
+          "name": "Albatross.VPN",
           "version": "0.0.0.0"
         },
-        "description": "Azadrah VPN",
+        "description": "Albatross VPN",
         "minimum-os": "win10",
         "execution-level": "as invoker",
         "ui-access": false,
@@ -38,12 +38,12 @@
         },
         "info": {
           "0409": {
-            "CompanyName": "Azadrah",
-            "FileDescription": "Azadrah VPN",
-            "InternalName": "Azadrah",
+            "CompanyName": "Albatross",
+            "FileDescription": "Albatross VPN",
+            "InternalName": "Albatross",
             "LegalCopyright": "GPL-3.0",
-            "OriginalFilename": "Azadrah.exe",
-            "ProductName": "Azadrah VPN"
+            "OriginalFilename": "Albatross.exe",
+            "ProductName": "Albatross VPN"
           }
         }
       }

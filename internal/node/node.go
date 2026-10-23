@@ -408,3 +408,32 @@ func validShortID(s string) bool {
 	_, err := hex.DecodeString(s)
 	return err == nil
 }
+
+// Style is a small code for how a server's traffic looks on the wire: its
+// security layer and transport. Filtering blocks some styles far more than
+// others, so the app learns which ones work on the current network.
+func (n *Node) Style() uint8 {
+	sec := uint8(0)
+	switch n.Security {
+	case "tls":
+		sec = 1
+	case "reality":
+		sec = 2
+	}
+	tr := uint8(0)
+	switch n.Transport {
+	case "ws":
+		tr = 1
+	case "grpc":
+		tr = 2
+	case "http", "h2":
+		tr = 3
+	case "httpupgrade":
+		tr = 4
+	case "xhttp", "splithttp":
+		tr = 5
+	case "kcp", "quic":
+		tr = 6
+	}
+	return sec*8 + tr + 1 // 0 means unknown
+}

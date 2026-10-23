@@ -2,20 +2,42 @@ name: Build
 
 on:
   push:
-    branches: ["**"]
+    branches: ["**", "!servers"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Publish a release with this version (e.g. 0.2.0); the run creates the v<version> tag"
+        required: false
 
 permissions:
   contents: write
 
 env:
   SINGBOX_VERSION: "1.14.3"
-  XRAY_VERSION: "26.10.10"
+  XRAY_VERSION: "26.9.30"
   WARPPLUS_VERSION: "1.2.6"
 
 jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: API tests (a local Worker with a local database)
+        run: npm run test:api
+
   test:
     runs-on: ubuntu-latest
     steps:
@@ -28,6 +50,8 @@ jobs:
           go vet ./...
           GOOS=windows go vet ./...
           test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: Collector smoke test
+        run: go run ./cmd/collect -limit 6 -probe=false -out /tmp/collect && cat /tmp/collect/meta.json
       - name: Download cores for end-to-end tests
         run: |
           mkdir -p /tmp/cores && cd /tmp/cores
@@ -43,6 +67,16 @@ jobs:
         run: |
           export E2E_HOST_IP="$(hostname -I | awk '{print $1}')"
           go test -count=1 -timeout 15m ./...
+      - name: Android tunnel path
+        # Makes a TUN device the way Android's VpnService does, so it needs root.
+        env:
+          SING_BOX: /tmp/cores/sing-box
+          XRAY: /tmp/cores/xray
+          E2E_UPSTREAM: direct
+        run: |
+          export E2E_HOST_IP="$(hostname -I | awk '{print $1}')"
+          go test -c -o /tmp/mobile.test ./mobile
+          sudo --preserve-env=SING_BOX,XRAY,E2E_UPSTREAM,E2E_HOST_IP /tmp/mobile.test -test.count=1 -test.v -test.run AndroidPath
 
   build:
     needs: test
@@ -56,22 +90,70 @@ jobs:
           go-version-file: go.mod
       - name: Version
         id: version
+        env:
+          RELEASE: ${{ inputs.release }}
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="0.1.0-dev.${GITHUB_RUN_NUMBER}"; fi
+          if [[ "$RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then v="$RELEASE"
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="0.1.0-dev.${GITHUB_RUN_NUMBER}"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Package
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          # The account service addresses (repository variable); empty builds an app without sign-in.
+          ACCOUNT_URL: ${{ vars.ACCOUNT_URL }}
+          # Opens the list of the project's own servers (deploy/server).
+          OWN_KEY: ${{ secrets.OWN_KEY }}
         run: bash build/package.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: Azadrah-folder
-          path: dist/Azadrah
+          name: Albatross-folder
+          path: dist/Albatross
           retention-days: 7
       - uses: actions/upload-artifact@v4
         with:
-          name: Azadrah-portable-${{ steps.version.outputs.version }}
+          name: Albatross-portable-${{ steps.version.outputs.version }}
           path: dist/*.zip
+
+  android:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK and NDK
+        run: |
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdk" --licenses > /dev/null || true
+          "$sdk" "platforms;android-35" "build-tools;35.0.0" "ndk;27.3.13750724" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
+      - name: Build APKs
+        env:
+          ACCOUNT_URL: ${{ vars.ACCOUNT_URL }}
+          OWN_KEY: ${{ secrets.OWN_KEY }}
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ALBATROSS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ALBATROSS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ALBATROSS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          # Without a key in the repository secrets the APKs get a debug key.
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/albatross.jks"
+            export ALBATROSS_KEYSTORE="$RUNNER_TEMP/albatross.jks"
+          fi
+          bash build/android/build.sh
+          "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging dist/*arm64-v8a.apk | head -3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Albatross-android-${{ env.VERSION }}
+          path: dist/*.apk
 
   installer:
     needs: build
@@ -82,26 +164,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: Azadrah-folder
-          path: dist/Azadrah
+          name: Albatross-folder
+          path: dist/Albatross
       - name: Smoke test on Windows
         shell: pwsh
         run: |
-          $data = Join-Path $env:RUNNER_TEMP "azadrah-data"
-          $out = Join-Path $env:RUNNER_TEMP "azadrah-out.txt"
-          $p = Start-Process -FilePath "dist\Azadrah\Azadrah.exe" -ArgumentList "--headless","--ui-port","18080","--data",$data -RedirectStandardOutput $out -PassThru
+          $data = Join-Path $env:RUNNER_TEMP "albatross-data"
+          $out = Join-Path $env:RUNNER_TEMP "albatross-out.txt"
+          $p = Start-Process -FilePath "dist\Albatross\Albatross.exe" -ArgumentList "--headless","--ui-port","18080","--data",$data -RedirectStandardOutput $out -PassThru
           $url = $null
           for ($i = 0; $i -lt 30 -and -not $url; $i++) { Start-Sleep 1; $url = Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 1 }
           if (-not $url) { throw "the app did not start" }
           $token = $url.Split("#")[1]
           $h = @{ "X-Token" = $token }
           $state = Invoke-RestMethod -Uri "http://127.0.0.1:18080/api/state" -Headers $h
-          "cores: sing-box=$($state.cores.sing_box) xray=$($state.cores.xray) warp-plus=$($state.cores.warp_plus)"
-          if (-not ($state.cores.sing_box -and $state.cores.xray -and $state.cores.warp_plus)) { throw "a core is missing" }
+          # The page is not told about cores; check the files and that the engine answers.
+          foreach ($c in "sing-box", "xray", "warp-plus") { if (-not (Test-Path "dist\Albatross\core\$c.exe")) { throw "$c is missing" } }
+          if (-not $state.status) { throw "the engine did not answer" }
+          if ($state.PSObject.Properties.Name -contains "cores") { throw "the state still lists cores" }
           $page = Invoke-WebRequest -Uri "http://127.0.0.1:18080/" -UseBasicParsing
           if ($page.StatusCode -ne 200) { throw "UI not served" }
-          & dist\Azadrah\core\sing-box.exe version
-          & dist\Azadrah\core\xray.exe version
+          & dist\Albatross\core\sing-box.exe version
+          & dist\Albatross\core\xray.exe version
           Stop-Process -Id $p.Id -Force
       - name: Real-world connection test
         # Public free servers change by the minute; report but never block.
@@ -109,9 +193,9 @@ jobs:
         timeout-minutes: 12
         shell: pwsh
         run: |
-          $data = Join-Path $env:RUNNER_TEMP "azadrah-real"
-          $out = Join-Path $env:RUNNER_TEMP "azadrah-real.txt"
-          $p = Start-Process -FilePath "dist\Azadrah\Azadrah.exe" -ArgumentList "--headless","--ui-port","18081","--data",$data -RedirectStandardOutput $out -PassThru
+          $data = Join-Path $env:RUNNER_TEMP "albatross-real"
+          $out = Join-Path $env:RUNNER_TEMP "albatross-real.txt"
+          $p = Start-Process -FilePath "dist\Albatross\Albatross.exe" -ArgumentList "--headless","--ui-port","18081","--data",$data -RedirectStandardOutput $out -PassThru
           $url = $null
           for ($i = 0; $i -lt 30 -and -not $url; $i++) { Start-Sleep 1; $url = Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 1 }
           $h = @{ "X-Token" = $url.Split("#")[1] }
@@ -119,8 +203,8 @@ jobs:
           for ($i = 0; $i -lt 90; $i++) {
             Start-Sleep 5
             $s = Invoke-RestMethod -Uri "$api/state" -Headers $h
-            "t=$($i*5)s working=$($s.working_now) countries=$(@($s.countries | Where-Object { $_.servers -gt 0 }).Count) candidates=$($s.scan.candidates) tested/min=$($s.scan.per_minute)"
-            if ($s.working_now -ge 3) { break }
+            "t=$($i*5)s servers=$($s.servers) countries=$(@($s.countries | Where-Object { $_.servers -gt 0 }).Count)"
+            if ($s.servers -ge 3) { break }
           }
           Invoke-RestMethod -Method Post -Uri "$api/connect" -Headers $h -ContentType "application/json" -Body '{"country":""}' | Out-Null
           for ($i = 0; $i -lt 40; $i++) {
@@ -130,7 +214,7 @@ jobs:
             if ($s.status -eq "connected") { break }
           }
           if ($s.status -eq "connected") {
-            "connected via $($s.conn.server) ($($s.conn.proto)), exit $($s.conn.exit_ip) $($s.conn.country), $($s.conn.delay) ms"
+            "connected, exit $($s.conn.country), $($s.conn.delay) ms"
             curl.exe -s -x http://127.0.0.1:10808 https://www.cloudflare.com/cdn-cgi/trace
           }
           $s.countries | Where-Object { $_.servers -gt 0 } | Select-Object -First 20 code, servers, best_delay | Format-Table | Out-String
@@ -145,39 +229,50 @@ jobs:
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
-          & $iscc "/DAppVersion=$env:VERSION" "/DSourceDir=$pwd\dist\Azadrah" "/DOutputDir=$pwd\dist" "build\windows\installer.iss"
+          & $iscc "/DAppVersion=$env:VERSION" "/DSourceDir=$pwd\dist\Albatross" "/DOutputDir=$pwd\dist" "build\windows\installer.iss"
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
           Get-ChildItem dist\*.exe
       - name: Test installer
         shell: pwsh
         run: |
-          $setup = Get-ChildItem dist\Azadrah-Setup-*.exe | Select-Object -First 1
-          $dir = Join-Path $env:RUNNER_TEMP "azadrah-installed"
+          $setup = Get-ChildItem dist\Albatross-Setup-*.exe | Select-Object -First 1
+          $dir = Join-Path $env:RUNNER_TEMP "albatross-installed"
           Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/CURRENTUSER","/DIR=`"$dir`"" -Wait
-          foreach ($f in "Azadrah.exe","core\sing-box.exe","core\xray.exe","core\warp-plus.exe") {
+          foreach ($f in "Albatross.exe","core\sing-box.exe","core\xray.exe","core\warp-plus.exe") {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f after install" }
           }
           "installed OK: $dir"
       - uses: actions/upload-artifact@v4
         with:
-          name: Azadrah-Setup-${{ env.VERSION }}
-          path: dist/Azadrah-Setup-*.exe
+          name: Albatross-Setup-${{ env.VERSION }}
+          path: dist/Albatross-Setup-*.exe
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Azadrah-Setup-*.exe
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          files: dist/Albatross-Setup-*.exe
           generate_release_notes: true
 
-  release-portable:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, installer]
+  # The installer job creates the release; this adds the portable zip and
+  # the APKs to it, so two jobs never race to create it.
+  release-assets:
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
+    needs: [build, installer, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Azadrah-portable-${{ needs.build.outputs.version }}
+          name: Albatross-portable-${{ needs.build.outputs.version }}
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: Albatross-android-${{ needs.build.outputs.version }}
           path: dist
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          tag_name: v${{ needs.build.outputs.version }}
+          files: |
+            dist/*.zip
+            dist/*.apk

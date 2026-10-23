@@ -1,0 +1,47 @@
+# Albatross's own servers
+
+Public free servers cover VLESS, VMess, Trojan, Shadowsocks, Hysteria, TUIC,
+AnyTLS and WireGuard. A server of the project's own carries every protocol
+the app runs at once, on its own ports, so that one being blocked leaves the
+rest:
+
+| Protocol | Port |
+|---|---|
+| VLESS + Reality + Vision | 443/tcp |
+| VLESS + XHTTP + Reality (Xray) | 8443/tcp |
+| Trojan + TLS | 2053/tcp |
+| VLESS + WebSocket + TLS | 2083/tcp |
+| VLESS + gRPC + TLS | 2087/tcp |
+| VMess + HTTPUpgrade + TLS | 2096/tcp |
+| AnyTLS | 8880/tcp |
+| Shadowsocks 2022 | 8388/tcp+udp |
+| Hysteria 2 + Salamander, port hopping 20000–40000 | 443/udp |
+| TUIC v5 (BBR) | 8444/udp |
+
+Every TLS protocol uses a real Let's Encrypt certificate (for the machine's
+`<ip>.sslip.io` name unless `DOMAIN` is set), so the app verifies the server
+like any HTTPS site; no link is "insecure". All ten links were checked end to
+end against the app's own parser and cores.
+
+## Setting one up
+
+1. A Linux machine with a public IPv4 address, Ubuntu 22.04 or 24.04,
+   x86-64 or ARM. Oracle Cloud's *Always Free* tier gives up to four ARM
+   cores and 24 GB in total at no cost; creating the account needs the
+   owner's identity and a card for verification.
+2. In the cloud's firewall (Oracle: *Networking → Virtual cloud networks →
+   the subnet's security list*), allow inbound TCP 80, 443, 2053, 2083, 2087,
+   2096, 8388, 8443, 8880 and UDP 443, 8388, 8444, 20000–40000.
+3. On the machine, as root:
+   ```sh
+   curl -fsSL https://raw.githubusercontent.com/cezomagoanlace29861-jpg/vp/main/deploy/server/install.sh | bash
+   ```
+   It installs sing-box and Xray, makes the keys (kept in
+   `/etc/albatross/secrets.env`, so running it again keeps the links),
+   gets the certificate, opens the machine's own firewall, turns on BBR and
+   starts both cores as services. The links end up in
+   `/root/albatross-links.txt`.
+4. Add the links to the app: paste them into the repository secret
+   `OWN_SERVERS`, one per line. The collector then publishes them for the
+   apps, encrypted, so public collectors do not pick them up and overload
+   them.

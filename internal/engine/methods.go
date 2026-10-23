@@ -70,7 +70,7 @@ func (e *Engine) refreshWarp() {
 	for _, n := range due {
 		byNode[n] = candidate{key: node.Key64(n.Key()), link: n.Link(), source: -1, node: n}
 	}
-	t := *e.tester
+	t := e.newTester()
 	t.Batch(e.ctx, "methods", due, func(r tester.Result) {
 		c := byNode[r.Node]
 		if r.OK {
@@ -83,7 +83,7 @@ func (e *Engine) refreshWarp() {
 				s.Source = "warp-plus"
 			}
 			e.mu.Unlock()
-			e.logf("info", "روش %s کار می‌کند (%d میلی‌ثانیه).", r.Node.Name, r.Delay/time.Millisecond)
+			e.logf("info", "Method %s works (%d ms).", r.Node.Name, r.Delay/time.Millisecond)
 		} else {
 			e.recordFail(c, r.Err)
 		}

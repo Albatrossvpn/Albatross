@@ -26,6 +26,7 @@ type Entry struct {
 	off      int64
 	size     uint32
 	Seen     uint32 // refresh cycle that last saw it in a source
+	SeenAt   uint32 // unix minutes it was last seen in a source
 	LastTest uint32 // unix minutes
 	Source   uint16 // index of the best-scoring source that listed it
 	Proto    uint8
@@ -33,6 +34,7 @@ type Entry struct {
 	State    uint8
 	Fails    uint8
 	Pop      uint8 // number of sources listing it, saturating
+	Style    uint8 // node.Style
 	Hint     [2]byte
 	Flags    uint8
 }
@@ -104,6 +106,7 @@ func (p *Pool) Add(e Entry, link string, sourceScore func(uint16) float64) bool 
 	defer p.mu.Unlock()
 	if i, ok := p.index[e.Key]; ok {
 		cur := &p.entries[i]
+		cur.SeenAt = Minutes(time.Now())
 		if cur.Seen != p.cycle {
 			cur.Seen = p.cycle
 			cur.Pop = 1
@@ -128,6 +131,7 @@ func (p *Pool) Add(e Entry, link string, sourceScore func(uint16) float64) bool 
 	e.size = uint32(n)
 	p.size += int64(n) + 1
 	e.Seen = p.cycle
+	e.SeenAt = Minutes(time.Now())
 	e.Pop = 1
 	p.index[e.Key] = int32(len(p.entries))
 	p.entries = append(p.entries, e)
@@ -206,15 +210,16 @@ func (p *Pool) Stats() (total, untested, dead, ok int) {
 	return len(p.entries), untested, dead, ok
 }
 
-// Compact drops candidates that no source has listed for keepCycles
-// cycles (unless they are known to work) and rewrites the file.
-func (p *Pool) Compact(keepCycles uint32) error {
+// Compact drops candidates that no source has listed for the keep
+// duration (unless they are known to work) and rewrites the file.
+func (p *Pool) Compact(keep time.Duration) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	cutoff := Minutes(time.Now().Add(-keep))
 	stale := 0
 	for i := range p.entries {
 		e := &p.entries[i]
-		if e.State != StateOK && p.cycle-e.Seen >= keepCycles {
+		if e.State != StateOK && e.SeenAt < cutoff {
 			stale++
 		}
 	}
@@ -233,7 +238,7 @@ func (p *Pool) Compact(keepCycles uint32) error {
 	var size int64
 	for i := range p.entries {
 		e := p.entries[i]
-		if e.State != StateOK && p.cycle-e.Seen >= keepCycles {
+		if e.State != StateOK && e.SeenAt < cutoff {
 			continue
 		}
 		buf := make([]byte, e.size)
