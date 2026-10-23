@@ -1,0 +1,119 @@
+name: Build Windows x64
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tor_version:
+        description: "Tor Browser release whose Tor Expert Bundle to bundle (empty = latest stable)"
+        required: false
+
+permissions:
+  contents: write
+
+env:
+  WINTUN_VERSION: "0.14.1"
+  WINTUN_SHA256: "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51"
+  # Tor Browser Developers signing key, used to sign the Tor Expert Bundle.
+  TOR_SIGNING_KEY: "EF6E286DDA85EA2A4BA7DE684E2C6E8793298290"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Vet
+        run: |
+          go vet ./...
+          GOOS=windows GOARCH=amd64 go vet ./...
+
+      - name: Version
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="0.1.0-${GITHUB_SHA::7}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Build Orbot.exe
+        env:
+          GOOS: windows
+          GOARCH: amd64
+          CGO_ENABLED: "0"
+        run: |
+          go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --arch amd64
+          go build -trimpath -ldflags "-H windowsgui -s -w -X main.version=${{ steps.ver.outputs.version }}" -o dist/Orbot.exe .
+
+      - name: Download Tor Expert Bundle
+        run: |
+          set -euo pipefail
+          V="${{ github.event.inputs.tor_version }}"
+          if [ -z "$V" ]; then
+            V=$(curl -fsSL https://aus1.torproject.org/torbrowser/update_3/release/downloads.json | jq -r .version)
+          fi
+          echo "Tor Browser release: $V"
+          base="https://dist.torproject.org/torbrowser/$V"
+          f="tor-expert-bundle-windows-x86_64-$V.tar.gz"
+          mkdir -p dl && cd dl
+          curl -fsSLO "$base/$f"
+          curl -fsSLO "$base/$f.asc"
+          gpg --batch --keyserver hkps://keys.openpgp.org --recv-keys "$TOR_SIGNING_KEY"
+          gpg --batch --verify "$f.asc" "$f"
+          mkdir -p tor-bundle && tar -xzf "$f" -C tor-bundle
+          echo "TOR_BUNDLE_VERSION=$V" >> "$GITHUB_ENV"
+          find tor-bundle -maxdepth 3 | sort
+
+      - name: Download wintun
+        run: |
+          set -euo pipefail
+          cd dl
+          curl -fsSL -o wintun.zip "https://www.wintun.net/builds/wintun-${WINTUN_VERSION}.zip"
+          echo "${WINTUN_SHA256}  wintun.zip" | sha256sum -c -
+          unzip -q wintun.zip
+
+      - name: Assemble package
+        run: |
+          set -euo pipefail
+          P=dist/Orbot-Windows-x64
+          mkdir -p "$P/licenses"
+          mv dist/Orbot.exe "$P/"
+          cp -r dl/tor-bundle/. "$P/"
+          cp dl/wintun/bin/amd64/wintun.dll "$P/"
+          cp dl/wintun/LICENSE.txt "$P/licenses/wintun-LICENSE.txt"
+          cp LICENSE "$P/licenses/Orbot-Windows-LICENSE.txt"
+          cp packaging/README-fa-en.txt "$P/README.txt"
+          echo "Tor Expert Bundle: $TOR_BUNDLE_VERSION" > "$P/VERSIONS.txt"
+          echo "wintun: $WINTUN_VERSION" >> "$P/VERSIONS.txt"
+          echo "Orbot for Windows: ${{ steps.ver.outputs.version }}" >> "$P/VERSIONS.txt"
+          # The app expects these files; fail the build if the bundle layout changes.
+          for f in tor/tor.exe tor/pluggable_transports/lyrebird.exe tor/pluggable_transports/snowflake-client.exe data/geoip data/geoip6 wintun.dll; do
+            test -f "$P/$f" || { echo "missing $f"; exit 1; }
+          done
+          (cd dist && zip -qr "Orbot-Windows-x64-${{ steps.ver.outputs.version }}.zip" Orbot-Windows-x64)
+          ls -la dist
+
+      - name: Build installer
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q nsis
+          makensis -V2 -DVERSION="${{ steps.ver.outputs.version }}" -DSRC="$PWD/dist/Orbot-Windows-x64" -DOUT="$PWD/dist/Orbot-Windows-x64-${{ steps.ver.outputs.version }}-setup.exe" packaging/installer.nsi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Orbot-Windows-x64-${{ steps.ver.outputs.version }}
+          path: |
+            dist/*.zip
+            dist/*-setup.exe
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.zip
+            dist/*-setup.exe

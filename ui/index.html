@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orbot</title>
+<style>
+  :root {
+    --bg: #1b1030; --card: #2a1a47; --card2: #33215a; --text: #f3eefc; --muted: #b9a9d6;
+    --accent: #a557ff; --accent2: #7d4cdb; --on: #45d483; --warn: #ffb547; --err: #ff6b6b;
+    --border: #4a3478;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", Tahoma, "Vazirmatn", sans-serif; font-size: 14px; }
+  body { padding: 16px; min-height: 100vh; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  header h1 { font-size: 20px; margin: 0; letter-spacing: .5px; }
+  .lang { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+  .hero { text-align: center; padding: 16px 0 8px; }
+  .onion { width: 170px; height: 170px; border-radius: 50%; border: none; cursor: pointer;
+    background: radial-gradient(circle at 50% 40%, #3d2669, #22143d); box-shadow: 0 0 0 6px #2e1d4e, 0 10px 30px rgba(0,0,0,.4);
+    display: inline-flex; align-items: center; justify-content: center; transition: box-shadow .3s; }
+  .onion svg { width: 110px; height: 110px; }
+  .onion.on { box-shadow: 0 0 0 6px var(--on), 0 0 40px rgba(69,212,131,.35); }
+  .onion.starting { animation: pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 6px var(--accent2); } 50% { box-shadow: 0 0 0 12px var(--accent); } }
+  .state { font-size: 18px; font-weight: 600; margin-top: 14px; }
+  .sub { color: var(--muted); margin-top: 4px; min-height: 18px; font-size: 13px; }
+  .bar { height: 6px; background: var(--card2); border-radius: 3px; overflow: hidden; margin: 12px 24px 0; }
+  .bar > div { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent2), var(--accent)); transition: width .4s; }
+  .btn { display: block; width: 100%; padding: 12px; border-radius: 12px; border: none; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 12px; }
+  .primary { background: var(--accent); color: white; }
+  .primary.stop { background: #5a3d8a; }
+  .ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  .row { display: flex; gap: 8px; }
+  .row .btn { flex: 1; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-top: 14px; }
+  .card h2 { font-size: 14px; margin: 0 0 10px; color: var(--muted); font-weight: 600; }
+  .opts { display: grid; gap: 8px; }
+  .opt { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border-radius: 10px; background: var(--card2); cursor: pointer; border: 1px solid transparent; }
+  .opt.sel { border-color: var(--accent); }
+  .opt input { margin-top: 3px; accent-color: var(--accent); }
+  .opt b { display: block; }
+  .opt small { color: var(--muted); }
+  textarea, select, input[type=number] { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-family: Consolas, monospace; font-size: 12px; }
+  textarea { min-height: 90px; direction: ltr; text-align: left; }
+  select { font-family: inherit; font-size: 14px; }
+  label.f { display: block; margin: 10px 0 4px; color: var(--muted); font-size: 12px; }
+  .ports { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .alert { border-radius: 10px; padding: 10px; margin-top: 12px; font-size: 13px; display: none; }
+  .alert.show { display: block; }
+  .alert.err { background: rgba(255,107,107,.15); border: 1px solid var(--err); }
+  .alert.warn { background: rgba(255,181,71,.12); border: 1px solid var(--warn); }
+  .info { font-family: Consolas, monospace; direction: ltr; text-align: left; color: var(--muted); font-size: 12px; margin-top: 8px; }
+  details summary { cursor: pointer; color: var(--muted); }
+  pre#log { direction: ltr; text-align: left; background: #120a22; border-radius: 8px; padding: 8px; max-height: 260px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+  .hidden { display: none !important; }
+  footer { text-align: center; color: var(--muted); font-size: 11px; margin: 18px 0 4px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Orbot</h1>
+  <button class="lang" id="langBtn">English</button>
+</header>
+
+<div class="alert err" id="missing"></div>
+
+<section class="hero">
+  <button class="onion" id="onion" aria-label="connect">
+    <svg viewBox="0 0 100 100" aria-hidden="true">
+      <path d="M50 8 C46 18 40 22 40 22 C52 20 56 12 50 8Z" fill="#7ed957"/>
+      <ellipse cx="50" cy="60" rx="34" ry="34" fill="#7d4cdb"/>
+      <ellipse cx="50" cy="60" rx="25" ry="31" fill="#a557ff"/>
+      <ellipse cx="50" cy="60" rx="15" ry="27" fill="#c99bff"/>
+      <ellipse cx="50" cy="60" rx="6" ry="22" fill="#f3e6ff"/>
+    </svg>
+  </button>
+  <div class="state" id="state">…</div>
+  <div class="sub" id="summary"></div>
+  <div class="bar"><div id="bar"></div></div>
+</section>
+
+<button class="btn primary" id="mainBtn"></button>
+<div class="row" id="onRow">
+  <button class="btn ghost" id="newnymBtn"></button>
+</div>
+<div class="info" id="ports"></div>
+
+<div class="alert err" id="error"></div>
+<div class="alert warn" id="adminBox">
+  <div id="adminText"></div>
+  <button class="btn primary" id="elevateBtn"></button>
+</div>
+
+<div class="card" id="modeCard">
+  <h2 data-t="modeTitle"></h2>
+  <div class="opts" id="modeOpts"></div>
+</div>
+
+<div class="card" id="bridgeCard">
+  <h2 data-t="bridgeTitle"></h2>
+  <div class="opts" id="bridgeOpts"></div>
+  <div id="customBox" class="hidden">
+    <label class="f" data-t="customLabel"></label>
+    <textarea id="custom" spellcheck="false" placeholder="obfs4 1.2.3.4:443 FINGERPRINT cert=... iat-mode=0&#10;webtunnel [2001:db8::1]:443 FINGERPRINT url=https://example.com/path ver=0.0.1"></textarea>
+    <small class="sub" data-t="customHelp"></small>
+  </div>
+</div>
+
+<div class="card">
+  <details>
+    <summary data-t="advanced"></summary>
+    <label class="f" data-t="exitLabel"></label>
+    <select id="exit"></select>
+    <label class="f" data-t="portsLabel"></label>
+    <div class="ports">
+      <div><small>SOCKS</small><input type="number" id="socksPort" min="1" max="65535"></div>
+      <div><small>HTTP</small><input type="number" id="httpPort" min="1" max="65535"></div>
+      <div><small>DNS</small><input type="number" id="dnsPort" min="1" max="65535"></div>
+    </div>
+  </details>
+</div>
+
+<div class="card">
+  <details id="logDetails">
+    <summary data-t="logs"></summary>
+    <pre id="log"></pre>
+  </details>
+</div>
+
+<button class="btn ghost" id="quitBtn"></button>
+<footer><span id="ver"></span> · <span data-t="footer"></span></footer>
+
+<script>
+const token = new URLSearchParams(location.search).get('t') || '';
+const T = {
+  fa: {
+    off: 'قطع', starting: 'در حال اتصال…', on: 'متصل به Tor', stopping: 'در حال قطع…', error: 'خطا',
+    connect: 'اتصال', disconnect: 'قطع اتصال', newnym: 'هویت جدید (مسیر تازه)',
+    modeTitle: 'حالت اتصال', bridgeTitle: 'پل‌ها (برای عبور از فیلترینگ)',
+    m_proxy: 'پروکسی سیستم', m_proxy_d: 'مرورگرها و بیشتر برنامه‌های ویندوز از Tor عبور می‌کنند. نیاز به دسترسی ادمین ندارد.',
+    m_vpn: 'VPN کامل', m_vpn_d: 'همه‌ی ترافیک سیستم (TCP و DNS) از Tor عبور می‌کند. نیاز به اجرای ادمین دارد.',
+    m_socks: 'فقط پورت‌های محلی', m_socks_d: 'فقط SOCKS5 و HTTP را روی 127.0.0.1 باز می‌کند تا خودتان برنامه‌ها را تنظیم کنید.',
+    b_none: 'اتصال مستقیم', b_none_d: 'بدون پل. اگر Tor در شبکه‌ی شما مسدود است کار نمی‌کند.',
+    b_snowflake: 'Snowflake', b_snowflake_d: 'ترافیک شبیه تماس ویدیویی است. معمولاً در ایران بهترین گزینه.',
+    b_obfs4: 'obfs4 (داخلی)', b_obfs4_d: 'پل‌های مبهم‌سازی‌شده‌ی پیش‌فرض Orbot.',
+    b_meek: 'meek', b_meek_d: 'از طریق CDN؛ کند ولی سخت‌تر مسدود می‌شود.',
+    b_custom: 'پل‌های سفارشی', b_custom_d: 'obfs4 یا webtunnel از ربات تلگرام @GetBridgesBot یا bridges.torproject.org.',
+    customLabel: 'هر پل در یک خط:', customHelp: 'برای دریافت پل: ایمیل به bridges@torproject.org یا ربات تلگرام @GetBridgesBot',
+    advanced: 'تنظیمات پیشرفته', exitLabel: 'کشور خروجی', anyCountry: 'هر کشوری (پیشنهادی)', portsLabel: 'پورت‌ها',
+    logs: 'گزارش‌ها (Log)', quit: 'خروج کامل', footer: 'بر پایه‌ی Tor و Orbot',
+    needAdmin: 'حالت VPN باید با دسترسی ادمین اجرا شود.', elevate: 'اجرای دوباره به‌عنوان ادمین',
+    lockedHint: 'برای تغییر تنظیمات ابتدا اتصال را قطع کنید.',
+    socksAt: 'SOCKS5', httpAt: 'HTTP',
+  },
+  en: {
+    off: 'Disconnected', starting: 'Connecting…', on: 'Connected to Tor', stopping: 'Disconnecting…', error: 'Error',
+    connect: 'Connect', disconnect: 'Disconnect', newnym: 'New identity (fresh circuits)',
+    modeTitle: 'Connection mode', bridgeTitle: 'Bridges (to get around censorship)',
+    m_proxy: 'System proxy', m_proxy_d: 'Browsers and most Windows apps go through Tor. No admin needed.',
+    m_vpn: 'Full VPN', m_vpn_d: 'All system traffic (TCP and DNS) goes through Tor. Requires admin.',
+    m_socks: 'Local ports only', m_socks_d: 'Only opens SOCKS5 and HTTP on 127.0.0.1 so you can configure apps yourself.',
+    b_none: 'Direct', b_none_d: 'No bridge. Will not work where Tor is blocked.',
+    b_snowflake: 'Snowflake', b_snowflake_d: 'Looks like a video call. Often the best choice in Iran.',
+    b_obfs4: 'obfs4 (built-in)', b_obfs4_d: 'Orbot’s default obfuscated bridges.',
+    b_meek: 'meek', b_meek_d: 'Goes through a CDN; slow but hard to block.',
+    b_custom: 'Custom bridges', b_custom_d: 'obfs4 or webtunnel lines from @GetBridgesBot or bridges.torproject.org.',
+    customLabel: 'One bridge per line:', customHelp: 'Get bridges: email bridges@torproject.org or Telegram @GetBridgesBot',
+    advanced: 'Advanced settings', exitLabel: 'Exit country', anyCountry: 'Any country (recommended)', portsLabel: 'Ports',
+    logs: 'Logs', quit: 'Quit', footer: 'Built on Tor and Orbot',
+    needAdmin: 'VPN mode must run as administrator.', elevate: 'Restart as administrator',
+    lockedHint: 'Disconnect first to change settings.',
+    socksAt: 'SOCKS5', httpAt: 'HTTP',
+  }
+};
+const COUNTRIES = ['at','au','ca','ch','cz','de','dk','es','fi','fr','gb','hk','it','jp','lu','nl','no','pl','ro','se','sg','us'];
+const $ = id => document.getElementById(id);
+let settings = null, status = null, lang = 'fa', logSeq = 0;
+
+async function call(path, method = 'GET', body) {
+  const r = await fetch(path, { method, headers: { 'X-Orbot-Token': token, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const t = k => (T[lang] && T[lang][k]) || T.en[k] || k;
+
+function renderOpts(el, items, current, onPick) {
+  el.innerHTML = '';
+  for (const [val, key] of items) {
+    const d = document.createElement('label');
+    d.className = 'opt' + (val === current ? ' sel' : '');
+    d.innerHTML = `<input type="radio" ${val === current ? 'checked' : ''}><div><b></b><small></small></div>`;
+    d.querySelector('b').textContent = t(key);
+    d.querySelector('small').textContent = t(key + '_d');
+    d.onclick = (e) => { e.preventDefault(); if (!locked()) onPick(val); };
+    el.appendChild(d);
+  }
+}
+const locked = () => status && status.tor && status.tor.state !== 'off' && status.tor.state !== 'error';
+
+function renderStatic() {
+  document.documentElement.lang = lang;
+  document.documentElement.dir = lang === 'fa' ? 'rtl' : 'ltr';
+  $('langBtn').textContent = lang === 'fa' ? 'English' : 'فارسی';
+  document.querySelectorAll('[data-t]').forEach(e => e.textContent = t(e.dataset.t));
+  $('newnymBtn').textContent = t('newnym');
+  $('quitBtn').textContent = t('quit');
+  $('elevateBtn').textContent = t('elevate');
+  $('adminText').textContent = t('needAdmin');
+  const ex = $('exit');
+  ex.innerHTML = `<option value="">${t('anyCountry')}</option>` +
+    COUNTRIES.map(c => `<option value="${c}">${c.toUpperCase()}</option>`).join('');
+  if (settings) ex.value = settings.exitCountry || '';
+  renderSettings();
+}
+
+function renderSettings() {
+  if (!settings) return;
+  renderOpts($('modeOpts'), [['proxy','m_proxy'],['vpn','m_vpn'],['socks','m_socks']], settings.mode, v => save({ mode: v }));
+  renderOpts($('bridgeOpts'), [['none','b_none'],['snowflake','b_snowflake'],['obfs4','b_obfs4'],['meek','b_meek'],['custom','b_custom']],
+    settings.bridge, v => save({ bridge: v }));
+  $('customBox').classList.toggle('hidden', settings.bridge !== 'custom');
+  if (document.activeElement !== $('custom')) $('custom').value = settings.customBridges || '';
+  $('exit').value = settings.exitCountry || '';
+  for (const k of ['socksPort','httpPort','dnsPort']) if (document.activeElement !== $(k)) $(k).value = settings[k];
+  const lk = locked();
+  for (const id of ['custom','exit','socksPort','httpPort','dnsPort']) $(id).disabled = lk;
+  $('modeCard').title = $('bridgeCard').title = lk ? t('lockedHint') : '';
+  $('modeCard').style.opacity = $('bridgeCard').style.opacity = lk ? .6 : 1;
+}
+
+async function save(patch) {
+  settings = Object.assign({}, settings, patch);
+  renderSettings();
+  try { await call('/api/settings', 'POST', settings); } catch (e) { showError(e.message); }
+}
+
+function showError(msg) {
+  $('error').textContent = msg || '';
+  $('error').classList.toggle('show', !!msg);
+}
+
+function renderStatus() {
+  if (!status) return;
+  const st = status.tor.state;
+  $('state').textContent = t(st);
+  $('summary').textContent = st === 'starting' ? `${status.tor.progress}% · ${status.tor.summary || ''}` : '';
+  $('bar').style.width = (st === 'on' ? 100 : st === 'starting' ? status.tor.progress : 0) + '%';
+  $('onion').className = 'onion' + (st === 'on' ? ' on' : st === 'starting' ? ' starting' : '');
+  const busy = st === 'starting' || st === 'on';
+  $('mainBtn').textContent = busy ? t('disconnect') : t('connect');
+  $('mainBtn').className = 'btn primary' + (busy ? ' stop' : '');
+  $('mainBtn').disabled = st === 'stopping' || !!status.missing;
+  $('onRow').classList.toggle('hidden', st !== 'on');
+  $('ports').textContent = busy ? [status.socksAddr && `${t('socksAt')} ${status.socksAddr}`, status.httpAddr && `${t('httpAt')} ${status.httpAddr}`].filter(Boolean).join('   ') : '';
+  $('missing').textContent = status.missing || '';
+  $('missing').classList.toggle('show', !!status.missing);
+  if (status.error && status.error !== 'need_admin') showError(status.error);
+  renderSettings();
+}
+
+async function toggle() {
+  showError('');
+  $('adminBox').classList.remove('show');
+  const st = status && status.tor.state;
+  try {
+    if (st === 'starting' || st === 'on') await call('/api/disconnect', 'POST');
+    else await call('/api/connect', 'POST');
+  } catch (e) {
+    if (e.message === 'need_admin') $('adminBox').classList.add('show');
+    else showError(e.message);
+  }
+  poll();
+}
+
+async function poll() {
+  try { status = await call('/api/status'); renderStatus(); } catch (e) {}
+}
+async function pollLogs() {
+  try {
+    const r = await call('/api/logs?since=' + logSeq);
+    logSeq = r.seq;
+    if (r.lines && r.lines.length) {
+      const pre = $('log');
+      const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+      pre.textContent += r.lines.join('\n') + '\n';
+      if (pre.textContent.length > 120000) pre.textContent = pre.textContent.slice(-100000);
+      if (atBottom) pre.scrollTop = pre.scrollHeight;
+    }
+  } catch (e) {}
+}
+
+$('onion').onclick = toggle;
+$('mainBtn').onclick = toggle;
+$('newnymBtn').onclick = async () => { try { await call('/api/newnym', 'POST'); } catch (e) { showError(e.message); } };
+$('elevateBtn').onclick = async () => { try { await call('/api/elevate', 'POST'); } catch (e) { showError(e.message); } };
+$('quitBtn').onclick = async () => { try { await call('/api/quit', 'POST'); } catch (e) {} window.close(); };
+$('langBtn').onclick = () => { lang = lang === 'fa' ? 'en' : 'fa'; save({ lang }); renderStatic(); renderStatus(); };
+$('custom').onchange = () => save({ customBridges: $('custom').value });
+$('exit').onchange = () => save({ exitCountry: $('exit').value });
+for (const k of ['socksPort','httpPort','dnsPort']) $(k).onchange = () => save({ [k]: parseInt($(k).value, 10) || 0 });
+
+(async function init() {
+  try {
+    settings = await call('/api/settings');
+    lang = settings.lang || 'fa';
+    const info = await call('/api/info');
+    $('ver').textContent = 'v' + info.version;
+  } catch (e) { showError(e.message); }
+  renderStatic();
+  await poll();
+  pollLogs();
+  setInterval(poll, 1000);
+  setInterval(pollLogs, 1500);
+})();
+</script>
+</body>
+</html>
