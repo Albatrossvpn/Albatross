@@ -37,6 +37,88 @@ import (
 	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
 )
 
+// hotSize is how many servers hot.txt holds: enough for every phone to find
+// a few that work on its network, small enough to fetch in a moment.
+const hotSize = 300
+
+// newSize bounds new.txt: the latest additions to fresh.txt, which apps
+// fetch often instead of downloading all of fresh.txt again.
+const newSize = 4000
+
+// newList is fresh minus what the last run published, newest first, with
+// the last new.txt's servers that are still listed after them.
+func newList(fresh, prevFresh, prevNew []string, max int) []string {
+	old := map[string]bool{}
+	for _, l := range prevFresh {
+		old[l] = true
+	}
+	was := map[string]bool{}
+	for _, l := range prevNew {
+		was[l] = true
+	}
+	var added, kept []string
+	for _, l := range fresh {
+		switch {
+		case was[l]:
+			kept = append(kept, l)
+		case !old[l]:
+			added = append(added, l)
+		}
+	}
+	out := append(added, kept...)
+	return out[:min(len(out), max)]
+}
+
+func readLines(path string) []string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(b))
+}
+
+// refreshHot re-tests the servers listed in path (the last hot.txt and the
+// top of fresh.txt) and writes the ones that still work to hot.txt. It runs
+// between full collections so the list the apps try first stays current.
+func refreshHot(path, out string, n int) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var list []*entry
+	seen := map[string]bool{}
+	for _, l := range strings.Fields(string(b)) {
+		nd, err := node.ParseLink(l)
+		if err != nil || seen[nd.Key()] {
+			continue
+		}
+		seen[nd.Key()] = true
+		e := &entry{link: l, proto: nd.Proto}
+		if !nd.UDPBased() {
+			e.endpoint = nd.Endpoint()
+		}
+		list = append(list, e)
+	}
+	passed, _ := realTest(list, n)
+	sort.SliceStable(list, func(i, j int) bool {
+		di, oki := passed[list[i]]
+		dj, okj := passed[list[j]]
+		if oki != okj {
+			return oki
+		}
+		return di < dj
+	})
+	hot := hotList(list, passed, hotSize)
+	if len(hot) == 0 {
+		log.Print("nothing passed; hot.txt left as it was")
+		return
+	}
+	if err := os.WriteFile(filepath.Join(out, "hot.txt"), []byte(strings.Join(hot, "\n")+"\n"), 0o644); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("wrote %d hot servers", len(hot))
+}
+
 type entry struct {
 	link     string
 	fresh    bool
@@ -79,7 +161,13 @@ func main() {
 	maxFresh := flag.Int("max-fresh", 60000, "most servers in fresh.txt; the rest go to the other files")
 	limit := flag.Int("limit", 0, "use only the first N sources (for tests)")
 	real := flag.Int("real", 8000, "connect through this many of the fresh servers with the cores in SING_BOX and XRAY; 0 skips")
+	prev := flag.String("prev", "", "directory holding the last published lists, for new.txt")
+	hotFrom := flag.String("hot-from", "", "only rewrite hot.txt in -out from the servers listed in this file that pass the real test")
 	flag.Parse()
+	if *hotFrom != "" {
+		refreshHot(*hotFrom, *out, *real)
+		return
+	}
 
 	srcs := sources.Collected()
 	if *limit > 0 && *limit < len(srcs) {
@@ -230,6 +318,10 @@ func main() {
 		m.Files[name] = len(links)
 	}
 	write("fresh.txt", fresh)
+	write("hot.txt", hotList(freshE, passed, hotSize))
+	if *prev != "" {
+		write("new.txt", newList(fresh, readLines(filepath.Join(*prev, "fresh.txt")), readLines(filepath.Join(*prev, "new.txt")), newSize))
+	}
 	for i := range *shards {
 		lo, hi := len(rest)*i / *shards, len(rest)*(i+1) / *shards
 		write(fmt.Sprintf("all-%d.txt", i+1), rest[lo:hi])

@@ -87,3 +87,24 @@ func TestLearnPortAndLife(t *testing.T) {
 		t.Fatalf("life = %v %v", d, ok)
 	}
 }
+
+func TestBlockedNetworksSink(t *testing.T) {
+	var l netLearn
+	l.use("op1")
+	for i := 0; i < 40; i++ {
+		l.record(1, 0, i%10 == 0)
+	}
+	for i := 0; i < 5; i++ {
+		l.recordNet(7, false)
+		l.recordNet(9, true)
+	}
+	v := l.snapshot()
+	if v.netBonus(7) >= -20 || v.netBonus(9) <= 20 || v.netBonus(8) != 0 {
+		t.Fatalf("blocked %v, open %v, unknown %v", v.netBonus(7), v.netBonus(9), v.netBonus(8))
+	}
+	// Another operator starts without this one's blocks.
+	l.use("op2")
+	if l.snapshot().netBonus(7) != 0 {
+		t.Fatal("blocks leaked to another network")
+	}
+}
