@@ -79,6 +79,7 @@ type member struct {
 	checked time.Time
 	speed   float64 // download bytes per second at the last speed test
 	speedAt time.Time
+	soaked  int8 // endurance check: 1 passed, -1 failed, 0 not run
 }
 
 func (c *connection) ready() bool {

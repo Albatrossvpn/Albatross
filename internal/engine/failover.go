@@ -250,6 +250,8 @@ func (c *connection) backups(skip map[*member]bool) []*member {
 	}
 	rank := func(m *member) int {
 		switch {
+		case m.soaked < 0:
+			return 3
 		case !m.speedKnown():
 			return 1
 		case m.speed >= usable:
@@ -346,6 +348,7 @@ func (e *Engine) race(ctx context.Context, c *connection, list []*member, timeou
 // and of its backups, and whether the group should be refreshed.
 func (e *Engine) monitor(ctx context.Context, c *connection) {
 	go c.streamTraffic(ctx)
+	go e.soakBackups(ctx, c)
 	if e.acct != nil {
 		go e.meter(ctx, c)
 	}
