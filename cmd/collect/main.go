@@ -8,6 +8,7 @@
 //	fresh.txt       servers from tested lists, Telegram and VPN Gate
 //	all-1.txt ...   everything else, best first, split into -shards files
 //	meta.json       when it ran and how many servers each file holds
+//	tor.json        Tor's current bridges (built-in and recommended for Iran)
 //
 // Servers whose address does not answer at all are left out (UDP-based
 // ones cannot be checked that way and are kept).
@@ -227,6 +228,17 @@ func main() {
 			log.Fatal(err)
 		}
 		m.Files["own.bin"] = len(strings.Fields(own))
+	}
+	if br, err := torBridges(ctx, &http.Client{Timeout: 90 * time.Second}); err != nil {
+		log.Printf("tor bridges: %v", err)
+	} else {
+		b, _ := json.Marshal(br)
+		if err := os.WriteFile(filepath.Join(*out, "tor.json"), b, 0o644); err != nil {
+			log.Fatal(err)
+		}
+		for _, v := range br {
+			m.Files["tor.json"] += len(v)
+		}
 	}
 	b, _ := json.MarshalIndent(m, "", "  ")
 	if err := os.WriteFile(filepath.Join(*out, "meta.json"), b, 0o644); err != nil {

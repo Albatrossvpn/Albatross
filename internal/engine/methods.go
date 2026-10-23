@@ -1,11 +1,14 @@
 package engine
 
 import (
+	"context"
+
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/tester"
 )
 
@@ -32,7 +35,7 @@ var methodsTested = map[string]time.Time{}
 // start, so only a few run at a time, and the user's chosen country goes
 // first.
 func (e *Engine) refreshWarp() {
-	if e.bin.WarpPlus == "" {
+	if e.bin.WarpPlus == "" && e.bin.Tor == "" {
 		return
 	}
 	e.mu.Lock()
@@ -43,6 +46,9 @@ func (e *Engine) refreshWarp() {
 	var due []*node.Node
 	methodsMu.Lock()
 	for _, n := range methodNodes() {
+		if e.bin.WarpPlus == "" {
+			break
+		}
 		every := 3 * time.Hour
 		if searching || (target != "" && n.WPCountry == target) {
 			every = 30 * time.Minute
@@ -57,6 +63,20 @@ func (e *Engine) refreshWarp() {
 	})
 	if len(due) > 4 {
 		due = due[:4]
+	}
+	// Tor is the last resort and slow to start, so it is tried while
+	// nothing else connects and otherwise only now and then, outside the
+	// warp-plus turns.
+	if tor := node.WarpPlus("tor", ""); e.bin.Tor != "" {
+		every := 12 * time.Hour
+		if searching {
+			every = 30 * time.Minute
+		}
+		methodsMu.Lock()
+		if now.Sub(methodsTested[tor.Key()]) >= every {
+			due = append(due, tor)
+		}
+		methodsMu.Unlock()
 	}
 	if len(due) == 0 {
 		return
@@ -81,6 +101,9 @@ func (e *Engine) refreshWarp() {
 			e.mu.Lock()
 			if s := e.good[c.key]; s != nil {
 				s.Source = "warp-plus"
+				if r.Node.WPMode == "tor" {
+					s.Source = "tor"
+				}
 			}
 			e.mu.Unlock()
 			e.logf("info", "Method %s works (%d ms).", r.Node.Name, r.Delay/time.Millisecond)
@@ -88,4 +111,22 @@ func (e *Engine) refreshWarp() {
 			e.recordFail(c, r.Err)
 		}
 	})
+}
+
+// torSource is the collector's copy of Tor's current built-in bridges.
+var torSource = sources.Source{ID: "__tor__", Kind: sources.KindSubscription, URL: sources.CentralBase + "tor.json"}
+
+// torBridges returns the last fetched bridge list, fetching it when there
+// is none yet.
+func (e *Engine) torBridges() []byte {
+	if b, ok := e.fetcher.Cached(torSource); ok && time.Since(e.fetcher.CachedAt(torSource)) < 24*time.Hour {
+		return []byte(b)
+	}
+	ctx, cancel := context.WithTimeout(e.ctx, 30*time.Second)
+	defer cancel()
+	if res := e.fetcher.Fetch(ctx, torSource); res.Err == nil && res.Text != "" {
+		return []byte(res.Text)
+	}
+	b, _ := e.fetcher.Cached(torSource)
+	return []byte(b)
 }
