@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -189,7 +190,7 @@ func TestPickGroupStaysInCountry(t *testing.T) {
 		add(fmt.Sprintf("nl%d", i), "NL", 120+i)
 		add(fmt.Sprintf("de%d", i+2), "DE", 300+i)
 	}
-	group := e.pickGroup("", "", nil)
+	group := e.pickGroup("", "", nil, groupSize)
 	if len(group) != 6 {
 		t.Fatalf("want the 6 German servers, got %d", len(group))
 	}
@@ -204,11 +205,11 @@ func TestPickGroupStaysInCountry(t *testing.T) {
 	// When reconnecting, the group stays where it was even though another
 	// country now has the single fastest server.
 	add("fr1", "FR", 50)
-	if g := e.pickGroup("", "DE", nil); g[0].Country != "DE" {
+	if g := e.pickGroup("", "DE", nil, groupSize); g[0].Country != "DE" {
 		t.Fatalf("reconnect left the country: %s", g[0].Country)
 	}
 	// A country with too few servers is topped up from elsewhere.
-	if g := e.pickGroup("", "FR", nil); len(g) != groupSize || g[0].Name != "fr1" {
+	if g := e.pickGroup("", "FR", nil, groupSize); len(g) != groupSize || g[0].Name != "fr1" {
 		t.Fatalf("want fr1 plus backups from elsewhere, got %d starting with %s", len(g), g[0].Name)
 	}
 }
@@ -238,4 +239,29 @@ func waitFor(t *testing.T, limit time.Duration, ok func() bool, logs func() []Lo
 		t.Logf("%s %s", l.Level, l.Text)
 	}
 	t.Fatal("timed out waiting")
+}
+
+func TestReachableKeepsLiveServers(t *testing.T) {
+	old := tcpAnswers
+	defer func() { tcpAnswers = old }()
+	tcpAnswers = func(_ context.Context, addr string) bool { return strings.HasPrefix(addr, "live") }
+	srv := func(name string) *Server {
+		link := fmt.Sprintf("vless://b831381d-6324-4d53-ad4f-8cda48b30811@%s.example:443?security=tls&type=tcp#%s", name, name)
+		return &Server{Key: name, Link: link, Name: name}
+	}
+	e := &Engine{ctx: context.Background()}
+	list := []*Server{srv("dead"), srv("live1"), srv("live2")}
+	exclude := map[string]bool{}
+	got := e.reachable(list, 1, exclude)
+	if len(got) != 1 || got[0].Name != "live1" {
+		t.Fatalf("got %v", got)
+	}
+	if !exclude["dead"] || exclude["live2"] {
+		t.Fatalf("exclude = %v", exclude)
+	}
+	// When nothing answers the device is likely offline; the list stays.
+	exclude = map[string]bool{}
+	if got := e.reachable(list[:1], 8, exclude); len(got) != 1 || len(exclude) != 0 {
+		t.Fatalf("offline: got %v, exclude %v", got, exclude)
+	}
 }

@@ -29,6 +29,12 @@ const groupSize = 8
 // next time the connection is idle.
 const minReady = 3
 
+// connectWide is how many candidates a connection attempt looks at. On a
+// filtered network most servers that worked an hour ago are gone; a quick
+// TCP check of many at once finds the live ones in seconds, where testing
+// groups of groupSize one after another took a minute.
+const connectWide = 40
+
 type connection struct {
 	country     string // what the user asked for ("" = fastest anywhere)
 	home        string // country the group was built in; backups stay here
@@ -205,13 +211,13 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 		}
 		picks := pinned
 		if picks == nil {
-			picks = e.pickGroup(country, home, exclude)
+			picks = e.reachable(e.pickGroup(country, home, exclude, connectWide), groupSize, exclude)
 		}
-		if len(picks) == 0 && !triedRecent {
+		if len(picks) == 0 && pinned == nil && !triedRecent {
 			// Nothing fresh: try last week's servers once before waiting on
 			// the scan.
 			triedRecent = true
-			picks = e.recentServers(country, groupSize, exclude)
+			picks = e.reachable(e.recentServers(country, connectWide, exclude), groupSize, exclude)
 		}
 		if len(picks) == 0 {
 			if len(exclude) > 0 {
@@ -262,9 +268,9 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 // with backups from the same country. A fastest-anywhere group forms around
 // the best server's country (or home, when it already had one) and reaches
 // into other countries only when that country runs short.
-func (e *Engine) pickGroup(country, home string, exclude map[string]bool) []*Server {
+func (e *Engine) pickGroup(country, home string, exclude map[string]bool, size int) []*Server {
 	if country != "" {
-		return e.bestServers(country, groupSize, exclude)
+		return e.bestServers(country, size, exclude)
 	}
 	if home == "" {
 		best := e.bestServers("", 1, exclude)
@@ -273,7 +279,7 @@ func (e *Engine) pickGroup(country, home string, exclude map[string]bool) []*Ser
 		}
 		home = best[0].Country
 	}
-	group := e.bestServers(home, groupSize, exclude)
+	group := e.bestServers(home, size, exclude)
 	if len(group) >= minReady {
 		return group
 	}
@@ -284,7 +290,63 @@ func (e *Engine) pickGroup(country, home string, exclude map[string]bool) []*Ser
 	for _, s := range group {
 		skip[s.Key] = true
 	}
-	return append(group, e.bestServers("", groupSize-len(group), skip)...)
+	return append(group, e.bestServers("", size-len(group), skip)...)
+}
+
+// tcpAnswers reports whether addr accepts a TCP connection. Tests replace it.
+var tcpAnswers = func(ctx context.Context, addr string) bool {
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// reachable keeps the first n of list, in order, whose address accepts a
+// TCP connection within a few seconds, and adds the rest to exclude.
+// Servers on UDP cannot be checked this way and are kept.
+func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Server {
+	ok := make([]bool, len(list))
+	ctx, cancel := context.WithTimeout(e.ctx, 3*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	for i, s := range list {
+		nd := s.Node()
+		if nd == nil || nd.UDPBased() {
+			ok[i] = nd != nil
+			continue
+		}
+		wg.Add(1)
+		go func(i int, addr string) {
+			defer wg.Done()
+			ok[i] = tcpAnswers(ctx, addr)
+		}(i, nd.Endpoint())
+	}
+	wg.Wait()
+	var out []*Server
+	alive := 0
+	for i, s := range list {
+		if !ok[i] {
+			continue
+		}
+		alive++
+		if len(out) < n {
+			out = append(out, s)
+		}
+	}
+	if alive == 0 {
+		// Nothing answered: more likely this device's network than every
+		// server at once. Leave the list as it was.
+		return list[:min(n, len(list))]
+	}
+	for i, s := range list {
+		if !ok[i] {
+			exclude[s.Key] = true
+		}
+	}
+	return out
 }
 
 // bestServers picks the lowest-delay usable servers in a country.
