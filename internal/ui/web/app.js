@@ -349,7 +349,7 @@ document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("cli
 // ---------- Settings ----------
 
 let settingsBusy = false;
-const toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats", "allow_lan"];
+const toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats", "allow_lan", "warp_exit"];
 
 function fillSettings(st) {
   for (const k of toggles) $("set-" + k).checked = !!st[k];

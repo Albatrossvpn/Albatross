@@ -36,6 +36,7 @@ const minReady = 3
 const connectWide = 40
 
 type connection struct {
+	warp        bool   // the config holds the WARP exit (watchWarpExit)
 	country     string // what the user asked for ("" = fastest anywhere)
 	home        string // country the group was built in; backups stay here
 	pinned      bool   // the user picked this one server
@@ -543,6 +544,10 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
 		clashSecret: c.clashSecret, probeAddr: c.probeAddr, exe: e.opt.ExeName, localDNS: e.dns(), mobile: e.opt.Mobile,
 	}
+	if set.WarpExit {
+		opts.warp = e.warpExit()
+		c.warp = opts.warp != nil
+	}
 	build := core.BuildOptions{
 		Fragment:    set.Fragment == "on",
 		FragmentFor: func(n *node.Node) bool { return fragFor[n] },
@@ -794,6 +799,7 @@ type connOptions struct {
 	exe         string
 	localDNS    string
 	mobile      bool
+	warp        *warpID // run WARP through the server in use (Settings.WarpExit)
 }
 
 // connectConfig builds the sing-box config for a live connection.
@@ -886,9 +892,19 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 	// Sites that sign people out when their address changes keep one exit
 	// for the whole connection.
 	rules = append(rules, map[string]any{"domain_suffix": stickyDomains, "outbound": "sticky"})
+	final := "proxy"
+	if o.warp != nil {
+		// Traffic starts on the server alone; watchWarpExit moves it onto
+		// WARP once WARP answers through the server.
+		outbounds = append(outbounds, map[string]any{
+			"type": "selector", "tag": "exit", "outbounds": []string{"proxy", "warp-exit"}, "default": "proxy",
+			"interrupt_exist_connections": false,
+		})
+		final = "exit"
+	}
 	route := map[string]any{
 		"rules": rules,
-		"final": "proxy",
+		"final": final,
 		// Never on Android: see tester.Tester.Mobile.
 		"auto_detect_interface":   !o.mobile,
 		"default_domain_resolver": "local",
@@ -915,8 +931,12 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 			"clash_api": map[string]any{"external_controller": o.clashAddr, "secret": o.clashSecret},
 		},
 	}
-	if len(s.Endpoints) > 0 {
-		cfg["endpoints"] = s.Endpoints
+	eps := append([]any{}, s.Endpoints...)
+	if o.warp != nil {
+		eps = append(eps, o.warp.endpoint())
+	}
+	if len(eps) > 0 {
+		cfg["endpoints"] = eps
 	}
 	return cfg
 }

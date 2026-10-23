@@ -127,6 +127,15 @@ func (c *connection) test(ctx context.Context, m *member, timeout time.Duration)
 	return r.Delay, err == nil && r.Delay > 0, true
 }
 
+// testTag is test for any outbound or endpoint by tag.
+func (c *connection) testTag(ctx context.Context, tag string, timeout time.Duration) (delay int, ok bool) {
+	var r struct {
+		Delay int `json:"delay"`
+	}
+	_, err := c.api(ctx, http.MethodGet, "/proxies/"+url.PathEscape(tag)+"/delay?"+delayQuery(timeout), nil, &r, timeout+2*time.Second)
+	return r.Delay, err == nil && r.Delay > 0
+}
+
 // use makes m the member all new connections go through.
 func (c *connection) use(ctx context.Context, m *member) error {
 	if _, err := c.api(ctx, http.MethodPut, "/proxies/proxy", map[string]string{"name": m.tag}, nil, 3*time.Second); err != nil {
@@ -371,6 +380,7 @@ func (e *Engine) race(ctx context.Context, c *connection, list []*member, timeou
 func (e *Engine) monitor(ctx context.Context, c *connection) {
 	go c.streamTraffic(ctx)
 	go e.soakBackups(ctx, c)
+	go e.watchWarpExit(ctx, c)
 	if e.acct != nil {
 		go e.meter(ctx, c)
 	}
