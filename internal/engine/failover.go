@@ -141,6 +141,16 @@ func (c *connection) use(ctx context.Context, m *member) error {
 	return nil
 }
 
+// keep makes m the member stickyDomains go through.
+func (c *connection) keep(ctx context.Context, m *member) {
+	if _, err := c.api(ctx, http.MethodPut, "/proxies/sticky", map[string]string{"name": m.tag}, nil, 3*time.Second); err != nil {
+		return
+	}
+	c.mu.Lock()
+	c.sticky = m
+	c.mu.Unlock()
+}
+
 // closeOn closes the connections still going through tag, so apps waiting
 // on a dead server reconnect through the new one right away instead of
 // timing out.
@@ -594,9 +604,13 @@ func (e *Engine) failover(ctx context.Context, c *connection, dead *member) bool
 func (e *Engine) switched(ctx context.Context, c *connection, from, to *member) {
 	c.mu.Lock()
 	c.healthy = true
+	move := c.sticky == nil || c.sticky == from
 	c.mu.Unlock()
 	if ctx.Err() != nil {
 		return
+	}
+	if move {
+		c.keep(ctx, to)
 	}
 	e.setStatus(StatusConnected, connectedMessage(c))
 	e.logf("info", "Server %q dropped; switched at once to ready server %q in the same location.", from.server.Name, to.server.Name)
@@ -641,6 +655,12 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 	if _, ok := live[active.tag]; !ok {
 		c.poke()
 		return true
+	}
+	c.mu.Lock()
+	sticky := c.sticky
+	c.mu.Unlock()
+	if _, ok := live[sticky.tagOr(active)]; !ok {
+		c.keep(ctx, active)
 	}
 	e.mu.Lock()
 	auto := e.settings.AutoSwitch
@@ -955,4 +975,12 @@ func rate(bps float64) string {
 		return fmt.Sprintf("%.1f MB/s", bps/(1<<20))
 	}
 	return fmt.Sprintf("%.0f KB/s", bps/(1<<10))
+}
+
+// tagOr is m's tag, or other's when m is nil.
+func (m *member) tagOr(other *member) string {
+	if m == nil {
+		return other.tag + "\x00" // never live, so the caller moves it
+	}
+	return m.tag
 }
