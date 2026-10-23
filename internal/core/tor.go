@@ -143,7 +143,10 @@ func (r *Runtime) startTorLocked() error {
 	}
 	ready := make(chan struct{})
 	var once sync.Once
-	p, err := Start("tor", r.Bin.Tor, []string{"-f", path}, nil, func(l string) {
+	// The bundle's Linux and Android builds keep their libraries (libevent,
+	// OpenSSL) beside tor.
+	env := []string{"LD_LIBRARY_PATH=" + filepath.Dir(r.Bin.Tor)}
+	p, err := Start("tor", r.Bin.Tor, []string{"-f", path}, env, func(l string) {
 		if strings.Contains(l, torDoneMsg) {
 			once.Do(func() { close(ready) })
 		}
