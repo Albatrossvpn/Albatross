@@ -36,8 +36,16 @@ var protoCodes = map[string]uint8{
 }
 
 // refreshEvery says how often each kind of source is downloaded again.
-func refreshEvery(s sources.Source) time.Duration {
+func refreshEvery(s sources.Source, mobile bool) time.Duration {
 	switch {
+	case s.Central && s.Tier == sources.TierDeep && mobile:
+		return 24 * time.Hour
+	case s.Central && s.Tier == sources.TierDeep:
+		return 6 * time.Hour
+	case s.Central && mobile:
+		return 3 * time.Hour
+	case s.Central:
+		return time.Hour
 	case s.Kind == sources.KindTelegram:
 		return 20 * time.Minute
 	case s.Kind == sources.KindVPNGate:
@@ -101,14 +109,26 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 			defer wg.Done()
 			for i := range jobs {
 				text, ok := e.cachedText(srcs[i])
-				if ok {
+				if !ok && srcs[i].Central && srcs[i].Tier == sources.TierPriority {
+					text, ok = sources.Snapshot(), true
+				}
+				if ok && text != "" {
 					e.ingest(i, srcs[i], text, states)
 				}
 			}
 		}()
 	}
+	// A recent copy of the collector's list already holds what the other
+	// built-in sources had; their older copies would only bring back
+	// servers the collector dropped.
+	skipBuiltin := false
+	for _, s := range srcs {
+		if s.Central && s.Tier == sources.TierPriority {
+			skipBuiltin = time.Since(e.fetcher.CachedAt(s)) < 24*time.Hour
+		}
+	}
 	for i, s := range srcs {
-		if !s.Enabled {
+		if !s.Enabled || (skipBuiltin && s.Builtin && !s.Central) {
 			continue
 		}
 		select {
@@ -132,14 +152,35 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 // system right away instead of keeping it for later.
 func releaseMemory() { debug.FreeOSMemory() }
 
-// refreshDue downloads every source whose refresh time has come.
+// refreshDue downloads every source whose refresh time has come. The
+// collector's lists go first; while they are reachable they stand in for
+// every other built-in source, which saves the device hundreds of
+// downloads (and Telegram, which is blocked on the direct path anyway).
 func (e *Engine) refreshDue() {
+	e.refreshSources(true)
+	e.refreshSources(false)
+}
+
+// centralOK reports whether the collector's list was downloaded lately.
+// Callers hold e.mu.
+func (e *Engine) centralOK(now time.Time) bool {
+	for i, s := range e.srcs {
+		if s.Central && s.Enabled && s.Tier == sources.TierPriority {
+			st := e.srcStats[i]
+			return st.LastError == "" && !st.Fetched.IsZero() && now.Sub(st.Fetched) < 6*time.Hour
+		}
+	}
+	return false
+}
+
+func (e *Engine) refreshSources(central bool) {
 	connected := e.proxyClient() != nil
 	e.mu.Lock()
 	var due []int
 	now := time.Now()
+	skipBuiltin := !central && e.centralOK(now)
 	for i, s := range e.srcs {
-		if !s.Enabled {
+		if !s.Enabled || s.Central != central || (skipBuiltin && s.Builtin) {
 			continue
 		}
 		st := e.srcStats[i]
@@ -152,7 +193,7 @@ func (e *Engine) refreshDue() {
 			due = append(due, i)
 			continue
 		}
-		if now.Sub(st.Fetched) >= refreshEvery(s) {
+		if now.Sub(st.Fetched) >= refreshEvery(s, e.opt.Mobile) {
 			due = append(due, i)
 		}
 	}
@@ -188,7 +229,7 @@ func (e *Engine) refreshDue() {
 				} else {
 					st.LastError = res.Err.Error()
 					// Retry failed sources sooner than a full interval.
-					st.Fetched = time.Now().Add(-refreshEvery(srcs[i]) + 10*time.Minute)
+					st.Fetched = time.Now().Add(-refreshEvery(srcs[i], e.opt.Mobile) + 10*time.Minute)
 				}
 				e.mu.Unlock()
 				if added > 0 {
@@ -228,7 +269,8 @@ func (e *Engine) refreshDue() {
 	total := e.scan.SourcesOK
 	e.mu.Unlock()
 	e.pool.NextCycle()
-	e.pool.Compact(6)
+	// The longest refresh interval is a day; keep two of them.
+	e.pool.Compact(48 * time.Hour)
 	releaseMemory()
 	e.logf("info", "Server list updated: %d lists reachable, %d servers queued for testing.", total, e.pool.Len())
 }
