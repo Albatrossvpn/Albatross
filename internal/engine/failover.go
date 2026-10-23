@@ -244,7 +244,7 @@ func (c *connection) backups(skip map[*member]bool) []*member {
 	defer c.mu.Unlock()
 	var out []*member
 	for _, m := range c.members {
-		if m.alive && !skip[m] {
+		if m.alive && !m.forged && !skip[m] {
 			out = append(out, m)
 		}
 	}
@@ -313,6 +313,15 @@ func (e *Engine) noteResult(c *connection, m *member, delay int, ok bool) {
 // none does within timeout. The others keep being tested in the background
 // and their results are recorded too.
 func (e *Engine) race(ctx context.Context, c *connection, list []*member, timeout time.Duration) *member {
+	c.mu.Lock()
+	var trusted []*member
+	for _, m := range list {
+		if !m.forged {
+			trusted = append(trusted, m)
+		}
+	}
+	c.mu.Unlock()
+	list = trusted
 	if len(list) == 0 {
 		return nil
 	}
@@ -362,6 +371,10 @@ func (e *Engine) monitor(ctx context.Context, c *connection) {
 	sweep := time.NewTimer(20 * time.Second)
 	defer sweep.Stop()
 	var last time.Time
+	// The server in use is checked for forged certificates a minute in,
+	// then every interceptEvery.
+	intercept := time.NewTimer(time.Minute)
+	defer intercept.Stop()
 	// A core that crashes is replaced at once, not at the next check.
 	var died <-chan struct{}
 	if c.running != nil && c.running.SingBox != nil {
@@ -388,6 +401,16 @@ func (e *Engine) monitor(ctx context.Context, c *connection) {
 				return
 			}
 			sweep.Reset(c.every(sweepBusy, sweepIdle))
+			continue
+		case <-intercept.C:
+			intercept.Reset(interceptEvery)
+			m := c.activeMember()
+			if !e.checkIntercept(ctx, c, m) {
+				continue
+			}
+			if !e.failover(ctx, c, m) {
+				return
+			}
 			continue
 		}
 		last = time.Now()

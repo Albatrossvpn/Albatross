@@ -73,10 +73,14 @@ type Engine struct {
 	// crowd stats (crowd.go); crowdAt is when tests were last reported.
 	crowdURLs []string
 	crowdAt   time.Time
-	fetcher   *sources.Fetcher
-	tester    *tester.Tester
-	resolver  *antiblock.Resolver
-	cf        *antiblock.Scanner
+	// httpsOK is when a server last passed a test with a genuine
+	// certificate, which shows this device checks certificates correctly
+	// (see distrust).
+	httpsOK  time.Time
+	fetcher  *sources.Fetcher
+	tester   *tester.Tester
+	resolver *antiblock.Resolver
+	cf       *antiblock.Scanner
 
 	mu           sync.Mutex
 	settings     Settings
