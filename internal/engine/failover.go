@@ -25,7 +25,7 @@ import (
 // they are needed. Both slow down while nothing is being sent.
 const (
 	checkBusy = 10 * time.Second
-	checkIdle = 30 * time.Second
+	checkIdle = 15 * time.Second
 	sweepBusy = 90 * time.Second
 	sweepIdle = 5 * time.Minute
 	// idleAfter is how long without traffic counts as idle.
@@ -711,7 +711,7 @@ func (c *connection) faster() *member {
 		if m.speedKnown() && m.speed < usable {
 			continue
 		}
-		if float64(m.delay) < float64(cur)*0.6 && cur-m.delay > 80 && (best == nil || m.delay < best.delay) {
+		if float64(m.delay) < float64(cur)*0.7 && cur-m.delay > 80 && (best == nil || m.delay < best.delay) {
 			best = m
 		}
 	}
@@ -820,6 +820,17 @@ func (c *connection) streamTraffic(ctx context.Context) {
 		case <-time.After(2 * time.Second):
 		}
 	}
+}
+
+// heavyRate is the traffic, in bytes a second, above which background
+// tests slow down (scanPace).
+const heavyRate = 256 << 10
+
+// heavy reports whether the user is moving a lot of data right now.
+func (c *connection) heavy() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.upRate+c.dnRate > heavyRate && time.Since(c.lastBusy) < 5*time.Second
 }
 
 func (c *connection) addTraffic(up, down int64) {

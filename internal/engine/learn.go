@@ -38,8 +38,9 @@ const (
 )
 
 // dohServers answer DNS-over-HTTPS JSON queries. They are reached through
-// the VPN.
-var dohServers = []string{"https://cloudflare-dns.com/dns-query", "https://dns.google/resolve"}
+// the VPN. Google's comes first: it passes the region's subnet on to sites
+// that answer by country (region.Subnet); Cloudflare's does not.
+var dohServers = []string{"https://dns.google/resolve", "https://cloudflare-dns.com/dns-query"}
 
 type learner struct {
 	path     string
@@ -169,7 +170,7 @@ func (e *Engine) learnLocal(ctx context.Context, c *connection, r region) {
 				case <-ctx.Done():
 					return
 				case host := <-l.queue:
-					addrs, err := lookupThrough(ctx, e.proxyClient(), host)
+					addrs, err := lookupThrough(ctx, e.proxyClient(), host, r.Subnet)
 					if err != nil || !l.local(addrs) {
 						continue
 					}
@@ -204,6 +205,11 @@ func (e *Engine) learnLocal(ctx context.Context, c *connection, r region) {
 	}
 }
 
+// viaVPN are the route's outbounds that leave through a server: the group,
+// the group with WARP after it (warpexit.go) and the fixed exit for sites
+// that sign people out (stickyDomains).
+var viaVPN = map[string]bool{"proxy": true, "exit": true, "sticky": true}
+
 // proxiedHosts lists the names of open connections going through the VPN.
 func (c *connection) proxiedHosts(ctx context.Context) []string {
 	var list struct {
@@ -221,7 +227,7 @@ func (c *connection) proxiedHosts(ctx context.Context) []string {
 	var out []string
 	for _, conn := range list.Connections {
 		h := strings.ToLower(strings.TrimSuffix(conn.Metadata.Host, "."))
-		if h == "" || seen[h] || len(conn.Chains) == 0 || conn.Chains[len(conn.Chains)-1] != "proxy" {
+		if h == "" || seen[h] || len(conn.Chains) == 0 || !viaVPN[conn.Chains[len(conn.Chains)-1]] {
 			continue
 		}
 		seen[h] = true
@@ -231,14 +237,15 @@ func (c *connection) proxiedHosts(ctx context.Context) []string {
 }
 
 // lookupThrough resolves host's IPv4 addresses with DNS-over-HTTPS through
-// client.
-func lookupThrough(ctx context.Context, client *http.Client, host string) ([]netip.Addr, error) {
+// client, as asked from subnet (see region.Subnet) where the server
+// supports it.
+func lookupThrough(ctx context.Context, client *http.Client, host, subnet string) ([]netip.Addr, error) {
 	if client == nil {
 		return nil, errors.New("not connected")
 	}
 	var lastErr error
 	for _, s := range dohServers {
-		addrs, err := dohQuery(ctx, client, s, host)
+		addrs, err := dohQuery(ctx, client, s, host, subnet)
 		if err == nil {
 			return addrs, nil
 		}
@@ -247,10 +254,14 @@ func lookupThrough(ctx context.Context, client *http.Client, host string) ([]net
 	return nil, lastErr
 }
 
-func dohQuery(ctx context.Context, client *http.Client, server, host string) ([]netip.Addr, error) {
+func dohQuery(ctx context.Context, client *http.Client, server, host, subnet string) ([]netip.Addr, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+"?"+url.Values{"name": {host}, "type": {"A"}}.Encode(), nil)
+	q := url.Values{"name": {host}, "type": {"A"}}
+	if subnet != "" {
+		q.Set("edns_client_subnet", subnet)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}

@@ -60,11 +60,16 @@ public final class App extends Application {
         return dns != null ? dns : FALLBACK_DNS;
     }
 
+    // The network's own resolver, IPv4 first. Some mobile networks list
+    // only IPv6 ones; a foreign fallback would answer Iranian sites with
+    // their foreign addresses.
     private static String pickDns(LinkProperties lp) {
         if (lp == null) return null;
+        String v6 = null;
         for (InetAddress a : lp.getDnsServers()) {
             if (a instanceof Inet4Address) return a.getHostAddress();
+            if (v6 == null && !a.isLinkLocalAddress()) v6 = a.getHostAddress();
         }
-        return null;
+        return v6;
     }
 }

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
@@ -39,6 +40,8 @@ type Snapshot struct {
 	// Share lists where other devices (a hotspot's, the same Wi-Fi's) can
 	// reach this device's HTTP and SOCKS proxy, when sharing is on.
 	Share []string `json:"share,omitempty"`
+	// SharePAC are the automatic proxy setup addresses for the same.
+	SharePAC []string `json:"share_pac,omitempty"`
 }
 
 // ScanInfo is scan progress.
@@ -93,6 +96,7 @@ func (e *Engine) Snapshot() Snapshot {
 		Helping:        e.helper != nil && !e.helper.Exited(),
 		CrowdAvailable: len(e.crowdURLs) > 0,
 		Share:          e.shareAddrs(),
+		SharePAC:       e.sharePAC(),
 		Target:         e.target,
 		TargetName:     countryName(e.target),
 		TargetFlag:     geo.Flag(e.target),
@@ -100,7 +104,7 @@ func (e *Engine) Snapshot() Snapshot {
 		Settings:       e.settings,
 		Version:        e.opt.Version,
 		Mobile:         e.opt.Mobile,
-		Update:         e.update,
+		Update:         e.updateCopy(),
 		Cores:          CoreInfo{SingBox: e.bin.SingBox != "", Xray: e.bin.Xray != "", WarpPlus: e.bin.WarpPlus != ""},
 		WorkingNow:     working,
 		TotalGood:      len(e.good),
@@ -166,14 +170,54 @@ func (e *Engine) shareAddrs() []string {
 	if err != nil {
 		return nil
 	}
-	addrs, _ := net.InterfaceAddrs()
 	var out []string
-	for _, a := range addrs {
-		ip, ok := a.(*net.IPNet)
-		if !ok || ip.IP.To4() == nil || !ip.IP.IsPrivate() || ip.IP.To4()[1] == 19 && ip.IP.To4()[0] == 172 {
-			continue
-		}
-		out = append(out, net.JoinHostPort(ip.IP.String(), port))
+	for _, ip := range e.lanIPs() {
+		out = append(out, net.JoinHostPort(ip, port))
 	}
 	return out
+}
+
+// sharePAC are the automatic proxy setup addresses (servePAC).
+func (e *Engine) sharePAC() []string {
+	var out []string
+	for _, a := range e.shareAddrs() {
+		host, port, _ := net.SplitHostPort(a)
+		out = append(out, "http://"+net.JoinHostPort(host, pacPort(port))+"/proxy.pac")
+	}
+	return out
+}
+
+// lanIPs are this device's private IPv4 addresses, without the tunnel's.
+func (e *Engine) lanIPs() []string {
+	if e.opt.LANAddrs != nil {
+		return e.opt.LANAddrs()
+	}
+	ifaces, _ := net.Interfaces()
+	var out []string
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || virtualIface(ifc.Name) {
+			continue
+		}
+		addrs, _ := ifc.Addrs()
+		for _, a := range addrs {
+			ip, ok := a.(*net.IPNet)
+			if !ok || ip.IP.To4() == nil || !ip.IP.IsPrivate() || ip.IP.To4()[1] == 19 && ip.IP.To4()[0] == 172 {
+				continue
+			}
+			out = append(out, ip.IP.String())
+		}
+	}
+	return out
+}
+
+// virtualIface reports adapters that only reach virtual machines and
+// containers on this computer, never another device.
+func virtualIface(name string) bool {
+	n := strings.ToLower(name)
+	for _, v := range []string{"docker", "br-", "veth", "vethernet", "virtualbox", "vmware", "vboxnet", "hyper-v", "wsl", "albatross"} {
+		if strings.Contains(n, v) {
+			return true
+		}
+	}
+	return false
 }
