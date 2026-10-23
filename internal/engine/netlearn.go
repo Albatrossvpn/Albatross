@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
 )
 
 // netLearn keeps track of which protocols and wire styles (see node.Style)
@@ -25,8 +27,28 @@ type netLearn struct {
 type netTable struct {
 	Proto [16]passRate `json:"proto"`
 	Style [32]passRate `json:"style"`
-	All   passRate     `json:"all"`
-	Used  time.Time    `json:"used"`
+	// Hello is per ClientHello (helloCode: browser fingerprint and
+	// fragmentation) on TLS and Reality servers.
+	Hello [16]passRate `json:"hello"`
+	// Port is per port class (node.StylePort).
+	Port [8]passRate `json:"port"`
+	// Life is how long a server of each wire style (node.StyleWire) lasts
+	// in use here before filtering cuts it.
+	Life [32]lifeRate `json:"life"`
+	All  passRate     `json:"all"`
+	Used time.Time    `json:"used"`
+	// Pend counts tests since the last crowd report (crowd.go); ASN is the
+	// network's operator as the crowd service saw it, and Seeded says the
+	// crowd's numbers were already added to this table.
+	Pend   crowdCounts `json:"pend"`
+	ASN    uint32      `json:"asn,omitempty"`
+	Seeded bool        `json:"seeded,omitempty"`
+}
+
+// lifeRate is a running average of lifetimes in minutes over N deaths.
+type lifeRate struct {
+	Min float64 `json:"min"`
+	N   float64 `json:"n"`
 }
 
 type passRate struct {
@@ -70,6 +92,7 @@ func (l *netLearn) use(key string) {
 	}
 	t := *prev
 	t.scale(0.2)
+	t.Pend, t.ASN, t.Seeded = crowdCounts{}, 0, false
 	l.Nets[key] = &t
 	for len(l.Nets) > maxNets {
 		oldest := ""
@@ -91,6 +114,35 @@ func (t *netTable) scale(f float64) {
 	for i := range t.Style {
 		sc(&t.Style[i])
 	}
+	for i := range t.Hello {
+		sc(&t.Hello[i])
+	}
+	for i := range t.Port {
+		sc(&t.Port[i])
+	}
+	for i := range t.Life {
+		t.Life[i].N *= f
+	}
+}
+
+func (r *passRate) add(ok bool) {
+	r.OK *= learnDecay
+	r.N *= learnDecay
+	r.N++
+	if ok {
+		r.OK++
+	}
+}
+
+// recordHello counts one test of a ClientHello (see helloCode).
+func (l *netLearn) recordHello(code int, ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	t := l.table()
+	if code >= 0 && code < len(t.Hello) {
+		t.Hello[code].add(ok)
+		t.Pend.Hello[code].add(ok)
+	}
 }
 
 func (l *netLearn) record(proto, style uint8, ok bool) {
@@ -98,20 +150,17 @@ func (l *netLearn) record(proto, style uint8, ok bool) {
 	defer l.mu.Unlock()
 	t := l.table()
 	t.Used = time.Now()
-	add := func(r *passRate) {
-		r.OK *= learnDecay
-		r.N *= learnDecay
-		r.N++
-		if ok {
-			r.OK++
-		}
-	}
+	add := func(r *passRate) { r.add(ok) }
 	add(&t.All)
 	if int(proto) < len(t.Proto) {
 		add(&t.Proto[proto])
+		t.Pend.Proto[proto].add(ok)
 	}
-	if int(style) < len(t.Style) {
-		add(&t.Style[style])
+	add(&t.Style[node.StyleWire(style)])
+	t.Pend.Style[node.StyleWire(style)].add(ok)
+	if p := node.StylePort(style); p != 0 && int(p) < len(t.Port) {
+		add(&t.Port[p])
+		t.Pend.Port[p].add(ok)
 	}
 }
 
@@ -119,6 +168,8 @@ func (l *netLearn) record(proto, style uint8, ok bool) {
 type learnedView struct {
 	proto [16]float64
 	style [32]float64
+	hello [16]float64
+	port  [8]float64
 }
 
 func (l *netLearn) snapshot() learnedView {
@@ -139,6 +190,12 @@ func (l *netLearn) snapshot() learnedView {
 	for i := range t.Style {
 		v.style[i] = lift(t.Style[i])
 	}
+	for i := range t.Hello {
+		v.hello[i] = lift(t.Hello[i])
+	}
+	for i := range t.Port {
+		v.port[i] = lift(t.Port[i])
+	}
 	return v
 }
 
@@ -147,10 +204,37 @@ func (v learnedView) bonus(proto, style uint8) float64 {
 	if int(proto) < len(v.proto) {
 		b += v.proto[proto]
 	}
-	if int(style) < len(v.style) {
-		b += v.style[style]
+	b += v.style[node.StyleWire(style)]
+	if p := node.StylePort(style); p != 0 {
+		b += v.port[p]
 	}
 	return b
+}
+
+// recordLife counts a server of this style that died after d in use.
+// Deaths in the first half minute are failures, not lifetimes.
+func (l *netLearn) recordLife(style uint8, d time.Duration) {
+	if d < 30*time.Second || d > 6*time.Hour {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	r := &l.table().Life[node.StyleWire(style)]
+	// The newest deaths count most: filtering rules change.
+	w := 1 / min(r.N+1, 8)
+	r.Min = r.Min*(1-w) + d.Minutes()*w
+	r.N++
+}
+
+// life is how long a server of this style usually lasts here, if known.
+func (l *netLearn) life(style uint8) (time.Duration, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	r := l.table().Life[node.StyleWire(style)]
+	if r.N < 3 {
+		return 0, false
+	}
+	return time.Duration(r.Min * float64(time.Minute)), true
 }
 
 func (l *netLearn) load(dir string) {

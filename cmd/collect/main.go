@@ -8,6 +8,7 @@
 //	fresh.txt       servers from tested lists, Telegram and VPN Gate
 //	all-1.txt ...   everything else, best first, split into -shards files
 //	meta.json       when it ran and how many servers each file holds
+//	tor.json        Tor's current bridges (built-in and recommended for Iran)
 //
 // Servers whose address does not answer at all are left out (UDP-based
 // ones cannot be checked that way and are kept).
@@ -219,14 +220,40 @@ func main() {
 		if err != nil || len(k) != 32 {
 			log.Fatal("OWN_KEY must be 64 hex digits")
 		}
-		sealed, err := sources.Seal(k, own)
-		if err != nil {
+		// Split into sources.OwnBuckets parts; each app reads two. With
+		// fewer servers than parts, each part gets one of them.
+		links := strings.Fields(own)
+		for b := range sources.OwnBuckets {
+			var part []string
+			for i, l := range links {
+				if i%sources.OwnBuckets == b {
+					part = append(part, l)
+				}
+			}
+			if len(part) == 0 {
+				part = []string{links[b%len(links)]}
+			}
+			sealed, err := sources.Seal(k, strings.Join(part, "\n")+"\n")
+			if err != nil {
+				log.Fatal(err)
+			}
+			name := fmt.Sprintf("own-%d.bin", b+1)
+			if err := os.WriteFile(filepath.Join(*out, name), sealed, 0o644); err != nil {
+				log.Fatal(err)
+			}
+			m.Files[name] = len(part)
+		}
+	}
+	if br, err := torBridges(ctx, &http.Client{Timeout: 90 * time.Second}); err != nil {
+		log.Printf("tor bridges: %v", err)
+	} else {
+		b, _ := json.Marshal(br)
+		if err := os.WriteFile(filepath.Join(*out, "tor.json"), b, 0o644); err != nil {
 			log.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(*out, "own.bin"), sealed, 0o644); err != nil {
-			log.Fatal(err)
+		for _, v := range br {
+			m.Files["tor.json"] += len(v)
 		}
-		m.Files["own.bin"] = len(strings.Fields(own))
 	}
 	b, _ := json.MarshalIndent(m, "", "  ")
 	if err := os.WriteFile(filepath.Join(*out, "meta.json"), b, 0o644); err != nil {

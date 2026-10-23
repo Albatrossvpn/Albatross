@@ -31,6 +31,11 @@ type Hooks struct {
 	// OpenVPNSettings opens the system's VPN settings (Android), where
 	// "Always-on VPN" and "Block connections without VPN" live.
 	OpenVPNSettings func() error
+	// ShareText hands text to the system share sheet (Android), which
+	// reaches Bluetooth and Quick Share as well as messengers.
+	ShareText func(string) error
+	// ShareApp shares the app's own installer (Android).
+	ShareApp func() error
 }
 
 // Server is the local UI server. It listens on 127.0.0.1 only and every
@@ -77,6 +82,9 @@ func (s *Server) routes() http.Handler {
 		"POST /api/open":         s.open,
 		"POST /api/vpn-settings": s.vpnSettings,
 		"POST /api/quit":         s.quit,
+		"POST /api/share":        s.share,
+		"POST /api/share/import": s.shareImport,
+		"POST /api/share/app":    s.shareApp,
 	}
 	for pattern, h := range api {
 		mux.Handle(pattern, s.guard(h))
@@ -274,4 +282,42 @@ func (s *Server) quit(w http.ResponseWriter, r *http.Request) {
 	if s.hooks.Quit != nil {
 		go s.hooks.Quit()
 	}
+}
+
+func (s *Server) share(w http.ResponseWriter, r *http.Request) {
+	code, err := s.eng.ShareCode()
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	sent := s.hooks.ShareText != nil && s.hooks.ShareText(code) == nil
+	writeJSON(w, map[string]any{"code": code, "sent": sent})
+}
+
+func (s *Server) shareImport(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		fail(w, err)
+		return
+	}
+	n, err := s.eng.ImportShareCode(req.Code)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"added": n})
+}
+
+func (s *Server) shareApp(w http.ResponseWriter, r *http.Request) {
+	if s.hooks.ShareApp == nil {
+		fail(w, errors.New("not supported"))
+		return
+	}
+	if err := s.hooks.ShareApp(); err != nil {
+		fail(w, err)
+		return
+	}
+	ok(w)
 }

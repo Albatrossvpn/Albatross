@@ -72,6 +72,14 @@ func (e *Engine) refreshLoop() {
 			go e.checkUpdate()
 		}
 		e.refreshDue()
+		if e.regimeDue() {
+			e.updateRegime()
+		}
+		e.updateHelp()
+		if time.Since(e.crowdAt) > crowdEvery {
+			e.crowdAt = time.Now()
+			go e.crowdReport(e.ctx)
+		}
 		e.mu.Lock()
 		// The WARP methods are their own protocol; a chosen one excludes them.
 		warp, clean := e.settings.Warp && e.settings.Protocol == "", e.settings.CleanIP
@@ -379,6 +387,8 @@ type candidate struct {
 	node      *node.Node
 	good      *Server
 	frag      bool   // fragment the TLS ClientHello
+	hello     int8   // 1 + index into helloFPs when the app picks the ClientHello
+	ech       bool   // look the server's ECH config up over DNS
 	pin       string // connect to this IP instead of resolving the name
 	pinReason string
 }
@@ -453,6 +463,9 @@ func (e *Engine) pickBatch(size int) []candidate {
 	e.mu.Unlock()
 	scores := e.sourceScores()
 	learned := e.net.snapshot()
+	e.mu.Lock()
+	reg, regProbe := e.reg.Regime, e.reg.Probe
+	e.mu.Unlock()
 	var out []candidate
 	rand.Shuffle(len(recheck), func(i, j int) { recheck[i], recheck[j] = recheck[j], recheck[i] })
 	maxRecheck := size / 3
@@ -495,6 +508,7 @@ func (e *Engine) pickBatch(size int) []candidate {
 		sc += float64(min(en.Pop, 10)) * 3
 		sc += protoPrior[en.Proto]
 		sc += learned.bonus(en.Proto, en.Style)
+		sc += reg.bonus(regProbe, en)
 		if en.Flags&pool.FlagFresh != 0 {
 			sc += 15
 		}
@@ -609,6 +623,7 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 	e.mu.Lock()
 	frag := e.settings.Fragment
 	cleanOn := e.settings.CleanIP
+	free := e.reg.Regime == regimeFree
 	spoof := ""
 	if e.settings.SpoofSNI != "" && e.opt.IsAdmin() {
 		spoof = e.settings.SpoofSNI
@@ -659,21 +674,52 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 	if e.ctx.Err() != nil {
 		return
 	}
+	learned := e.net.snapshot()
 	for i := range live {
-		live[i].frag = frag == "on" || (live[i].good != nil && live[i].good.Fragment)
+		c := &live[i]
+		c.frag = frag == "on" || (c.good != nil && c.good.Fragment)
+		if !helloable(c.node) {
+			continue
+		}
+		if c.good != nil && helloIndex(c.good.Hello) >= 0 {
+			c.setHello(helloIndex(c.good.Hello))
+			continue
+		}
+		c.setHello(learned.pickHello(c.frag, rand.Float64))
+		if frag == "auto" && !c.frag && c.node.Security == "tls" && learned.fragHelps(c.fp()) {
+			c.frag = true
+		}
 	}
 
 	// Real tests. Servers that fail get one more chance with the tricks
 	// that beat SNI filtering: a fragmented ClientHello and, behind
 	// Cloudflare, an edge IP that is not blocked here.
 	failed := e.realTest(live, spoof, chunk)
+	for _, c := range failed {
+		e.net.recordHello(c.helloCode(), false)
+	}
 	var retry []candidate
 	clean := e.cf.Best()
 	for _, c := range failed {
+		if free {
+			// Nothing here needs the tricks that beat filtering.
+			break
+		}
 		r := c
 		changed := false
-		if frag == "auto" && !r.frag && r.node.Security == "tls" && !r.node.UDPBased() {
+		// The second try changes the ClientHello: fragmented, unless that
+		// clearly does worse on this network, else another browser's.
+		switch {
+		case !r.ech && r.node.Security == "tls" && r.node.ECH == "" && antiblock.CDNFrontable(r.node):
+			// Behind a CDN, ECH hides the name SNI filtering looks for.
+			n := *r.node
+			n.TryECH = true
+			r.node, r.ech, changed = &n, true, true
+		case frag == "auto" && !r.frag && r.node.Security == "tls" && !r.node.UDPBased() && (r.hello == 0 || !learned.fragHurts(r.fp())):
 			r.frag, changed = true, true
+		case r.hello != 0:
+			r.setHello(learned.nextHello(r.fp(), r.frag))
+			changed = true
 		}
 		if cleanOn && len(clean) > 0 && antiblock.CDNFrontable(c.node) && r.pinReason != "clean" {
 			ip := clean[rand.Intn(min(len(clean), 3))].IP
@@ -685,6 +731,7 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 	}
 	if len(retry) > 0 && e.ctx.Err() == nil {
 		for _, c := range e.realTest(retry, spoof, chunk) {
+			e.net.recordHello(c.helloCode(), false)
 			e.recordFail(c, "failed")
 		}
 	}
@@ -813,6 +860,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	now := time.Now()
 	n := c.node
 	e.net.record(protoCodes[n.Proto], n.Style(), true)
+	e.net.recordHello(c.helloCode(), true)
 	e.pool.Update(c.key, func(p *pool.Entry) {
 		p.State = pool.StateOK
 		p.Fails = 0
@@ -846,6 +894,11 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	s.Fails = 0
 	s.OKCount++
 	s.Fragment = c.frag
+	s.ECH = c.ech
+	s.Hello = ""
+	if c.hello != 0 {
+		s.Hello = helloFPs[c.fp()]
+	}
 	s.PinIP, s.PinReason = c.pin, c.pinReason
 	e.scan.Tested++
 	e.scan.recent = append(e.scan.recent, now)

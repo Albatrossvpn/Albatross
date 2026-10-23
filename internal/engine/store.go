@@ -31,6 +31,8 @@ type Server struct {
 	Fails     int       `json:"fails"` // consecutive failures since LastOK
 	OKCount   int       `json:"ok_count"`
 	Fragment  bool      `json:"fragment,omitempty"`   // only works with TLS fragmentation
+	Hello     string    `json:"hello,omitempty"`      // browser ClientHello the app picked
+	ECH       bool      `json:"ech,omitempty"`        // only works with ECH looked up over DNS
 	PinIP     string    `json:"pin_ip,omitempty"`     // connect here instead of resolving the name
 	PinReason string    `json:"pin_reason,omitempty"` // "dns" (poisoned) or "clean" (Cloudflare edge)
 	Plain     bool      `json:"plain,omitempty"`
@@ -56,6 +58,14 @@ func (s *Server) Node() *node.Node {
 // name is poisoned or a clean Cloudflare edge was needed.
 func (s *Server) runNode() *node.Node {
 	n := s.Node()
+	if n != nil && (s.Hello != "" && helloable(n) || s.ECH) {
+		c := *n
+		if helloable(n) {
+			c.HelloFP = s.Hello
+		}
+		c.TryECH = s.ECH
+		n = &c
+	}
 	if n == nil || s.PinIP == "" {
 		return n
 	}
