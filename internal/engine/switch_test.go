@@ -143,3 +143,37 @@ func TestDisconnectWhileReconnecting(t *testing.T) {
 		t.Fatal("a second disconnect cleared a VPN that was already off")
 	}
 }
+
+// Always-on VPN resumes only what the user left on: disconnecting turns it
+// off for good, closing the app does not.
+func TestResumeFollowsTheUser(t *testing.T) {
+	dir := t.TempDir()
+	e, err := New(Options{DataDir: dir, Sources: []sources.Source{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Resume() {
+		t.Fatal("resumed a VPN the user never turned on")
+	}
+	e.mu.Lock()
+	e.settings.Connected = true
+	e.wantConnect = true // a connection is already on its way
+	e.mu.Unlock()
+	if !e.Resume() {
+		t.Fatal("did not resume a VPN the user left on")
+	}
+	e.disconnect(false)
+	if !e.Settings().Connected {
+		t.Fatal("closing the app forgot that the user left the VPN on")
+	}
+	e.Disconnect()
+	e.pool.Close()
+	e2, err := New(Options{DataDir: dir, Sources: []sources.Source{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e2.pool.Close()
+	if e2.Resume() {
+		t.Fatal("resumed after the user disconnected")
+	}
+}

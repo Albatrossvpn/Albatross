@@ -32,7 +32,12 @@ public final class TunnelService extends VpnService {
     }
 
     static void stop(Context c) {
-        c.startService(new Intent(c, TunnelService.class).setAction(ACTION_STOP));
+        try {
+            c.startService(new Intent(c, TunnelService.class).setAction(ACTION_STOP));
+        } catch (IllegalStateException e) {
+            // In the background Android refuses to start a service that is
+            // not running, and then there is nothing to stop.
+        }
     }
 
     @Override
@@ -49,6 +54,22 @@ public final class TunnelService extends VpnService {
             return START_NOT_STICKY;
         }
         foreground();
+        if (tun == null && SERVICE_INTERFACE.equals(action)) {
+            // Android started the VPN by itself (Always-on VPN, for example
+            // after a restart). Connect again if the user left it on; the
+            // engine opens the tunnel once a server is ready.
+            new Thread(() -> {
+                boolean resumed = false;
+                try {
+                    ((App) getApplication()).engine();
+                    resumed = Mobile.resume();
+                } catch (Exception e) {
+                    Log.e(TAG, "starting the engine failed", e);
+                }
+                if (!resumed) stop(this);
+            }).start();
+            return START_NOT_STICKY;
+        }
         if (tun == null && !open()) {
             close();
             stopSelf();
