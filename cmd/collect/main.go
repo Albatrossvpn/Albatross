@@ -64,6 +64,9 @@ type meta struct {
 	// Channels counts the usable servers each Telegram channel posted;
 	// channels that stay at zero can be dropped from the lists.
 	Channels map[string]int `json:"channels"`
+	// Yield is the same count for every other source, so a link that still
+	// answers but carries nothing usable shows up too.
+	Yield map[string]int `json:"yield"`
 }
 
 var schemeRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]{1,20})://[^\s"'<>]{8,}`)
@@ -95,7 +98,7 @@ func main() {
 	var mu sync.Mutex
 	byKey := map[uint64]*entry{}
 	reached := 0
-	schemes, channels := map[string]int{}, map[string]int{}
+	schemes, channels, yield := map[string]int{}, map[string]int{}, map[string]int{}
 	seenLinks := map[uint64]bool{}
 	ctx := context.Background()
 	sem := make(chan struct{}, 32)
@@ -158,6 +161,8 @@ func main() {
 			}
 			if s.Kind == sources.KindTelegram {
 				channels[s.URL] = usable
+			} else {
+				yield[s.Label()] = usable
 			}
 		}(s)
 	}
@@ -217,7 +222,7 @@ func main() {
 		log.Fatal(err)
 	}
 	m := meta{Updated: time.Now().UTC(), Sources: len(srcs), Reached: reached, Found: len(byKey), Dead: dead, Tested: len(tested), Passed: len(passed), Files: map[string]int{},
-		Schemes: schemes, Protocols: protocols, Channels: channels}
+		Schemes: schemes, Protocols: protocols, Channels: channels, Yield: yield}
 	write := func(name string, links []string) {
 		if err := os.WriteFile(filepath.Join(*out, name), []byte(strings.Join(links, "\n")+"\n"), 0o644); err != nil {
 			log.Fatal(err)
