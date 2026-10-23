@@ -8,7 +8,7 @@ set -euo pipefail
 
 VERSION="${VERSION:-0.0.0-dev}"
 SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.3}"
-XRAY_VERSION="${XRAY_VERSION:-26.10.10}"
+XRAY_VERSION="${XRAY_VERSION:-26.9.30}"
 WARPPLUS_VERSION="${WARPPLUS_VERSION:-1.2.6}"
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
