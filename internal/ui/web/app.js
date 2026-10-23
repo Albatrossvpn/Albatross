@@ -95,6 +95,9 @@ function render(s) {
 
   $("help-row").classList.toggle("hidden", !s.help_available && !s.settings.help_others);
   $("crowd-row").classList.toggle("hidden", !s.crowd_available);
+  $("share-note").textContent = s.share && s.share.length
+    ? "Set the proxy on the other device to " + s.share.join(" or ")
+    : "Phones, laptops and TVs on your hotspot or Wi-Fi can use this connection by setting an HTTP or SOCKS proxy";
   $("help-note").textContent = s.helping ? "Helping now. Thank you!" :
     "Lets people in censored countries reach Tor through this computer. Runs only outside Iran on an open network.";
   $("notice").classList.toggle("hidden", !s.notice);
@@ -346,7 +349,7 @@ document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("cli
 // ---------- Settings ----------
 
 let settingsBusy = false;
-const toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats"];
+const toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats", "allow_lan"];
 
 function fillSettings(st) {
   for (const k of toggles) $("set-" + k).checked = !!st[k];
