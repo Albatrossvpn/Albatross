@@ -31,6 +31,9 @@ const (
 	idleAfter = 30 * time.Second
 	// refreshAfter is the youngest a group can be refreshed at.
 	refreshAfter = 5 * time.Minute
+	// quietFor is how long without traffic a group must be before it is
+	// refreshed, which restarts the core.
+	quietFor = 3 * time.Minute
 	// stayAtLeast is how long a member stays in use before it is swapped
 	// for a better one; a member that stops answering is left at once.
 	// Each swap changes the exit address, which can sign users out.
@@ -218,10 +221,12 @@ func (c *connection) watchLog(core, line string) {
 }
 
 // idle reports whether no traffic has passed for a while.
-func (c *connection) idle() bool {
+func (c *connection) idle() bool { return c.idleFor(idleAfter) }
+
+func (c *connection) idleFor(d time.Duration) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return time.Since(c.lastBusy) > idleAfter
+	return time.Since(c.lastBusy) > d
 }
 
 func (c *connection) every(busy, quiet time.Duration) time.Duration {
@@ -479,6 +484,25 @@ func (e *Engine) failover(ctx context.Context, c *connection, dead *member) bool
 		c.poke()
 		return true
 	}
+	// Building a new group restarts the core, which drops every open
+	// connection and can take long when few servers are known. A burst of
+	// loss on a filtered network can make the whole group miss one round,
+	// so give all of it one more, slower chance first.
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(2 * time.Second):
+	}
+	if b := e.race(ctx, c, c.members, 8*time.Second); b != nil && c.use(ctx, b) == nil {
+		if b != dead {
+			c.closeOn(ctx, dead.tag)
+		}
+		e.switched(ctx, c, dead, b)
+		return true
+	}
+	if ctx.Err() != nil {
+		return false
+	}
 	e.logf("warn", "No ready server answered; preparing a new group in %s…", countryName(c.home))
 	e.rebuild(c, c.members)
 	return false
@@ -552,8 +576,10 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 		e.logf("info", "A faster server was found in this group: %q (%d ms).", b.server.Name, d)
 	}
 	// A group younger than refreshAfter is left alone, so a country whose
-	// servers keep failing does not restart the core over and over.
-	if c.idle() && time.Since(c.started) > refreshAfter && e.groupStale(c) {
+	// servers keep failing does not restart the core over and over. The
+	// restart drops connections that apps keep open while quiet (messaging,
+	// notifications), so it waits for a longer quiet spell than "idle".
+	if c.idleFor(quietFor) && time.Since(c.started) > refreshAfter && e.groupStale(c) {
 		e.logf("info", "Refreshing backup servers in %s…", countryName(c.home))
 		e.rebuild(c, nil)
 		return false
@@ -587,8 +613,9 @@ func (c *connection) faster() *member {
 }
 
 // groupStale reports whether rebuilding the group would help: too few
-// members still work and the same country has others to offer, or clearly
-// faster servers have appeared there.
+// members still work and the same country has others to offer. Faster
+// servers elsewhere are not reason enough: the restart drops connections,
+// and the group already moves to its own fastest member without one.
 func (e *Engine) groupStale(c *connection) bool {
 	c.mu.Lock()
 	live := 0
@@ -599,18 +626,9 @@ func (e *Engine) groupStale(c *connection) bool {
 			live++
 		}
 	}
-	cur := c.delay
 	c.mu.Unlock()
 	fresh := e.bestServers(c.home, groupSize, inGroup)
-	if live < minReady && len(fresh) >= minReady-live {
-		return true
-	}
-	for _, s := range fresh[:min(3, len(fresh))] {
-		if cur > 0 && float64(s.Delay) < float64(cur)*0.6 && cur-s.Delay > 80 {
-			return true
-		}
-	}
-	return false
+	return live < minReady && len(fresh) >= minReady-live
 }
 
 // rebuild replaces the connection with a fresh group in the same country,
