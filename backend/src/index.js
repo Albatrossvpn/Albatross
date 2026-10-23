@@ -36,6 +36,7 @@ const now = () => Math.floor(Date.now() / 1000);
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/list/")) return mirror(url);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
     try {
       if (!env.TOKEN_SECRET || env.TOKEN_SECRET.length < 24) throw new HttpError(503, "The service is not configured yet.");
@@ -528,4 +529,18 @@ async function crowdSummary(request, env, url) {
     (a[r.kind] ??= []).push([r.code, r.ok, r.n]);
   }
   return json({ asn: self, asns: out });
+}
+
+// mirror serves the app's own server lists and update file from GitHub, one
+// more way to reach them when GitHub and its CDNs are filtered. Only those
+// files, cached at the edge for ten minutes.
+const MIRRORED = /^\/list\/(servers\/(fresh\.txt|all-[1-8]\.txt|tor\.json|meta\.json)|main\/update\.json)$/;
+async function mirror(url) {
+  const m = MIRRORED.exec(url.pathname);
+  if (!m) return new Response("Not found", { status: 404 });
+  const up = await fetch("https://raw.githubusercontent.com/cezomagoanlace29861-jpg/vp/" + m[1], { cf: { cacheTtl: 600, cacheEverything: true } });
+  return new Response(up.body, {
+    status: up.status,
+    headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=600" },
+  });
 }
