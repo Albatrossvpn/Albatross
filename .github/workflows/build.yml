@@ -162,6 +162,9 @@ jobs:
           fi
           bash build/android/build.sh
           "$ANDROID_HOME/build-tools/35.0.0/aapt2" dump badging dist/*arm64-v8a.apk | head -3
+          # Which key signed it: the release key's digest stays the same
+          # from one version to the next.
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs dist/*arm64-v8a.apk | grep -m2 -E "DN|SHA-256"
       - uses: actions/upload-artifact@v4
         with:
           name: Albatross-android-${{ env.VERSION }}
@@ -303,6 +306,11 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.build.outputs.version }}
+          # 0.3.1 and earlier were signed with a throwaway key; Android
+          # installs the first build signed with the release key only after
+          # the old app is removed.
+          body: |
+            Android: if you have 0.3.1 or older, uninstall it before installing this version (one time only). Later updates install over it.
           files: |
             dist/*.zip
             dist/*.apk
