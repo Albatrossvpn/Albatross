@@ -69,6 +69,13 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 			s.Endpoints = append(s.Endpoints, obj)
 			s.epIdx = append(s.epIdx, i)
 		} else {
+			if !n.UDPBased() {
+				// Mobile networks drop idle TCP connections after a minute or
+				// two; keepalives this often keep quiet connections (chats,
+				// notifications) open.
+				obj["tcp_keep_alive"] = "30s"
+				obj["tcp_keep_alive_interval"] = "15s"
+			}
 			s.Outbounds = append(s.Outbounds, obj)
 			s.outIdx = append(s.outIdx, i)
 		}

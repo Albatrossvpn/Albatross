@@ -87,7 +87,10 @@ func ProtocolChoices() []ProtocolChoice {
 // encrypted: servers without transport encryption are left out.
 func DefaultSettings() Settings {
 	return Settings{
-		Mode:        "proxy",
+		Mode: "proxy",
+		// Iranian sites open directly: faster, it saves the servers'
+		// bandwidth, and many of them refuse foreign visitors.
+		Bypass:      "IR",
 		ProxyPort:   10808,
 		AutoSwitch:  true,
 		Fragment:    "auto",
