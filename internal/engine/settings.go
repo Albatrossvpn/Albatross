@@ -72,6 +72,8 @@ type Settings struct {
 	// CleanIP retries Cloudflare-fronted servers through edge IPs that
 	// pass on this network.
 	CleanIP bool `json:"clean_ip"`
+	// OverrideGPS puts the phone's location in the VPN's country (Android).
+	OverrideGPS bool `json:"override_gps"`
 }
 
 // ProtocolChoice is a connection protocol the user can pick.
