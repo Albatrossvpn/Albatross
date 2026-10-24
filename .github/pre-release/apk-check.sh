@@ -70,9 +70,9 @@ cores() { # label abi-dir
     bin="${c%% *}"
     arg="${c#* }"
     res="$(timeout 60 adb shell "cd $libdir && ./$bin $arg" 2>&1 | tr -d '\r' | grep -v 'unsupported flags' | head -3 | tr '\n' ' ')"
-    if echo "$res" | grep -qiE 'not found|inaccessible|denied|cannot|can.t execute|exec format|CANNOT LINK|No such file|Bad system call|Segmentation'; then
+    if echo "$res" | grep -qiE 'not found|inaccessible|denied|cannot|can.t execute|exec format|CANNOT LINK|No such file|Bad system call|Segmentation|panic:|fatal error:|SIGSYS'; then
       log "FAIL $label core $bin: ${res:0:200}"
-    elif echo "$res" | grep -qiE 'version|usage|commands|flags'; then
+    elif echo "$res" | grep -qiE 'version|usage|commands|flags|^Xray [0-9]|^lyrebird [0-9]'; then
       log "PASS $label core $bin runs: ${res:0:100}"
     else
       log "FAIL $label core $bin: unexpected output: ${res:0:200}"
