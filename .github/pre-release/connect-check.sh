@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Connects the debuggable build through the VPN (SelfTest.java) on the running
 # emulator, like build/android/selftest.sh, for the emulator's own ABI and,
-# on Android 11+, for each ARM ABI in the APK through ARM translation.
+# for the emulator's own ABI (x86_64).
 set -u
 api="$1"
 out=out
@@ -47,10 +47,8 @@ connect() { # label apk [install args]
 own="${universal:-$x64}"
 abis="$(adb shell getprop ro.product.cpu.abilist | tr -d '\r')"
 if [ -n "$own" ]; then connect native "$own"; else log "FAIL no debug APK for x86_64"; fi
-if [ "$api" -ge 30 ] && [ -n "$universal" ]; then
-  for abi in armeabi-v7a arm64-v8a; do
-    unzip -l "$universal" | grep -q "lib/$abi/" || continue
-    if echo "$abis" | grep -q "$abi"; then connect "$abi" "$universal" --abi "$abi"; else log "SKIP $abi: this emulator image cannot run $abi code"; fi
-  done
-fi
+# ARM code is not connected through the emulators' ARM translation: the
+# released 0.3.3 (arm64) already crashes there with SIGILL, so a crash says
+# nothing about the build. ARM needs a real phone.
+log "INFO ARM builds not connected here (emulator ARM translation cannot run 0.3.3 either); device ABIs: $abis"
 exit 0
