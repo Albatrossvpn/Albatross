@@ -7,10 +7,12 @@ package mobile
 // pidfd calls before it starts its first process and counts on its own
 // SIGSYS handler to turn that into an error (Go issue 69065), but in a
 // library such as this one Go leaves SIGSYS to whoever loads it: the probe
-// killed the app as soon as it started a core. The handler below, set when
-// the library loads, makes every call the filter forbids fail with ENOSYS,
-// as on a kernel that lacks it; any other SIGSYS goes to the handler that
-// was there before (the system's crash reporter).
+// killed the app as soon as it started a core. Cores no longer start
+// through os/exec (internal/core/child_linux.go); in case other code does,
+// the handler below, set when the library loads, makes every call the
+// filter forbids fail with ENOSYS, as on a kernel that lacks it. Any other
+// SIGSYS goes to the handler that was there before (the system's crash
+// reporter).
 
 /*
 #define _GNU_SOURCE

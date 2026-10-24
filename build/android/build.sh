@@ -51,8 +51,22 @@ gobuild() {
     armeabi-v7a) goarch=arm cc=armv7a-linux-androideabi ;;
     x86_64) goarch=amd64 cc=x86_64-linux-android ;;
   esac
-  GOOS=android GOARCH="$goarch" GOARM=7 CGO_ENABLED=1 CC="$ndkbin/$cc$api-clang" GOTOOLCHAIN=auto \
+  GOOS=android GOARCH="$goarch" GOARM=7 CGO_ENABLED=1 CC="$ndkbin/$cc$api-clang" GOTOOLCHAIN="${toolchain:-auto}" \
     go build -trimpath -buildvcs=false -o "$out" "$@"
+}
+
+# smoke <name> <binary> <args...> runs a core built for this machine from
+# the same source and Go as the phone's, and fails the build if it crashes
+# at start (a dependency that checks Go's internals panics before main).
+smoke() {
+  local name="$1" out
+  shift
+  out="$("$@" 2>&1 || true)"
+  if [ -z "$out" ] || printf '%s' "$out" | grep -qE 'panic:|fatal error:'; then
+    echo "$name crashes at start:" >&2
+    printf '%s\n' "$out" | head -20 >&2
+    exit 1
+  fi
 }
 
 # Xray publishes no 32-bit ARM Android build: build that one from its source.
@@ -60,9 +74,25 @@ xraysrc() {
   local src="$tmp/xray-src"
   if [ ! -d "$src" ]; then
     git clone -q --depth 1 --branch "v$XRAY_VERSION" "$gh/XTLS/Xray-core" "$src"
+    (cd "$src" && CGO_ENABLED=0 GOTOOLCHAIN=auto go build -trimpath -buildvcs=false -ldflags "-checklinkname=0" -o "$tmp/xray-host" ./main)
+    smoke Xray "$tmp/xray-host" version
   fi
   echo "$src"
 }
+
+# warp-plus publishes Android builds for 64-bit ARM only: build the others
+# from its source with the Go its go.mod names. With a newer Go, Psiphon's
+# TLS library in it panics at start.
+wpsrc() {
+  local src="$tmp/wp-src"
+  if [ ! -d "$src" ]; then
+    git clone -q --depth 1 --branch "v$WARPPLUS_VERSION" "$gh/bepass-org/warp-plus" "$src"
+    (cd "$src" && CGO_ENABLED=0 GOTOOLCHAIN="$(wptoolchain "$src")" go build -trimpath -buildvcs=false -o "$tmp/warp-plus-host" ./cmd/warp-plus)
+    smoke warp-plus "$tmp/warp-plus-host" --help
+  fi
+  echo "$src"
+}
+wptoolchain() { sed -n 's/^toolchain //p' "$1/go.mod" | grep . || echo auto; }
 
 # Cores for each ABI. Android only lets an app run executables that ship as
 # native libraries, hence the lib*.so names. An empty asset name builds that
@@ -92,13 +122,10 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
     cp "$(find "$tmp/wp-$abi" -type f -iname 'warp-plus*' ! -iname '*.txt' | head -1)" "$out/libwarpplus.so"
     cp "$(find "$tmp/wp-$abi" -iname 'LICENSE*' | head -1)" "$app/src/main/assets/licenses/warp-plus-LICENSE.txt"
   else
-    # A module of its own, so the app's go.mod does not decide its versions.
-    local wp="$tmp/wp-src"
-    if [ ! -d "$wp" ]; then
-      mkdir -p "$wp"
-      (cd "$wp" && go mod init warpbuild && go get "github.com/bepass-org/warp-plus/cmd/warp-plus@v$WARPPLUS_VERSION")
-    fi
-    (cd "$wp" && gobuild "$abi" "$out/libwarpplus.so" -ldflags "-s -w" github.com/bepass-org/warp-plus/cmd/warp-plus)
+    local wp
+    wp="$(wpsrc)"
+    (cd "$wp" && toolchain="$(wptoolchain "$wp")" gobuild "$abi" "$out/libwarpplus.so" -ldflags "-s -w" ./cmd/warp-plus)
+    cp "$wp/LICENSE" "$app/src/main/assets/licenses/warp-plus-LICENSE.txt"
   fi
   chmod 755 "$out"/*.so
 }
