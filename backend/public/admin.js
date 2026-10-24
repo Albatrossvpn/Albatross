@@ -150,7 +150,7 @@ function openUser(u) {
   $("#u-save").textContent = u ? "Save" : "Create";
   $("#u-name").value = "";
   $("#u-pass").value = "";
-  fillLimits("u", u || { reset_days: 30, quota_bytes: 5 * GB });
+  fillLimits("u", u || { reset_days: 0, quota_bytes: 5 * GB });
   if (u) $("#u-toggle").textContent = u.disabled ? "Turn on" : "Turn off";
   $("#user-dialog").showModal();
 }
@@ -183,7 +183,7 @@ async function patch(body, done) {
   const r = await guard(() => call("PATCH", `users/${editing.id}`, body), $("#u-error"));
   if (r) { editing = r.user; refresh(); done && done(r); }
 }
-$("#u-reset-usage").addEventListener("click", () => patch({ reset_usage: true }, () => toast("Usage reset.")));
+$("#u-reset-usage").addEventListener("click", () => patch({ reset_usage: true }, () => toast("Recharged: the allowance is full again.")));
 $("#u-signout").addEventListener("click", () => patch({ sign_out: true }, () => toast("Signed out everywhere.")));
 $("#u-toggle").addEventListener("click", () => patch({ disabled: !editing.disabled }, (r) => {
   $("#u-toggle").textContent = r.user.disabled ? "Turn on" : "Turn off";
@@ -209,7 +209,7 @@ $("#bulk").addEventListener("click", () => {
   for (const id of ["b-copy", "b-download"]) $("#" + id).classList.add("hidden");
   $("#b-create").classList.remove("hidden");
   $("#b-error").textContent = "";
-  fillLimits("b", { reset_days: 30, quota_bytes: 5 * GB });
+  fillLimits("b", { reset_days: 0, quota_bytes: 5 * GB });
   $("#bulk-dialog").showModal();
 });
 $("#b-cancel").addEventListener("click", () => $("#bulk-dialog").close());
