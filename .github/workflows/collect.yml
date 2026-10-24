@@ -5,9 +5,11 @@ name: Collect servers
 # instead of hundreds of sources (see cmd/collect).
 on:
   schedule:
-    # Hourly, off the top of the hour: GitHub skips scheduled runs when it
-    # is busy, and a list hours old sends phones to servers that are gone.
-    - cron: "41 * * * *"
+    # Every 5 minutes. A run takes longer than that, so the "due" job lets a
+    # scheduled run through only when no other run is collecting: the list
+    # is rebuilt back to back, as fresh as a full collection can be.
+    # GitHub may still delay or drop some of these; the next one fills in.
+    - cron: "*/5 * * * *"
   # A change to the collector or its lists publishes at once instead of
   # waiting for the schedule, which GitHub may also delay or skip.
   push:
@@ -18,12 +20,25 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: collect
-  cancel-in-progress: false
-
 jobs:
+  due:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.age.outputs.run }}
+    steps:
+      - id: age
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Runs are not queued behind each other (a queue keeps only the
+          # newest and cancels the rest): a run stops when an older one is
+          # still going, so two starting together never both stop.
+          busy=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/collect.yml/runs?status=in_progress" \
+            --jq "[.workflow_runs[] | select(.id < $GITHUB_RUN_ID)] | length")
+          if [ "$busy" -gt 0 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
   collect:
+    needs: due
+    if: needs.due.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:

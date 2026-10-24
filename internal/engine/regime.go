@@ -106,6 +106,9 @@ var (
 // probes at once.
 const regimeEvery = 3 * time.Hour
 
+// regimeRecheck is how long to wait before confirming a changed regime.
+var regimeRecheck = 15 * time.Second
+
 // probeRegime runs every probe directly, outside the VPN, in parallel.
 func (e *Engine) probeRegime(ctx context.Context) (regime, regimeProbe) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -341,6 +344,26 @@ func (e *Engine) updateRegime() {
 	}
 	e.mu.Lock()
 	prev := e.reg
+	e.mu.Unlock()
+	// One probe on a weak mobile signal can miss the foreign download or
+	// the CDN edge and read as a much harder regime (or one lucky request
+	// as an open network). A change counts only when a second probe a
+	// little later still sees it.
+	if prev.Regime != regimeUnknown && r != prev.Regime {
+		select {
+		case <-e.ctx.Done():
+			return
+		case <-time.After(regimeRecheck):
+		}
+		r2, p2 := e.probeRegime(e.ctx)
+		if e.ctx.Err() != nil {
+			return
+		}
+		// The second reading wins; one that is back at the previous
+		// regime means the first was a fluke.
+		r, p = r2, p2
+	}
+	e.mu.Lock()
 	s := regimeState{Regime: r, Probe: p, At: time.Now(), History: append(prev.History, regimeSeen{r, time.Now()})}
 	if len(s.History) > 48 {
 		s.History = s.History[len(s.History)-48:]
