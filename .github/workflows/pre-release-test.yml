@@ -1,0 +1,192 @@
+# Pre-release checks run by the test thread. Lives only on this branch and
+# is never merged: it installs a Build run's APK on emulators from Android 5
+# to 16 (and the 32-bit ARM path through Android 11+ ARM translation),
+# connects a debuggable build on several Android versions, and upgrades a
+# Windows install of 0.3.3 to the Build run's installer.
+name: Pre-release test
+
+on:
+  push:
+    branches: ["claude/project-thread-yrz2j6"]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: pre-release-test
+  cancel-in-progress: true
+
+env:
+  # The Build run whose APK and installer are tested.
+  BUILD_RUN: "40118715522"
+  # The commit the debuggable app for the connection test is built from.
+  DEBUG_REF: "858861fd9bafa7f67ff006e453bb5cdf8c30035c"
+  GH_TOKEN: ${{ github.token }}
+  SINGBOX_VERSION: "1.14.3"
+  XRAY_VERSION: "26.9.30"
+  WARPPLUS_VERSION: "1.2.6"
+
+jobs:
+  apk:
+    name: Install on Android API ${{ matrix.api }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { api: 21, target: default }
+          - { api: 22, target: default }
+          - { api: 23, target: default }
+          - { api: 24, target: default }
+          - { api: 26, target: default }
+          - { api: 28, target: default }
+          - { api: 29, target: default }
+          - { api: 30, target: google_apis }
+          - { api: 31, target: google_apis }
+          - { api: 33, target: google_apis }
+          - { api: 34, target: google_apis }
+          - { api: 35, target: google_apis }
+          - { api: 36, target: google_apis }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get the APKs
+        run: |
+          mkdir -p apk dl
+          gh run download "$BUILD_RUN" -R "$GITHUB_REPOSITORY" -p 'Albatross-android-*' -D dl
+          find dl -name '*.apk' -exec mv {} apk/ \;
+          curl -fsSL --retry 3 -o apk/old-0.3.3.apk "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.3.3/Albatross-0.3.3-android.apk"
+          ls -la apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install, start, run the cores
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: bash .github/pre-release/apk-check.sh ${{ matrix.api }}
+      - name: Result
+        if: always()
+        run: |
+          cat out/result.txt || true
+          { echo "### Android API ${{ matrix.api }}"; sed 's/^/    /' out/result.txt; } >> "$GITHUB_STEP_SUMMARY" || true
+          ! grep -q '^FAIL' out/result.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: apk-api-${{ matrix.api }}
+          path: out/
+
+  debug-build:
+    name: Debuggable build for the connection test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEBUG_REF }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK and NDK
+        run: |
+          sdk="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$sdk" --licenses > /dev/null || true
+          "$sdk" "platforms;android-36" "build-tools;36.0.0" "ndk;27.3.13750724" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
+      - name: Build
+        env:
+          VERSION: 0.1.0-dev.prerelease
+        run: |
+          bash build/android/build.sh
+          cd android && ./gradlew --no-daemon -q assembleDebug
+          ls -la app/build/outputs/apk/debug/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 3
+
+  connect:
+    name: Connect on Android API ${{ matrix.api }}
+    needs: debug-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { api: 21, target: default }
+          - { api: 23, target: default }
+          - { api: 26, target: default }
+          - { api: 29, target: default }
+          - { api: 31, target: google_apis }
+          - { api: 34, target: google_apis }
+          - { api: 36, target: google_apis }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debug-apk
+          path: apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Connect
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: ${{ matrix.api }}
+          target: ${{ matrix.target }}
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          script: bash .github/pre-release/connect-check.sh ${{ matrix.api }}
+      - name: Result
+        if: always()
+        run: |
+          cat out/result.txt || true
+          { echo "### Connect, Android API ${{ matrix.api }}"; sed 's/^/    /' out/result.txt; } >> "$GITHUB_STEP_SUMMARY" || true
+          ! grep -q '^FAIL' out/result.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: connect-api-${{ matrix.api }}
+          path: out/
+
+  windows-upgrade:
+    name: Windows upgrade from 0.3.3
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get the installers
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force setup, dl | Out-Null
+          gh run download $env:BUILD_RUN -R $env:GITHUB_REPOSITORY -p 'Albatross-Setup-*' -D dl
+          Get-ChildItem -Recurse dl -Filter *.exe | Move-Item -Destination setup -Force
+          Invoke-WebRequest "https://github.com/$env:GITHUB_REPOSITORY/releases/download/v0.3.3/Albatross-Setup-0.3.3.exe" -OutFile old-0.3.3.exe
+          Get-ChildItem setup, old-0.3.3.exe
+      - name: Upgrade, run, uninstall
+        shell: pwsh
+        run: ./.github/pre-release/windows-upgrade.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-upgrade
+          path: |
+            *.log
+            win-out/
