@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -203,7 +205,9 @@ func TestRevokedSessionSignsOut(t *testing.T) {
 
 func TestFallsBackToNextAddress(t *testing.T) {
 	// A block page (HTML, 200) and a failing address come before the service.
+	var blockedHits atomic.Int32
 	blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		blockedHits.Add(1)
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("<html>blocked</html>"))
 	}))
@@ -218,6 +222,43 @@ func TestFallsBackToNextAddress(t *testing.T) {
 	c, _ := newTestClient(t, blocked.URL, broken.URL, ts.URL)
 	if _, err := c.Login(context.Background(), "ada", "correct horse"); err != nil {
 		t.Fatalf("login did not reach the service behind the broken addresses: %v", err)
+	}
+	// Later calls start with the address that answered.
+	blockedHits.Store(0)
+	if _, err := c.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := blockedHits.Load(); n != 0 {
+		t.Errorf("the blocked address was tried again %d times", n)
+	}
+}
+
+// A blocked address that hangs leaves time for the next within a short
+// deadline (connecting waits only a few seconds), and the address that
+// answered is tried first after a restart.
+func TestHangingAddressLeavesTimeForTheNext(t *testing.T) {
+	hang := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.Copy(io.Discard, r.Body) // so the server notices the client giving up
+		<-r.Context().Done()
+	}))
+	defer hang.Close()
+	ts := httptest.NewServer(&fakeService{})
+	defer ts.Close()
+	c, path := newTestClient(t, hang.URL, ts.URL)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := c.Login(ctx, "ada", "correct horse"); err != nil {
+		t.Fatal(err)
+	}
+	c = New([]string{hang.URL, ts.URL}, path, nil)
+	if got := c.last.Load(); got != 1 {
+		t.Fatalf("after a restart the first address tried is %d", got)
+	}
+	c.last.Store(0)
+	ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := c.Sync(ctx); err != nil {
+		t.Fatalf("sync did not reach the second address in time: %v", err)
 	}
 }
 
