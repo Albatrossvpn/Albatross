@@ -53,7 +53,12 @@ launch() { # label
   js="$(grep -E 'Uncaught (SyntaxError|ReferenceError|TypeError)' "$out/$label-logcat.txt" | grep -m2 -E 'app\.js|127\.0\.0\.1' | cut -c1-220 | tr '\n' ' ')"
   killed="$(grep -m1 -E 'Killing [0-9]+:app\.albatross\.vpn' "$out/$label-logcat.txt" | grep -vE 'crash|signal' | cut -c1-200)"
   abi="$(sh_ dumpsys package "$pkg" | grep -m1 primaryCpuAbi | tr -d ' ')"
-  if [ -n "$crash" ]; then log "FAIL $label: app crashed ($abi): $crash"
+  if [ -n "$crash" ] && [ "$label" = old033-arm64 ]; then
+    baseline_crashed=1
+    log "INFO $label: the released 0.3.3 also crashes under this emulator's ARM translation, so ARM results here say nothing about the new build: $crash"
+  elif [ -n "$crash" ] && [ -n "${baseline_crashed:-}" ] && [ "$label" != debug-x86_64 ] && [ "$label" != native ]; then
+    log "SKIP $label: crashed under ARM translation like 0.3.3 does ($abi): $crash"
+  elif [ -n "$crash" ]; then log "FAIL $label: app crashed ($abi): $crash"
   elif [ -n "$js" ]; then log "FAIL $label: the page's script does not run in this WebView, the UI is dead: $js"
   elif [ -n "$pid" ]; then log "PASS $label: app running, page script loaded (pid $pid, $abi)"
   elif [ -n "$killed" ]; then log "SKIP $label: the emulator killed the app for its own reasons: $killed"
@@ -71,7 +76,11 @@ cores() { # label abi-dir
     arg="${c#* }"
     res="$(timeout 60 adb shell "cd $libdir && ./$bin $arg" 2>&1 | tr -d '\r' | grep -v 'unsupported flags' | head -3 | tr '\n' ' ')"
     if echo "$res" | grep -qiE 'not found|inaccessible|denied|cannot|can.t execute|exec format|CANNOT LINK|No such file|Bad system call|Segmentation|panic:|fatal error:|SIGSYS'; then
-      log "FAIL $label core $bin: ${res:0:200}"
+      if [ -n "${baseline_crashed:-}" ] && [ "$dir" != x86_64 ]; then
+        log "SKIP $label core $bin under ARM translation (0.3.3 also crashes here): ${res:0:120}"
+      else
+        log "FAIL $label core $bin: ${res:0:200}"
+      fi
     elif echo "$res" | grep -qiE 'version|usage|commands|flags|^Xray [0-9]|^lyrebird [0-9]'; then
       log "PASS $label core $bin runs: ${res:0:100}"
     else
