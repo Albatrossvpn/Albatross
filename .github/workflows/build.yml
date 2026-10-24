@@ -315,8 +315,8 @@ jobs:
           files: dist/Albatross-Setup-*.exe
           generate_release_notes: true
 
-  # The installer job creates the release; this adds the portable zip and
-  # the APKs to it, so two jobs never race to create it.
+  # The installer job creates the release; this adds the APK to it, so two
+  # jobs never race to create it.
   release-assets:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
     needs: [build, installer, android]
@@ -324,12 +324,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Albatross-portable-${{ needs.build.outputs.version }}
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
           name: Albatross-android-${{ needs.build.outputs.version }}
           path: dist
+      # One download per platform: the Windows installer (added by the
+      # installer job) and one Android APK for 64-bit ARM phones. The x86_64
+      # APK is only for the emulator test.
+      - name: Name the APK
+        run: mv dist/*-android-arm64-v8a.apk "Albatross-${{ needs.build.outputs.version }}-android.apk"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.build.outputs.version }}
@@ -338,9 +339,7 @@ jobs:
           # the old app is removed.
           body: |
             Android: if you have 0.3.1 or older, uninstall it before installing this version (one time only). Later updates install over it.
-          files: |
-            dist/*.zip
-            dist/*.apk
+          files: Albatross-*-android.apk
       - uses: actions/checkout@v4
         with:
           ref: main
@@ -359,7 +358,7 @@ jobs:
           import json, os
           v = os.environ["VERSION"]
           rel = json.load(open("rel.json"))
-          keys = {"android-arm64-v8a.apk": "android-arm64-v8a", "android-x86_64.apk": "android-x86_64", "Setup-": "windows"}
+          keys = {"-android.apk": "android-arm64-v8a", "Setup-": "windows"}
           files = {}
           for a in rel["assets"]:
               for part, key in keys.items():
@@ -368,9 +367,16 @@ jobs:
           path = "repo/update.json"
           m = json.load(open(path))
           m["latest_version"] = v
+          # 0.3.2 and later download the new version through their own
+          # connection before they stop, so they may be required to update.
+          # Older versions (min_version) can only open a browser after
+          # disconnecting, which strands users where GitHub is filtered.
           if os.environ["FORCE"] == "true":
-              m["min_version"] = v
-          m["message"] = os.environ.get("MESSAGE", "")
+              m["require"] = v
+          # A release without a message keeps the last one (it may tell
+          # older versions how to update).
+          if os.environ.get("MESSAGE"):
+              m["message"] = os.environ["MESSAGE"]
           m["files"] = files
           with open(path, "w") as f:
               json.dump(m, f, indent=2)
