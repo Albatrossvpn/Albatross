@@ -13,7 +13,7 @@ const DEFAULTS = {
   default_quota_bytes: String(5 * 1024 ** 3),
   default_max_seconds: "0",
   default_valid_days: "0",
-  default_reset_days: "30",
+  default_reset_days: "0", // allowances renew only when the admin recharges them
   download_windows: "",
   download_android: "",
 };
