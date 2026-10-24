@@ -25,6 +25,11 @@ type state struct {
 	// Share is where other devices reach the proxy (Settings.AllowLAN).
 	Share    []string `json:"share,omitempty"`
 	SharePAC []string `json:"share_pac,omitempty"`
+	// Notice is an important message for the user (engine.Snapshot).
+	Notice         string `json:"notice,omitempty"`
+	HelpAvailable  bool   `json:"help_available"`
+	Helping        bool   `json:"helping"`
+	CrowdAvailable bool   `json:"crowd_available"`
 }
 
 type conn struct {
@@ -48,12 +53,16 @@ type publicSettings struct {
 	SecureOnly      bool   `json:"secure_only"`
 	AutoConnect     bool   `json:"auto_connect"`
 	StartWithSystem bool   `json:"start_with_system"`
+	AllowLAN        bool   `json:"allow_lan"`
+	HelpOthers      bool   `json:"help_others"`
+	ShareStats      bool   `json:"share_stats"`
 }
 
 func publicSettingsOf(s engine.Settings) publicSettings {
 	return publicSettings{
 		Mode: s.Mode, Bypass: s.Bypass, Protocol: s.Protocol, BlockAds: s.BlockAds,
 		SecureOnly: s.SecureOnly, AutoConnect: s.AutoConnect, StartWithSystem: s.StartWithSystem,
+		AllowLAN: s.AllowLAN, HelpOthers: s.HelpOthers, ShareStats: s.ShareStats,
 	}
 }
 
@@ -63,6 +72,7 @@ func publicState(s engine.Snapshot) state {
 		Countries: s.Countries, Settings: publicSettingsOf(s.Settings), Protocols: engine.ProtocolChoices(),
 		Admin: s.Admin, Mobile: s.Mobile, Version: s.Version, Update: s.Update, Account: s.Account,
 		Share: s.Share, SharePAC: s.SharePAC,
+		Notice: s.Notice, HelpAvailable: s.HelpAvailable, Helping: s.Helping, CrowdAvailable: s.CrowdAvailable,
 	}
 	for _, c := range s.Countries {
 		out.Servers += c.Servers

@@ -1,20 +1,49 @@
-# Free dependency updates: one weekly pull request per ecosystem.
+# Free dependency updates: at most one pull request per ecosystem, minor
+# and patch versions only. Major versions change behaviour and break the
+# build, so they are taken by hand.
 version: 2
 updates:
   - package-ecosystem: gomod
-    directory: /
+    directories: ["/", "/tools/snowflake"]
     schedule:
       interval: weekly
-    open-pull-requests-limit: 3
+    open-pull-requests-limit: 1
+    groups:
+      all:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      all:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: gradle
     directory: /android
     schedule:
       interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      all:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: npm
     directory: /backend
     schedule:
       interval: monthly
+    open-pull-requests-limit: 1
+    groups:
+      all:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]

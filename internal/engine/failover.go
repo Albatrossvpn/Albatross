@@ -580,6 +580,7 @@ func (e *Engine) failover(ctx context.Context, c *connection, dead *member) bool
 		return false
 	}
 	e.logf("warn", "No ready server answered; preparing a new group in %s…", countryName(c.home))
+	e.refreshHotNow()
 	e.rebuild(c, c.members)
 	return false
 }

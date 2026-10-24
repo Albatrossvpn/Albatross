@@ -46,7 +46,7 @@ type Platform interface {
 	LanAddrs() string
 	// InstallUpdate opens the system installer on a downloaded APK of a
 	// newer version, which installs over this one (same signing key).
-	InstallUpdate(path string)
+	InstallUpdate(path string) error
 }
 
 var (
@@ -85,17 +85,14 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 		}
 	}
 	e, err := engine.New(engine.Options{
-		Sources:  only,
-		DataDir:  filepath.Join(dataDir, "albatross"),
-		AppDirs:  []string{libDir},
-		SysProxy: vpn,
-		Version:  Version,
-		LocalDNS: dns,
-		Mobile:   true,
-		InstallUpdate: func(path string) error {
-			p.InstallUpdate(path)
-			return nil
-		},
+		Sources:       only,
+		DataDir:       filepath.Join(dataDir, "albatross"),
+		AppDirs:       []string{libDir},
+		SysProxy:      vpn,
+		Version:       Version,
+		LocalDNS:      dns,
+		Mobile:        true,
+		InstallUpdate: p.InstallUpdate,
 		LANAddrs: func() []string {
 			var out []string
 			for _, a := range strings.Split(p.LanAddrs(), ",") {
@@ -160,6 +157,15 @@ func Resume() bool {
 	e := eng
 	mu.Unlock()
 	return e != nil && e.Resume()
+}
+
+// Connected reports whether traffic is flowing through a server, for the
+// VPN notification: while it searches or reconnects, it is not.
+func Connected() bool {
+	mu.Lock()
+	e := eng
+	mu.Unlock()
+	return e != nil && e.Snapshot().Status == engine.StatusConnected
 }
 
 // SetDNS tells the engine the current network's resolver; the app calls it
