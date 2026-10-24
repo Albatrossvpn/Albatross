@@ -43,10 +43,13 @@ func servePAC(ctx context.Context, proxyAddr string) {
 		}
 		proxy := net.JoinHostPort(host, port)
 		w.Header().Set("Content-Type", "application/x-ns-proxy-autoconfig")
+		// Private addresses are matched as text, never with isInNet on a
+		// name: that resolves it on the client, and Iran's resolvers answer
+		// blocked sites with 10.10.34.x, which would send exactly those
+		// sites around the VPN.
 		fmt.Fprintf(w, `function FindProxyForURL(url, host) {
   if (isPlainHostName(host) || shExpMatch(host, "*.local") ||
-      isInNet(host, "10.0.0.0", "255.0.0.0") || isInNet(host, "172.16.0.0", "255.240.0.0") ||
-      isInNet(host, "192.168.0.0", "255.255.0.0") || isInNet(host, "127.0.0.0", "255.0.0.0"))
+      (/^[0-9.]+$/.test(host) && /^(10|127)\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[01])\./.test(host)))
     return "DIRECT";
   return "PROXY %s; SOCKS5 %s";
 }
