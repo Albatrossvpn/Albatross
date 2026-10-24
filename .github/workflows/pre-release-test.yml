@@ -22,12 +22,12 @@ concurrency:
 env:
   # The Build run whose APK and installer are tested; empty tests only the
   # debuggable build (when the commit's own Build run has no APK).
-  BUILD_RUN: ""
+  BUILD_RUN: "40132592374"
   # The commit the debuggable app for the tests is built from.
   DEBUG_REF: "6d030e50841a67240465dbbfe9394f21b547ee47"
   # 1 switches off the app's fatal NewApi lint in the debuggable build only,
   # so a commit that fails it can still be tested on newer Android.
-  SKIP_NEWAPI_LINT: "1"
+  SKIP_NEWAPI_LINT: "0"
   GH_TOKEN: ${{ github.token }}
   # The release key's certificate (DN CN=Albatross), as 0.3.3 is signed.
   RELEASE_CERT: "73cc588ac98efae650cb158cbfe118e867cc013ab36827f64a45c70309ba3646"
