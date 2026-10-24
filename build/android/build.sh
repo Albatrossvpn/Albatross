@@ -160,6 +160,18 @@ tor x86_64 android-x86_64
 mkdir -p "$app/src/main/assets/licenses"
 printf 'Tor and its pluggable transports are from the Tor Project (https://www.torproject.org), under the 3-clause BSD license.\n' > "$app/src/main/assets/licenses/tor-LICENSE.txt"
 
+# Today's root certificates, for phones whose own store lacks them
+# (internal/roots), from this machine's ca-certificates package, which the
+# OS keeps current. Only Mozilla's: never a CA this machine alone trusts,
+# such as a company proxy's. Without them the committed copy stays.
+moz=/usr/share/ca-certificates/mozilla
+n="$(cat "$moz"/*.crt 2>/dev/null | grep -c 'BEGIN CERTIFICATE' || true)"
+if [ "$n" -gt 100 ]; then
+  { printf "# Mozilla's root certificates (MPL 2.0) from Debian/Ubuntu's ca-certificates.\n# build/android/build.sh refreshes this file.\n"; awk 1 "$moz"/*.crt; } > "$root/internal/roots/roots.pem"
+  echo "bundled $n root certificates"
+fi
+printf "The engine's root certificates are Mozilla's (https://wiki.mozilla.org/CA), under the Mozilla Public License 2.0.\n" > "$app/src/main/assets/licenses/mozilla-roots-LICENSE.txt"
+
 # The engine, UI and tun2socks as one Android library.
 go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target=android/arm64,android/arm,android/amd64 -androidapi "$api" \
