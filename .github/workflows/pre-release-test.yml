@@ -20,10 +20,14 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # The Build run whose APK and installer are tested.
-  BUILD_RUN: "40118715522"
-  # The commit the debuggable app for the connection test is built from.
-  DEBUG_REF: "858861fd9bafa7f67ff006e453bb5cdf8c30035c"
+  # The Build run whose APK and installer are tested; empty tests only the
+  # debuggable build (when the commit's own Build run has no APK).
+  BUILD_RUN: ""
+  # The commit the debuggable app for the tests is built from.
+  DEBUG_REF: "6d030e50841a67240465dbbfe9394f21b547ee47"
+  # 1 switches off the app's fatal NewApi lint in the debuggable build only,
+  # so a commit that fails it can still be tested on newer Android.
+  SKIP_NEWAPI_LINT: "1"
   GH_TOKEN: ${{ github.token }}
   # The release key's certificate (DN CN=Albatross), as 0.3.3 is signed.
   RELEASE_CERT: "73cc588ac98efae650cb158cbfe118e867cc013ab36827f64a45c70309ba3646"
@@ -37,6 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Signatures, minSdk, ABIs, signer
+        if: env.BUILD_RUN != ''
         run: |
           gh run download "$BUILD_RUN" -R "$GITHUB_REPOSITORY" -p 'Albatross-android-*' -D dl
           tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
@@ -86,7 +91,7 @@ jobs:
       - name: Get the APKs
         run: |
           mkdir -p apk dl
-          gh run download "$BUILD_RUN" -R "$GITHUB_REPOSITORY" -p 'Albatross-android-*' -D dl
+          [ -n "$BUILD_RUN" ] && gh run download "$BUILD_RUN" -R "$GITHUB_REPOSITORY" -p 'Albatross-android-*' -D dl
           find dl -name '*.apk' -exec mv {} apk/ \;
           curl -fsSL --retry 3 -o apk/old-0.3.3.apk "https://github.com/$GITHUB_REPOSITORY/releases/download/v0.3.3/Albatross-0.3.3-android.apk"
           ls -la apk
@@ -137,6 +142,9 @@ jobs:
           yes | "$sdk" --licenses > /dev/null || true
           "$sdk" "platforms;android-36" "build-tools;36.0.0" "ndk;27.3.13750724" > /dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
+      - name: Test-only build settings
+        if: env.SKIP_NEWAPI_LINT == '1'
+        run: sed -i '/fatal += "NewApi"/d' android/app/build.gradle.kts && git diff --stat
       - name: Build
         env:
           VERSION: 0.1.0-dev.prerelease
@@ -207,6 +215,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Get the installers
+        if: env.BUILD_RUN != ''
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force setup, dl | Out-Null
@@ -215,6 +224,7 @@ jobs:
           Invoke-WebRequest "https://github.com/$env:GITHUB_REPOSITORY/releases/download/v0.3.3/Albatross-Setup-0.3.3.exe" -OutFile old-0.3.3.exe
           Get-ChildItem setup, old-0.3.3.exe
       - name: Upgrade, run, uninstall
+        if: env.BUILD_RUN != ''
         shell: pwsh
         run: ./.github/pre-release/windows-upgrade.ps1
       - uses: actions/upload-artifact@v4

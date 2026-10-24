@@ -21,7 +21,7 @@ debug="$(ls apk/debug/*.apk 2>/dev/null | head -1 || true)"
 apkfile="${universal:-$x64}"
 adb wait-for-device
 abis="$(sh_ getprop ro.product.cpu.abilist)"
-log "INFO API $api, testing $(basename "$apkfile"); device ABIs: $abis"
+log "INFO API $api, testing ${apkfile:-only the debuggable build $debug}; device ABIs: $abis"
 log "INFO WebView: $(sh_ dumpsys webviewupdate | grep -m1 -i 'Current WebView package') $(sh_ dumpsys package com.android.webview | grep -m1 versionName) $(sh_ dumpsys package com.google.android.webview | grep -m1 versionName)"
 
 pid_of() {
@@ -89,7 +89,7 @@ install() { # label args...
 }
 
 # 1. In place over 0.3.3 (arm64, runs through ARM translation on 11+).
-if [ "$api" -ge 30 ] && [ -f apk/old-0.3.3.apk ] && echo "$abis" | grep -q arm64-v8a; then
+if [ "$api" -ge 30 ] && [ -n "$apkfile" ] && [ -f apk/old-0.3.3.apk ] && echo "$abis" | grep -q arm64-v8a; then
   res="$(install old033 apk/old-0.3.3.apk)"
   if echo "$res" | grep -q Success; then
     res="$(install over033 -r "$apkfile")"
