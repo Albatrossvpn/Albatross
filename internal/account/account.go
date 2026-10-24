@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -110,6 +111,9 @@ type Client struct {
 
 	mu sync.Mutex
 	st stored
+	// last is the index in URLs of the address that answered last, tried
+	// first, so an address that is blocked costs its timeout only once.
+	last atomic.Int32
 }
 
 // New returns a client with the session at path loaded.
@@ -259,7 +263,10 @@ func (c *Client) call(ctx context.Context, method, path, token string, body, out
 		payload, _ = json.Marshal(body)
 	}
 	var last error = ErrUnreachable
-	for _, base := range c.URLs {
+	first := int(c.last.Load())
+	for i := range c.URLs {
+		k := (first + i) % len(c.URLs)
+		base := c.URLs[k]
 		hc := http.DefaultClient
 		if h, ok := ctx.Value(clientKey{}).(*http.Client); ok {
 			hc = h
@@ -304,6 +311,7 @@ func (c *Client) call(ctx context.Context, method, path, token string, body, out
 			if e.Error == "" {
 				e.Error = resp.Status
 			}
+			c.last.Store(int32(k))
 			return &Error{Status: resp.StatusCode, Message: e.Error}
 		}
 		if out != nil {
@@ -312,6 +320,7 @@ func (c *Client) call(ctx context.Context, method, path, token string, body, out
 				continue
 			}
 		}
+		c.last.Store(int32(k))
 		return nil
 	}
 	return last

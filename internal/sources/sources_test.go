@@ -50,14 +50,15 @@ func TestSealedOwnList(t *testing.T) {
 
 func TestMirrorsUseGitHubAPIOnlyForOwnRepo(t *testing.T) {
 	defer func(old string) { WorkerMirror = old }(WorkerMirror)
-	WorkerMirror = "https://lists.example.workers.dev"
+	WorkerMirror = "https://accounts.example.org/, https://lists.example.workers.dev"
 	own := Mirrors(CentralBase + "fresh.txt")
 	if !slices.Contains(own, "https://api.github.com/repos/cezomagoanlace29861-jpg/Albatross/contents/fresh.txt?ref=servers") ||
-		!slices.Contains(own, WorkerMirror+"/list/servers/fresh.txt") {
+		!slices.Contains(own, "https://accounts.example.org/list/servers/fresh.txt") ||
+		!slices.Contains(own, "https://lists.example.workers.dev/list/servers/fresh.txt") {
 		t.Fatalf("own repo: %v", own)
 	}
 	for _, m := range Mirrors("https://raw.githubusercontent.com/someone/lists/main/sub.txt") {
-		if strings.Contains(m, "api.github.com") || strings.HasPrefix(m, WorkerMirror) {
+		if strings.Contains(m, "api.github.com") || strings.Contains(m, "example") {
 			t.Fatalf("other repo uses the API: %s", m)
 		}
 	}
