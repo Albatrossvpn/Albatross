@@ -4,18 +4,29 @@ name: Hot servers
 # hot.txt never lists servers that stopped working an hour ago.
 on:
   schedule:
-    - cron: "11,26,56 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
-concurrency:
-  group: collect
-  cancel-in-progress: false
-
 jobs:
+  due:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.busy.outputs.run }}
+    steps:
+      - id: busy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A run stops when an older one is still going (see collect.yml).
+          busy=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/hot.yml/runs?status=in_progress" \
+            --jq "[.workflow_runs[] | select(.id < $GITHUB_RUN_ID)] | length")
+          if [ "$busy" -gt 0 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
   hot:
+    needs: due
+    if: needs.due.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -52,4 +63,16 @@ jobs:
           git add hot.txt
           git diff --cached --quiet && exit 0
           git commit -qm "Hot servers $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:servers
+          # A full collection may have replaced the branch meanwhile: put
+          # this hot.txt on top of the new one.
+          url="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          cp hot.txt "$RUNNER_TEMP/hot.txt"
+          for try in 1 2 3; do
+            git push -q "$url" HEAD:servers && exit 0
+            git fetch -q "$url" servers && git reset -q --hard FETCH_HEAD
+            cp "$RUNNER_TEMP/hot.txt" hot.txt
+            git add hot.txt
+            git diff --cached --quiet && exit 0
+            git commit -qm "Hot servers $(date -u +%Y-%m-%dT%H:%MZ)"
+          done
+          exit 1

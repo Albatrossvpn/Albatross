@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -847,7 +848,24 @@ func (e *Engine) setProxy(gen int, addr string, bypass []string) error {
 		return err
 	}
 	e.proxyOn = true
+	e.rememberProxySet(addr)
 	return nil
+}
+
+// rememberProxySet records the address the system proxy points at ("" when
+// cleared), so the next start can undo it after a crash.
+func (e *Engine) rememberProxySet(addr string) {
+	path := filepath.Join(e.dir, "system-proxy")
+	if addr == "" {
+		os.Remove(path)
+		return
+	}
+	os.WriteFile(path, []byte(addr), 0o644)
+}
+
+func (e *Engine) lastProxySet() string {
+	b, _ := os.ReadFile(filepath.Join(e.dir, "system-proxy"))
+	return strings.TrimSpace(string(b))
 }
 
 // clearProxy undoes setProxy, if it is in effect.
@@ -857,6 +875,7 @@ func (e *Engine) clearProxy() {
 	if e.proxyOn {
 		e.opt.SysProxy.Clear()
 		e.proxyOn = false
+		e.rememberProxySet("")
 	}
 }
 

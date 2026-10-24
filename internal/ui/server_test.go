@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -45,5 +46,18 @@ func TestAPIGuards(t *testing.T) {
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Albatross") {
 		t.Fatalf("index: %d", w.Code)
+	}
+}
+
+// Every switch on the settings page must come back in the state, or a
+// switch shown off can never be turned off.
+func TestSettingsRoundTrip(t *testing.T) {
+	b, _ := json.Marshal(publicSettingsOf(engine.Settings{AllowLAN: true, HelpOthers: true, ShareStats: true}))
+	var m map[string]any
+	json.Unmarshal(b, &m)
+	for _, k := range []string{"allow_lan", "help_others", "share_stats"} {
+		if m[k] != true {
+			t.Errorf("%s missing from the page's settings: %s", k, b)
+		}
 	}
 }
