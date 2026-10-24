@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# Prints the account service's address for a release build: the Worker in
-# backend/ on the Cloudflare account's workers.dev subdomain. It is read from
-# Cloudflare at build time so the address is never written into this public
-# repository.
+# Prints the account service's addresses for a release build, comma
+# separated, in the order the app tries them: the Worker's own domains
+# (custom_domain routes in backend/wrangler.toml, then the repository
+# variable SITE_DOMAIN). The Worker answers on nothing else; a workers.dev
+# address would tie it to the Cloudflare account's other Workers.
 set -euo pipefail
-: "${CLOUDFLARE_API_TOKEN:?the CLOUDFLARE_API_TOKEN secret is needed}"
-: "${CLOUDFLARE_ACCOUNT_ID:?the CLOUDFLARE_ACCOUNT_ID secret is needed}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
-name="$(sed -n 's/^name *= *"\(.*\)"/\1/p' "$root/backend/wrangler.toml" | head -1)"
-sub="$(curl -fsS --retry 3 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-  "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" |
-  python3 -c 'import json, sys; print(json.load(sys.stdin)["result"]["subdomain"])')"
-[ -n "$name" ] && [ -n "$sub" ]
-echo "https://$name.$sub.workers.dev"
+{
+  sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' "$root/backend/wrangler.toml"
+  for d in ${SITE_DOMAIN:-}; do echo "$d"; done
+} | awk 'NF && !seen[$0]++ { print "https://" $0 }' | paste -sd, - | grep . ||
+  { echo "No account service domain: add a custom_domain route to backend/wrangler.toml." >&2; exit 1; }
