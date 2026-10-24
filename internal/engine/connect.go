@@ -736,6 +736,9 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 			for _, s := range r.Suffixes {
 				bypass = append(bypass, "*"+s)
 			}
+			for _, d := range r.Extra {
+				bypass = append(bypass, d, "*."+d)
+			}
 		}
 		switch err := e.setProxy(gen, c.proxyAddr, bypass); {
 		case errors.Is(err, errStale):
@@ -983,12 +986,12 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		ruleSets = append(ruleSets, localRuleSet(r.geoSiteTag(), o.rulesDir), localRuleSet(r.geoIPTag(), o.rulesDir),
 			map[string]any{"type": "local", "tag": r.learnedTag(), "format": "source", "path": r.learnedFile(o.rulesDir)})
 		rules = append(rules, map[string]any{
-			"domain_suffix": r.Suffixes,
+			"domain_suffix": r.names(),
 			"rule_set":      []string{r.geoSiteTag(), r.learnedTag(), r.geoIPTag()},
 			"outbound":      "direct",
 		})
 		dnsRules = append(dnsRules, map[string]any{
-			"domain_suffix": r.Suffixes, "rule_set": []string{r.geoSiteTag(), r.learnedTag()},
+			"domain_suffix": r.names(), "rule_set": []string{r.geoSiteTag(), r.learnedTag()},
 			"action": "route", "server": "local",
 		})
 	}
