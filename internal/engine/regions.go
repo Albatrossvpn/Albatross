@@ -1,6 +1,9 @@
 package engine
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"strings"
+)
 
 // region is a place whose own sites can be opened directly instead of
 // through the VPN ("bypass local sites"). Sites of the region are matched by
@@ -17,12 +20,36 @@ type region struct {
 	// Without it they name servers near the VPN server and the site sees
 	// a foreign visitor, which many of them refuse.
 	Subnet string
+	// Extra are sites of the region missing from its domain list; each
+	// also covers its subdomains.
+	Extra []string
 }
 
 // regions are the choices, in the order they are listed.
 var regions = []region{
 	{Code: "CN", Name: "China", Suffixes: []string{".cn", ".xn--fiqs8s", ".xn--fiqz9s"}},
-	{Code: "IR", Name: "Iran", Suffixes: []string{".ir", ".xn--mgba3a4f16a"}, Subnet: "2.176.0.0/24"}, // TCI
+	{Code: "IR", Name: "Iran", Suffixes: []string{".ir", ".xn--mgba3a4f16a"}, Subnet: "2.176.0.0/24", // TCI
+		Extra: []string{"aparatcdn.com", "abrarvan.com", "snappmarket.com", "ofogh-kourosh.com", "excoino.com", "chabok.io", "behnevis.com"}},
+}
+
+// names are the domain suffixes the region's rules always match: its
+// top-level domains and Extra (sing-box's domain_suffix matches a name and
+// its subdomains, never a longer word).
+func (r region) names() []string { return append(append([]string{}, r.Suffixes...), r.Extra...) }
+
+// owns reports whether host is the region's by its name alone.
+func (r region) owns(host string) bool {
+	for _, s := range r.Suffixes {
+		if strings.HasSuffix(host, s) {
+			return true
+		}
+	}
+	for _, d := range r.Extra {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			return true
+		}
+	}
+	return false
 }
 
 func findRegion(code string) (region, bool) {
