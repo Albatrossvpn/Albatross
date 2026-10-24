@@ -244,6 +244,14 @@ func (c *Client) saveLocked() error {
 	return os.Rename(tmp, c.Path)
 }
 
+type clientKey struct{}
+
+// WithClient makes the calls made with ctx go through hc, such as a server
+// the app found working while the service cannot be reached directly.
+func WithClient(ctx context.Context, hc *http.Client) context.Context {
+	return context.WithValue(ctx, clientKey{}, hc)
+}
+
 // call sends one request to the first address that answers.
 func (c *Client) call(ctx context.Context, method, path, token string, body, out any) error {
 	var payload []byte
@@ -253,7 +261,9 @@ func (c *Client) call(ctx context.Context, method, path, token string, body, out
 	var last error = ErrUnreachable
 	for _, base := range c.URLs {
 		hc := http.DefaultClient
-		if c.HTTP != nil {
+		if h, ok := ctx.Value(clientKey{}).(*http.Client); ok {
+			hc = h
+		} else if c.HTTP != nil {
 			if h := c.HTTP(); h != nil {
 				hc = h
 			}

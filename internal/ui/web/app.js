@@ -170,6 +170,9 @@ $("login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("login-error").textContent = "";
   $("login-btn").disabled = true;
+  // Where the account service is filtered, signing in first finds a
+  // server to go through, which can take a while.
+  $("login-btn").textContent = "Signing in…";
   try {
     await api("POST", "/api/login", { username: $("login-user").value, password: $("login-pass").value });
     $("login-pass").value = "";
@@ -178,11 +181,8 @@ $("login-form").addEventListener("submit", async (e) => {
     $("login-error").textContent = err.message;
   } finally {
     $("login-btn").disabled = false;
+    $("login-btn").textContent = "Sign in";
   }
-});
-$("signup-link").addEventListener("click", () => {
-  const site = state && state.account.site_url;
-  if (site) api("POST", "/api/open", { url: site + "account.html#signup" }).catch((e) => toast(e.message));
 });
 $("logout-btn").addEventListener("click", async () => {
   await api("POST", "/api/logout").catch((e) => toast(e.message));
