@@ -21,13 +21,18 @@ import (
 
 // Sites of the bypassed region that are missing from its domain list go
 // through the VPN in proxy mode, where the core is handed names rather than
-// addresses, so the list of the region's addresses never applies to them;
-// many of those sites refuse foreign visitors. While connected, the names
-// the VPN carries are looked up through the VPN, and those that resolve to
-// addresses of the region are added to a list of their own. The core reloads
-// that list by itself, so from the next connection on they go direct. The
-// local resolver is never asked (it would see every site the user opens),
-// and a failed lookup changes nothing.
+// addresses, so the list of the region's addresses never applies to them.
+// Elsewhere they also go through it when their DNS names a server abroad,
+// as CDNs with servers in several countries do. Many of those sites refuse
+// foreign visitors. While connected, the names the VPN carries are looked up
+// through the VPN, and those that belong to the region are added to a list
+// of their own: names that resolve to the region's addresses or to a name of
+// the region (a CNAME such as *.arvancloud.ir). Where a site's DNS is hosted
+// says nothing about where it is served, so that is never a sign. The core
+// reloads that list by itself, and the name's open connections are
+// closed so apps reconnect directly at once. The local resolver is never
+// asked (it would see every site the user opens), and a failed lookup
+// changes nothing.
 const (
 	maxLearned = 5000
 	// learnEvery is how often the connection list is read while traffic
@@ -43,9 +48,9 @@ const (
 var dohServers = []string{"https://dns.google/resolve", "https://cloudflare-dns.com/dns-query"}
 
 type learner struct {
-	path     string
-	suffixes []string
-	ranges   []ipRange
+	path   string
+	region region
+	ranges []ipRange
 
 	mu      sync.Mutex
 	learned map[string]bool
@@ -96,12 +101,12 @@ func newLearner(rulesDir string, r region) *learner {
 		return nil
 	}
 	l := &learner{
-		path:     r.learnedFile(rulesDir),
-		suffixes: r.Suffixes,
-		ranges:   ranges,
-		learned:  map[string]bool{},
-		checked:  map[string]time.Time{},
-		queue:    make(chan string, 64),
+		path:    r.learnedFile(rulesDir),
+		region:  r,
+		ranges:  ranges,
+		learned: map[string]bool{},
+		checked: map[string]time.Time{},
+		queue:   make(chan string, 64),
 	}
 	for _, n := range readLearned(l.path) {
 		l.learned[n] = true
@@ -111,13 +116,8 @@ func newLearner(rulesDir string, r region) *learner {
 
 // want reports whether host should be looked up now, and marks it.
 func (l *learner) want(host string) bool {
-	if host == "" || strings.Contains(host, ":") {
+	if host == "" || strings.Contains(host, ":") || l.region.owns(host) {
 		return false
-	}
-	for _, s := range l.suffixes {
-		if strings.HasSuffix(host, s) {
-			return false
-		}
 	}
 	if _, err := netip.ParseAddr(host); err == nil {
 		return false
@@ -142,6 +142,23 @@ func (l *learner) local(addrs []netip.Addr) bool {
 		}
 	}
 	return false
+}
+
+// ownName reports whether any of names is the region's by its name.
+func (l *learner) ownName(names []string) bool {
+	for _, n := range names {
+		if l.region.owns(n) {
+			return true
+		}
+	}
+	return false
+}
+
+// isLocal looks host up through client and reports whether it is served
+// from the region: its addresses, or a name of the region it is an alias of.
+func (l *learner) isLocal(ctx context.Context, client *http.Client, host, subnet string) bool {
+	a, err := lookupThrough(ctx, client, host, subnet)
+	return err == nil && (l.local(a.addrs) || l.ownName(a.names))
 }
 
 // add records host as local and rewrites the list.
@@ -170,12 +187,14 @@ func (e *Engine) learnLocal(ctx context.Context, c *connection, r region) {
 				case <-ctx.Done():
 					return
 				case host := <-l.queue:
-					addrs, err := lookupThrough(ctx, e.proxyClient(), host, r.Subnet)
-					if err != nil || !l.local(addrs) {
+					if !l.isLocal(ctx, e.proxyClient(), host, r.Subnet) {
 						continue
 					}
 					if l.add(host) == nil {
-						e.logf("info", "%q is a local site; it will open directly from now on.", host)
+						e.logf("info", "%q is a local site; it opens directly from now on.", host)
+						// The core has the new list a moment after it is
+						// written; then the app reconnects directly.
+						time.AfterFunc(2*time.Second, func() { c.closeHost(ctx, host) })
 					}
 				}
 			}
@@ -210,10 +229,14 @@ func (e *Engine) learnLocal(ctx context.Context, c *connection, r region) {
 // that sign people out (stickyDomains).
 var viaVPN = map[string]bool{"proxy": true, "exit": true, "sticky": true}
 
-// proxiedHosts lists the names of open connections going through the VPN.
-func (c *connection) proxiedHosts(ctx context.Context) []string {
+// openConn is a connection open in the core that goes through the VPN.
+type openConn struct{ id, host string }
+
+// vpnConns lists the open connections going through the VPN.
+func (c *connection) vpnConns(ctx context.Context) []openConn {
 	var list struct {
 		Connections []struct {
+			ID       string `json:"id"`
 			Metadata struct {
 				Host string `json:"host"`
 			} `json:"metadata"`
@@ -223,38 +246,71 @@ func (c *connection) proxiedHosts(ctx context.Context) []string {
 	if _, err := c.api(ctx, http.MethodGet, "/connections", nil, &list, 3*time.Second); err != nil {
 		return nil
 	}
-	seen := map[string]bool{}
-	var out []string
+	var out []openConn
 	for _, conn := range list.Connections {
 		h := strings.ToLower(strings.TrimSuffix(conn.Metadata.Host, "."))
-		if h == "" || seen[h] || len(conn.Chains) == 0 || !viaVPN[conn.Chains[len(conn.Chains)-1]] {
+		if h == "" || len(conn.Chains) == 0 || !viaVPN[conn.Chains[len(conn.Chains)-1]] {
 			continue
 		}
-		seen[h] = true
-		out = append(out, h)
+		out = append(out, openConn{conn.ID, h})
 	}
 	return out
 }
 
-// lookupThrough resolves host's IPv4 addresses with DNS-over-HTTPS through
-// client, as asked from subnet (see region.Subnet) where the server
-// supports it.
-func lookupThrough(ctx context.Context, client *http.Client, host, subnet string) ([]netip.Addr, error) {
+// proxiedHosts lists the names of open connections going through the VPN.
+func (c *connection) proxiedHosts(ctx context.Context) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, o := range c.vpnConns(ctx) {
+		if !seen[o.host] {
+			seen[o.host] = true
+			out = append(out, o.host)
+		}
+	}
+	return out
+}
+
+// closeHost closes host's connections through the VPN, so apps open them
+// again, directly now that host is known to be local.
+func (c *connection) closeHost(ctx context.Context, host string) {
+	for _, o := range c.vpnConns(ctx) {
+		if o.host == host {
+			c.api(ctx, http.MethodDelete, "/connections/"+url.PathEscape(o.id), nil, nil, 2*time.Second)
+		}
+	}
+}
+
+// DNS record types.
+const (
+	dnsA     = 1
+	dnsCNAME = 5
+)
+
+// dnsAnswer is what a lookup found: IPv4 addresses, and the names it is an
+// alias of (CNAME targets).
+type dnsAnswer struct {
+	addrs []netip.Addr
+	names []string
+}
+
+// lookupThrough looks host up with DNS-over-HTTPS through client, as asked
+// from subnet (see region.Subnet) where the server supports it.
+func lookupThrough(ctx context.Context, client *http.Client, host, subnet string) (dnsAnswer, error) {
 	if client == nil {
-		return nil, errors.New("not connected")
+		return dnsAnswer{}, errors.New("not connected")
 	}
 	var lastErr error
 	for _, s := range dohServers {
-		addrs, err := dohQuery(ctx, client, s, host, subnet)
+		a, err := dohQuery(ctx, client, s, host, subnet)
 		if err == nil {
-			return addrs, nil
+			return a, nil
 		}
 		lastErr = err
 	}
-	return nil, lastErr
+	return dnsAnswer{}, lastErr
 }
 
-func dohQuery(ctx context.Context, client *http.Client, server, host, subnet string) ([]netip.Addr, error) {
+func dohQuery(ctx context.Context, client *http.Client, server, host, subnet string) (dnsAnswer, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 	q := url.Values{"name": {host}, "type": {"A"}}
@@ -263,37 +319,46 @@ func dohQuery(ctx context.Context, client *http.Client, server, host, subnet str
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+"?"+q.Encode(), nil)
 	if err != nil {
-		return nil, err
+		return dnsAnswer{}, err
 	}
 	req.Header.Set("Accept", "application/dns-json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return dnsAnswer{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New(resp.Status)
+		return dnsAnswer{}, errors.New(resp.Status)
+	}
+	type record struct {
+		Type int    `json:"type"`
+		Data string `json:"data"`
 	}
 	var r struct {
-		Status int `json:"Status"`
-		Answer []struct {
-			Type int    `json:"type"`
-			Data string `json:"data"`
-		} `json:"Answer"`
+		Status int      `json:"Status"`
+		Answer []record `json:"Answer"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&r); err != nil {
-		return nil, err
+		return dnsAnswer{}, err
 	}
-	var out []netip.Addr
-	for _, a := range r.Answer {
-		if a.Type != 1 {
-			continue
-		}
-		if ip, err := netip.ParseAddr(a.Data); err == nil {
-			out = append(out, ip)
+	return parseAnswer(r.Answer, func(x record) (int, string) { return x.Type, x.Data }), nil
+}
+
+// parseAnswer collects the addresses and CNAME targets of a DNS-over-HTTPS
+// answer.
+func parseAnswer[T any](answer []T, get func(T) (int, string)) dnsAnswer {
+	var out dnsAnswer
+	for _, x := range answer {
+		switch t, data := get(x); t {
+		case dnsA:
+			if ip, err := netip.ParseAddr(data); err == nil {
+				out.addrs = append(out.addrs, ip)
+			}
+		case dnsCNAME:
+			out.names = append(out.names, strings.ToLower(strings.TrimSuffix(data, ".")))
 		}
 	}
-	return out, nil
+	return out
 }
 
 // ipRange is an inclusive range of addresses.
