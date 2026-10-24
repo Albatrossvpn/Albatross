@@ -1,5 +1,6 @@
 package app.albatross.vpn;
 
+import android.app.AppOpsManager;
 import android.content.Intent;
 import android.net.Uri;
 import android.net.VpnService;
@@ -144,6 +145,40 @@ final class Bridge implements Platform {
             try {
                 app.startActivity(new Intent(Settings.ACTION_VPN_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             } catch (Exception ignored) {
+            }
+        });
+    }
+
+    // "Override GPS location" needs Developer options on and Albatross chosen
+    // there as the mock location app; the page walks the user through both.
+    @Override
+    public String locationSetup() {
+        try {
+            if (Settings.Global.getInt(app.getContentResolver(), Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) != 1) {
+                return "developer";
+            }
+            AppOpsManager ops = app.getSystemService(AppOpsManager.class);
+            if (ops.checkOpNoThrow(AppOpsManager.OPSTR_MOCK_LOCATION, android.os.Process.myUid(), app.getPackageName()) == AppOpsManager.MODE_ALLOWED) {
+                return "";
+            }
+        } catch (Exception ignored) {
+        }
+        return "mock_app";
+    }
+
+    @Override
+    public void openLocationSettings(String step) {
+        main.post(() -> {
+            // About phone, where tapping Build number turns Developer options
+            // on; or Developer options, where the mock location app is chosen.
+            String action = "developer".equals(step) ? Settings.ACTION_DEVICE_INFO_SETTINGS : Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS;
+            try {
+                app.startActivity(new Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            } catch (Exception e) {
+                try {
+                    app.startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Exception ignored) {
+                }
             }
         });
     }
