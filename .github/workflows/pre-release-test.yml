@@ -75,7 +75,9 @@ jobs:
           - { api: 24, target: default }
           - { api: 26, target: google_apis }
           - { api: 28, target: default }
-          - { api: 29, target: default }
+          # Its stock WebView 74 aborts in Skia on the emulator's host GPU
+          # ("Unknown mask format"), so it renders in software.
+          - { api: 29, target: default, gpu: guest }
           - { api: 30, target: google_apis }
           - { api: 31, target: google_apis }
           - { api: 33, target: google_apis }
@@ -107,7 +109,7 @@ jobs:
           target: ${{ matrix.target }}
           arch: x86_64
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          emulator-options: -no-window -gpu ${{ matrix.gpu || 'swiftshader_indirect' }} -noaudio -no-boot-anim -no-snapshot
           script: bash .github/pre-release/apk-check.sh ${{ matrix.api }}
       - name: Result
         if: always()
@@ -171,7 +173,9 @@ jobs:
         include:
           - { api: 23, target: default }
           - { api: 26, target: google_apis }
-          - { api: 29, target: default }
+          # Its stock WebView 74 aborts in Skia on the emulator's host GPU
+          # ("Unknown mask format"), so it renders in software.
+          - { api: 29, target: default, gpu: guest }
           - { api: 30, target: google_apis }
           - { api: 31, target: google_apis }
           - { api: 34, target: google_apis }
@@ -194,7 +198,7 @@ jobs:
           target: ${{ matrix.target }}
           arch: x86_64
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          emulator-options: -no-window -gpu ${{ matrix.gpu || 'swiftshader_indirect' }} -noaudio -no-boot-anim -no-snapshot
           script: bash .github/pre-release/connect-check.sh ${{ matrix.api }}
       - name: Result
         if: always()
