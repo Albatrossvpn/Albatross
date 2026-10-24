@@ -24,7 +24,7 @@ env:
   # debuggable build (when the commit's own Build run has no APK).
   BUILD_RUN: "40132592374"
   # The commit the debuggable app for the tests is built from.
-  DEBUG_REF: "6d030e50841a67240465dbbfe9394f21b547ee47"
+  DEBUG_REF: "eb9e6372257523d3230a77cb64862ae8066924b4"
   # 1 switches off the app's fatal NewApi lint in the debuggable build only,
   # so a commit that fails it can still be tested on newer Android.
   SKIP_NEWAPI_LINT: "0"
