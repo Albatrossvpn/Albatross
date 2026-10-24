@@ -48,12 +48,12 @@ jobs:
           fails=0
           for apk in $(find dl -name '*.apk'); do
             echo "== $(basename "$apk"), $(du -m "$apk" | cut -f1) MB"
-            "$tools/aapt2" dump badging "$apk" | grep -E "^(package|sdkVersion|targetSdkVersion|native-code)"
+            "$tools/aapt2" dump badging "$apk" | grep -E "^(package|minSdkVersion|sdkVersion|targetSdkVersion|native-code)"
             "$tools/apksigner" verify --verbose --print-certs --min-sdk-version 23 "$apk" > sig.txt 2>&1 || { echo "FAIL apksigner refuses it for Android 6"; fails=1; }
             grep -E 'Verified using|Signer #1 certificate (DN|SHA-256)|WARNING' sig.txt | head -12
             for v in v1 v2 v3; do grep -q "Verified using $v scheme.*: true" sig.txt || { echo "FAIL no $v signature"; fails=1; }; done
             grep -q "certificate SHA-256 digest: $RELEASE_CERT" sig.txt || { echo "FAIL not signed with the release key"; fails=1; }
-            "$tools/aapt2" dump badging "$apk" | grep -q "sdkVersion:'23'" || { echo "FAIL minSdk is not 23"; fails=1; }
+            "$tools/aapt2" dump badging "$apk" | grep -qE "^(min)?[sS]dkVersion:'23'" || { echo "FAIL minSdk is not 23"; fails=1; }
             for abi in arm64-v8a armeabi-v7a; do unzip -l "$apk" | grep -q "lib/$abi/libgojni.so" || { echo "FAIL no $abi engine"; fails=1; }; done
             for abi in arm64-v8a armeabi-v7a; do
               n="$(unzip -l "$apk" | grep -cE "lib/$abi/lib(singbox|xray|warpplus|tor|lyrebird)\.so" || true)"
