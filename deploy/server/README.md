@@ -38,7 +38,7 @@ left open in the June 2025 shutdown.
    2096, 8388, 8443, 8880 and UDP 53, 443, 8388, 8444, 20000–40000.
 3. On the machine, as root:
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/cezomagoanlace29861-jpg/vp/main/deploy/server/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/main/deploy/server/install.sh | bash
    ```
    It installs sing-box and Xray, makes the keys (kept in
    `/etc/albatross/secrets.env`, so running it again keeps the links),
