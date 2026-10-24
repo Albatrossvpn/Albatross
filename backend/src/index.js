@@ -548,7 +548,7 @@ const MIRRORED = /^\/list\/(servers\/(hot\.txt|new\.txt|fresh\.txt|all-[1-8]\.tx
 async function mirror(url) {
   const m = MIRRORED.exec(url.pathname);
   if (!m) return new Response("Not found", { status: 404 });
-  const up = await fetch("https://raw.githubusercontent.com/cezomagoanlace29861-jpg/vp/" + m[1], { cf: { cacheTtl: 600, cacheEverything: true } });
+  const up = await fetch("https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/" + m[1], { cf: { cacheTtl: 600, cacheEverything: true } });
   return new Response(up.body, {
     status: up.status,
     headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=600" },

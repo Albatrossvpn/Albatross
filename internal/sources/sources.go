@@ -99,7 +99,7 @@ func Snapshot() string {
 
 // CentralBase is where the collector publishes its lists: a branch of the
 // app's own repository, so the GitHub CDN mirrors work for it too.
-const CentralBase = "https://raw.githubusercontent.com/cezomagoanlace29861-jpg/vp/servers/"
+const CentralBase = "https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/servers/"
 
 // CentralShards is how many all-N.txt files the collector writes.
 const CentralShards = 8
