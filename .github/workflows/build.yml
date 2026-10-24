@@ -126,13 +126,20 @@ jobs:
       - name: Package
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          # The account service addresses (repository variable ACCOUNT_URL)
-          # turn sign-in on. Accounts are on hold, so builds leave it empty
-          # and the app connects without signing in.
-          ACCOUNT_URL: ""
           # Opens the list of the project's own servers (deploy/server).
           OWN_KEY: ${{ secrets.OWN_KEY }}
-        run: bash build/package.sh
+          RELEASE: ${{ inputs.release }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # Releases ask users to sign in (backend/); test builds connect
+          # without an account.
+          if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            ACCOUNT_URL="$(bash build/account-url.sh)"
+            echo "::add-mask::$ACCOUNT_URL"
+            export ACCOUNT_URL
+          fi
+          bash build/package.sh
       - uses: actions/upload-artifact@v4
         with:
           name: Albatross-folder
@@ -165,8 +172,9 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
       - name: Build APKs
         env:
-          ACCOUNT_URL: ""  # accounts on hold; see the Windows build
           OWN_KEY: ${{ secrets.OWN_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ALBATROSS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ALBATROSS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -180,6 +188,12 @@ jobs:
           if [ -z "$KEYSTORE_BASE64" ] && { [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; }; then
             echo "::error::A release needs the ANDROID_KEYSTORE_BASE64 secret, or users must uninstall to update."
             exit 1
+          fi
+          # Releases ask users to sign in; see the Windows build.
+          if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            ACCOUNT_URL="$(bash build/account-url.sh)"
+            echo "::add-mask::$ACCOUNT_URL"
+            export ACCOUNT_URL
           fi
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/albatross.jks"
@@ -197,15 +211,20 @@ jobs:
           name: Albatross-android-${{ env.VERSION }}
           path: dist/*.apk
       # The same app, debuggable, connects on an emulator: proves the cores,
-      # Tor and the VPN service run on Android, not just that it builds.
+      # Tor and the VPN service run on Android, not just that it builds. A
+      # release asks for an account, so the commit's own run (without one)
+      # is the proof for it.
       - name: Debuggable build for the emulator
+        if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
         run: cd android && ./gradlew --no-daemon -q assembleDebug
       - name: Enable KVM
+        if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Connect on an emulator
+        if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 34
@@ -247,7 +266,22 @@ jobs:
           & dist\Albatross\core\sing-box.exe version
           & dist\Albatross\core\xray.exe version
           Stop-Process -Id $p.Id -Force
+      - name: Release asks users to sign in
+        if: inputs.release != '' || startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $data = Join-Path $env:RUNNER_TEMP "albatross-acct"
+          $out = Join-Path $env:RUNNER_TEMP "albatross-acct.txt"
+          $p = Start-Process -FilePath "dist\Albatross\Albatross.exe" -ArgumentList "--headless","--ui-port","18082","--data",$data -RedirectStandardOutput $out -PassThru
+          $url = $null
+          for ($i = 0; $i -lt 30 -and -not $url; $i++) { Start-Sleep 1; $url = Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 1 }
+          $h = @{ "X-Token" = $url.Split("#")[1] }
+          $s = Invoke-RestMethod -Uri "http://127.0.0.1:18082/api/state" -Headers $h
+          Stop-Process -Id $p.Id -Force
+          if (-not $s.account.enabled) { throw "this release lets people connect without an account" }
+          "sign-in is required"
       - name: Real-world connection test
+        if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
         # Public free servers change by the minute; report but never block.
         continue-on-error: true
         timeout-minutes: 12
@@ -367,16 +401,28 @@ jobs:
           path = "repo/update.json"
           m = json.load(open(path))
           m["latest_version"] = v
-          # 0.3.2 and later download the new version through their own
-          # connection before they stop, so they may be required to update.
-          # Older versions (min_version) can only open a browser after
-          # disconnecting, which strands users where GitHub is filtered.
+          # 0.3.3 and later download the new version through their own
+          # connection before they stop (require). Older versions read only
+          # min_version: they stop at once and open download_url, so the
+          # message tells them, in one paragraph (they show it as plain
+          # text), how to reinstall.
+          apk = files.get("android-arm64-v8a", {}).get("urls", [""])[0]
+          page = "https://github.com/" + os.environ["GITHUB_REPOSITORY"] + "/releases/latest"
           if os.environ["FORCE"] == "true":
               m["require"] = v
-          # A release without a message keeps the last one (it may tell
-          # older versions how to update).
+              m["min_version"] = v
+              if apk:
+                  m["download_url"] = apk
           if os.environ.get("MESSAGE"):
               m["message"] = os.environ["MESSAGE"]
+          elif os.environ["FORCE"] == "true":
+              m["message"] = (
+                  f"Albatross {v} is required and this version no longer connects. "
+                  "If the app does not update by itself: 1) Uninstall Albatross. "
+                  f"2) Download the new version with Get the update, or open {apk or page} in your browser "
+                  f"(Windows: Albatross-Setup-{v}.exe from {page}). "
+                  "3) Install it and sign in with the username and password you were given. "
+                  "Later updates install from inside the app.")
           m["files"] = files
           with open(path, "w") as f:
               json.dump(m, f, indent=2)
