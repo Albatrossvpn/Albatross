@@ -6,7 +6,7 @@
 set -uo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/internal/sources/lists/snapshot.txt.gz"
-url="https://raw.githubusercontent.com/cezomagoanlace29861-jpg/vp/servers/fresh.txt"
+url="https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/servers/fresh.txt"
 tmp="$(mktemp)"
 if curl -fsSL --retry 3 --retry-delay 3 --max-time 120 "$url" -o "$tmp" && [ "$(wc -l <"$tmp")" -gt 100 ]; then
   gzip -9 -c "$tmp" >"$out"
