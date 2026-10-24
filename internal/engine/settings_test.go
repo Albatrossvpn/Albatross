@@ -105,7 +105,7 @@ func TestConnectConfigRegions(t *testing.T) {
 			t.Fatal(err)
 		}
 		cfg := connectConfig(set, connOptions{
-			listen: "127.0.0.1", port: 10808, bypass: bypass, blockAds: true, secureOnly: true, rulesDir: dir,
+			listen: "127.0.0.1", port: 10808, user: "u", pass: "p", bypass: bypass, blockAds: true, secureOnly: true, rulesDir: dir,
 			clashAddr: "127.0.0.1:9090", clashSecret: "s", probeAddr: "127.0.0.1:9091",
 		})
 		b, _ := json.Marshal(cfg)
