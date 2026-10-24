@@ -1,8 +1,9 @@
 name: Commit identities
 
-# Every commit must carry a noreply address. The repository is public, and a
-# personal address would identify whoever made the commit. The log names
-# the commit only, never the address.
+# Every commit must carry a noreply address and UTC times. The repository is
+# public: a personal address would identify whoever made the commit, and a
+# time zone tells where they live. The log names the commit only, never the
+# address.
 on:
   pull_request:
   push:
@@ -18,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Check author and committer addresses
+      - name: Check author and committer addresses and time zones
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -30,14 +31,16 @@ jobs:
             # History replaced by a forced push: check what no other branch has.
             range=("$HEAD" --not $(git for-each-ref --format='%(refname)' refs/remotes/origin | grep -v '/main$'))
           fi
-          bad="$(git log --format='%h %ae %ce' "${range[@]}" | awk '{
+          bad="$(git log --date=format:%z --format='%h %ae %ce %ad %cd' "${range[@]}" | awk '{
             for (i = 2; i <= 3; i++)
-              if ($i !~ /@users\.noreply\.github\.com$/ && $i != "noreply@github.com" && $i != "noreply@anthropic.com") {
-                print $1 (i == 2 ? " author" : " committer"); break
-              }
+              if ($i !~ /@users\.noreply\.github\.com$/ && $i != "noreply@github.com" && $i != "noreply@anthropic.com")
+                print $1 " the " (i == 2 ? "author" : "committer") " address is not a noreply address."
+            for (i = 4; i <= 5; i++)
+              if ($i != "+0000")
+                print $1 " the " (i == 4 ? "author" : "committer") " time is not in UTC (commit with TZ=UTC)."
           }')"
           if [ -n "$bad" ]; then
-            while read -r sha who; do echo "::error::Commit $sha: the $who address is not a noreply address."; done <<< "$bad"
+            while read -r sha what; do echo "::error::Commit $sha: $what"; done <<< "$bad"
             exit 1
           fi
-          echo "Every new commit uses a noreply address."
+          echo "Every new commit uses a noreply address and UTC times."
