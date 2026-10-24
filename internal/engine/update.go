@@ -161,6 +161,8 @@ func updateKey(mobile bool) string {
 			return "android-x86_64"
 		case "arm64":
 			return "android-arm64-v8a"
+		case "arm":
+			return "android-armeabi-v7a"
 		}
 		return "android-" + runtime.GOARCH // no installer is published
 	}

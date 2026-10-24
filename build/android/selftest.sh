@@ -4,7 +4,7 @@
 # working connection. Prints the app's log either way.
 set -uo pipefail
 summary() { [ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "- $1" >> "$GITHUB_STEP_SUMMARY"; echo "$1"; }
-apk="$(ls android/app/build/outputs/apk/debug/*x86_64*.apk | head -1)"
+apk="$(ls android/app/build/outputs/apk/debug/*.apk | head -1)"
 adb install -r "$apk"
 adb shell appops set app.albatross.vpn ACTIVATE_VPN allow
 adb logcat -c
