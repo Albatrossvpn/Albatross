@@ -50,10 +50,12 @@ func TestUpdateManifest(t *testing.T) {
 		t.Fatalf("up to date: %+v", u)
 	}
 	// Builds without a release version are never held back.
-	e.opt.Version = "dev"
-	e.applyUpdate(UpdateManifest{MinVersion: "9.9.9", LatestVersion: "9.9.9"})
-	if u := e.Snapshot().Update; u != nil {
-		t.Fatalf("dev build: %+v", u)
+	for _, v := range []string{"dev", "0.1.0-dev.12"} {
+		e.opt.Version = v
+		e.applyUpdate(UpdateManifest{MinVersion: "9.9.9", LatestVersion: "9.9.9"})
+		if u := e.Snapshot().Update; u != nil {
+			t.Fatalf("dev build %s: %+v", v, u)
+		}
 	}
 }
 
