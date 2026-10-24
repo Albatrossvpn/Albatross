@@ -1,20 +1,21 @@
 {
   "min_version": "0.3.0",
-  "latest_version": "0.3.2",
-  "message": "Version 0.3.2 fixes Iranian sites, hotspot sharing, Disconnect on Android and app updates. If you have 0.3.1 or older, uninstall it once, then install 0.3.2; later updates install in place from inside the app.",
+  "latest_version": "0.3.3",
+  "message": "Version 0.3.3 makes in-app updates reliable (downloads resume and survive the install permission), fixes the Hotspot, Help others and Share stats switches, and refreshes the server list faster. If you have 0.3.1 or older, uninstall it once, then install 0.3.3; later updates install in place from inside the app.",
   "download_url": "https://github.com/cezomagoanlace29861-jpg/vp/releases/latest",
   "files": {
     "android-arm64-v8a": {
       "urls": [
-        "https://github.com/cezomagoanlace29861-jpg/vp/releases/download/v0.3.2/Albatross-0.3.2-android-arm64-v8a.apk"
+        "https://github.com/cezomagoanlace29861-jpg/vp/releases/download/v0.3.3/Albatross-0.3.3-android.apk"
       ],
-      "sha256": "c6dd032d99d9307f622c34c5704526eae794078ccec25c0fb13f5fe7dd58bf91"
+      "sha256": "5150c4db5545a2b92804ff583802dc77ad9d286908d25a262ab4c5e5b6ed21e6"
     },
     "windows": {
       "urls": [
-        "https://github.com/cezomagoanlace29861-jpg/vp/releases/download/v0.3.2/Albatross-Setup-0.3.2.exe"
+        "https://github.com/cezomagoanlace29861-jpg/vp/releases/download/v0.3.3/Albatross-Setup-0.3.3.exe"
       ],
-      "sha256": "75b93c2818c6f63234b407037500f4682d2d411538c414725f23865f8a995e7d"
+      "sha256": "703ce9be431006bf279ca009e6b26ae7bc270865ebe06f9f9ac157bbfb23b369"
     }
-  }
+  },
+  "require": "0.3.3"
 }
