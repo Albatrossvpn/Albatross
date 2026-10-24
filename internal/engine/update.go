@@ -21,9 +21,9 @@ import (
 // UpdateURL is the manifest that says which versions may still connect.
 // Editing update.json on the main branch reaches every installed copy
 // within hours (GitHub's CDN mirrors cache it); see the README.
-var UpdateURL = "https://raw.githubusercontent.com/cezomagoanlace29861-jpg/vp/main/update.json"
+var UpdateURL = "https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/main/update.json"
 
-const releasesURL = "https://github.com/cezomagoanlace29861-jpg/vp/releases/latest"
+const releasesURL = "https://github.com/cezomagoanlace29861-jpg/Albatross/releases/latest"
 
 // ErrUpdateRequired means this version is older than the manifest's
 // minimum and may not connect any more.
