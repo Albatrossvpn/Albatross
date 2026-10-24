@@ -84,6 +84,14 @@ jobs:
             go doc -u "$x" | grep -q '^var ' || { echo "::error::$x, set with -X by the build scripts, is not a variable any more."; exit 1; }
             echo "found $x"
           done
+      - name: The page runs on old WebViews
+        # Android 6's WebView is Chrome 44: one newer piece of syntax and the
+        # page stays blank. old-webview.js tells such users what to update,
+        # so it must run on anything. The page's policy blocks inline scripts.
+        run: |
+          npx --yes acorn@8.19.0 --ecma5 --silent internal/ui/web/app.js
+          npx --yes acorn@8.19.0 --ecma3 --silent internal/ui/web/old-webview.js
+          ! grep -nE '<script>|\son[a-z]+=' internal/ui/web/index.html || { echo "::error::index.html has an inline script or event handler."; exit 1; }
       - name: Collector smoke test
         run: go run ./cmd/collect -limit 6 -probe=false -out /tmp/collect && cat /tmp/collect/meta.json
       - name: Download cores for end-to-end tests
