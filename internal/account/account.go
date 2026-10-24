@@ -96,6 +96,8 @@ type stored struct {
 	// Counts not yet confirmed by the service.
 	PendingBytes   int64 `json:"pending_bytes"`
 	PendingSeconds int64 `json:"pending_seconds"`
+	// Base is the address that answered last, tried first after a restart.
+	Base string `json:"base,omitempty"`
 }
 
 // Client talks to the service and keeps the session on disk.
@@ -112,7 +114,8 @@ type Client struct {
 	mu sync.Mutex
 	st stored
 	// last is the index in URLs of the address that answered last, tried
-	// first, so an address that is blocked costs its timeout only once.
+	// first, so an address that is blocked costs its timeout only once. It
+	// is saved with the session (stored.Base).
 	last atomic.Int32
 }
 
@@ -121,6 +124,11 @@ func New(urls []string, path string, httpClient func() *http.Client) *Client {
 	c := &Client{URLs: urls, HTTP: httpClient, Path: path, Now: time.Now}
 	if b, err := os.ReadFile(path); err == nil {
 		json.Unmarshal(b, &c.st)
+	}
+	for i, u := range urls {
+		if u == c.st.Base {
+			c.last.Store(int32(i))
+		}
 	}
 	return c
 }
@@ -237,6 +245,9 @@ func (c *Client) Sync(ctx context.Context) (Info, error) {
 }
 
 func (c *Client) saveLocked() error {
+	if k := int(c.last.Load()); k < len(c.URLs) {
+		c.st.Base = c.URLs[k]
+	}
 	b, err := json.Marshal(c.st)
 	if err != nil {
 		return err
@@ -275,7 +286,14 @@ func (c *Client) call(ctx context.Context, method, path, token string, body, out
 				hc = h
 			}
 		}
-		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		// With a deadline, each address left gets an equal share of what
+		// remains, so one that hangs (blocked silently) leaves time for the
+		// next.
+		wait := 15 * time.Second
+		if d, ok := ctx.Deadline(); ok {
+			wait = min(wait, time.Until(d)/time.Duration(len(c.URLs)-i))
+		}
+		rctx, cancel := context.WithTimeout(ctx, wait)
 		req, err := http.NewRequestWithContext(rctx, method, strings.TrimRight(base, "/")+"/api/v1/"+path, bytes.NewReader(payload))
 		if err != nil {
 			cancel()
