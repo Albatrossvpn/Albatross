@@ -129,15 +129,12 @@ jobs:
           # Opens the list of the project's own servers (deploy/server).
           OWN_KEY: ${{ secrets.OWN_KEY }}
           RELEASE: ${{ inputs.release }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
         run: |
           # Releases ask users to sign in (backend/); test builds connect
           # without an account.
           if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             ACCOUNT_URL="$(bash build/account-url.sh)"
-            for u in ${ACCOUNT_URL//,/ }; do echo "::add-mask::${u#https://}"; done
             export ACCOUNT_URL
           fi
           bash build/package.sh
@@ -174,8 +171,6 @@ jobs:
       - name: Build APKs
         env:
           OWN_KEY: ${{ secrets.OWN_KEY }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ALBATROSS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -194,7 +189,6 @@ jobs:
           # Releases ask users to sign in; see the Windows build.
           if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             ACCOUNT_URL="$(bash build/account-url.sh)"
-            for u in ${ACCOUNT_URL//,/ }; do echo "::add-mask::${u#https://}"; done
             export ACCOUNT_URL
           fi
           if [ -n "$KEYSTORE_BASE64" ]; then
