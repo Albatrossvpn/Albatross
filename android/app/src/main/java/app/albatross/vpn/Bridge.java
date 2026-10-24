@@ -99,17 +99,20 @@ final class Bridge implements Platform {
     }
 
     @Override
-    public void installUpdate(String path) {
-        main.post(() -> {
-            ApkProvider.update = new java.io.File(path);
-            try {
-                app.startActivity(new Intent(Intent.ACTION_VIEW)
-                        .setDataAndType(ApkProvider.UPDATE_URI, ApkProvider.TYPE)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
-            } catch (Exception e) {
-                Toast.makeText(app, R.string.update_failed, Toast.LENGTH_LONG).show();
-            }
-        });
+    public void installUpdate(String path) throws Exception {
+        java.io.File f = new java.io.File(path);
+        if (!f.canRead()) throw new java.io.FileNotFoundException(path);
+        // Kept on disk, not only in memory: allowing "Install unknown apps"
+        // restarts the app's process before the installer reads the file.
+        ApkProvider.setUpdate(app, f);
+        try {
+            app.startActivity(new Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(ApkProvider.UPDATE_URI, ApkProvider.TYPE)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        } catch (Exception e) {
+            main.post(() -> Toast.makeText(app, R.string.update_failed, Toast.LENGTH_LONG).show());
+            throw e;
+        }
     }
 
     // Go cannot list the network interfaces on Android 11 and later; Java

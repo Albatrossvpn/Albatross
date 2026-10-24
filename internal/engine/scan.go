@@ -169,6 +169,20 @@ func releaseMemory() { debug.FreeOSMemory() }
 // collector's lists go first; while they are reachable they stand in for
 // every other built-in source, which saves the device hundreds of
 // downloads (and Telegram, which is blocked on the direct path anyway).
+// refreshHotNow downloads the hot and new lists at once, for when the
+// servers in use stop answering: the collector may already know better
+// ones.
+func (e *Engine) refreshHotNow() {
+	e.mu.Lock()
+	for i, s := range e.srcs {
+		if (s.Hot || s.Delta) && i < len(e.srcStats) {
+			e.srcStats[i].Fetched = time.Time{}
+		}
+	}
+	e.mu.Unlock()
+	e.triggerRefill()
+}
+
 func (e *Engine) refreshDue() {
 	e.refreshSources(true)
 	e.refreshSources(false)
