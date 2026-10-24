@@ -108,7 +108,23 @@ async function settings(env) {
   return out;
 }
 
-const clientTag = (request, env) => tag(env.TOKEN_SECRET, request.headers.get("CF-Connecting-IP") || "unknown");
+// An IPv6 client is usually given a whole /64, so the limits count the
+// prefix as one address; otherwise each few guesses could take a new one.
+function clientAddress(request) {
+  const ip = (request.headers.get("CF-Connecting-IP") || "unknown").toLowerCase();
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(ip);
+  if (mapped) return mapped[1];
+  const halves = ip.split("::");
+  if (!ip.includes(":") || halves.length > 2) return ip;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves[1] ? halves[1].split(":") : [];
+  const groups = halves.length === 1 ? head : [...head, ...Array(Math.max(8 - head.length - tail.length, 0)).fill("0"), ...tail];
+  const prefix = groups.slice(0, 4);
+  if (groups.length !== 8 || !prefix.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return ip;
+  return prefix.map((g) => parseInt(g, 16).toString(16)).join(":") + "::/64";
+}
+
+const clientTag = (request, env) => tag(env.TOKEN_SECRET, clientAddress(request));
 
 /** True when `key` has used up `max` attempts within the window. */
 async function blocked(env, key, max, window) {
@@ -133,6 +149,28 @@ async function count(env, key, window) {
 const forget = (env, key) => env.DB.prepare("DELETE FROM attempts WHERE key = ?1").bind(key).run();
 
 const tooMany = () => new HttpError(429, "Too many attempts. Wait a few minutes and try again.");
+
+/** Rate-limit keys for checking the password of `name` from this request's address. */
+async function passwordKeys(request, env, name) {
+  const t = await clientTag(request, env);
+  return { ip: "login:ip:" + t, who: "login:user:" + name, from: "login:from:" + t + ":" + name };
+}
+
+// Failures from all addresses lock a username outright only far above what
+// typos make, or anyone who knows it could keep its owner out cheaply; that
+// cap bounds a guesser with very many addresses. Below it, while many
+// addresses guess at it, each one that already failed at it gets only a few
+// tries; one that has not still signs in with the right password.
+async function passwordBlocked(env, k) {
+  if ((await blocked(env, k.ip, 40, 900)) || (await blocked(env, k.from, 8, 900)) || (await blocked(env, k.who, 100, 900))) return true;
+  return (await blocked(env, k.who, 8, 900)) && (await blocked(env, k.from, 3, 900));
+}
+
+async function passwordFailed(env, k) {
+  await count(env, k.ip, 900);
+  await count(env, k.who, 900);
+  await count(env, k.from, 900);
+}
 
 async function userByName(env, name) {
   return env.DB.prepare("SELECT * FROM users WHERE username = ?1").bind(String(name).trim().toLowerCase()).first();
@@ -183,18 +221,17 @@ async function login(request, env) {
     throw new HttpError(400, "Enter your username and password.");
   }
   const name = username.trim().toLowerCase();
-  const ip = "login:ip:" + (await clientTag(request, env));
-  const who = "login:user:" + name;
-  if ((await blocked(env, ip, 40, 900)) || (await blocked(env, who, 8, 900))) throw tooMany();
+  const k = await passwordKeys(request, env, name);
+  if (await passwordBlocked(env, k)) throw tooMany();
 
   const user = await userByName(env, name);
   const ok = await verifyPassword(password, user ? user.pass_hash : DUMMY);
   if (!user || !ok) {
-    await count(env, ip, 900);
-    await count(env, who, 900);
+    await passwordFailed(env, k);
     throw new HttpError(401, "Wrong username or password.");
   }
-  await forget(env, who);
+  // The username's count stays, so the other addresses guessing at it stay slowed.
+  await forget(env, k.from);
   return json({ token: await session(env, user), account: accountOf(user, now()) });
 }
 
@@ -275,10 +312,10 @@ async function usage(request, env) {
 async function changePassword(request, env) {
   const { user } = await authUser(request, env);
   const { old_password, new_password } = await body(request);
-  const key = "login:user:" + user.username.toLowerCase();
-  if (await blocked(env, key, 8, 900)) throw tooMany();
+  const k = await passwordKeys(request, env, user.username.toLowerCase());
+  if (await passwordBlocked(env, k)) throw tooMany();
   if (typeof old_password !== "string" || !(await verifyPassword(old_password, user.pass_hash))) {
-    await count(env, key, 900);
+    await passwordFailed(env, k);
     throw new HttpError(403, "The current password is wrong.");
   }
   if (!checkPassword(new_password)) throw new HttpError(400, "Choose a password of at least 8 characters.");
