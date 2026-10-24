@@ -81,7 +81,7 @@ cores() { # label abi-dir
       else
         log "FAIL $label core $bin: ${res:0:200}"
       fi
-    elif echo "$res" | grep -qiE 'version|usage|commands|flags|^Xray [0-9]|^lyrebird [0-9]'; then
+    elif echo "$res" | grep -qiE 'version|usage|commands|flags|^COMMAND +warp-plus|^Xray [0-9]|^lyrebird [0-9]'; then
       log "PASS $label core $bin runs: ${res:0:100}"
     else
       log "FAIL $label core $bin: unexpected output: ${res:0:200}"
