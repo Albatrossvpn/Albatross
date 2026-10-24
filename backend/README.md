@@ -26,7 +26,7 @@ The service decides; the official app obeys. The servers that carry the traffic 
 
 You need a Cloudflare account and a domain whose DNS is on Cloudflare (a Worker can only answer on a custom domain of a zone Cloudflare serves). With the domain registered at GoDaddy: add it to Cloudflare, copy GoDaddy's DNS records into the Cloudflare zone (the website's `A` and `www` records, and any mail records), then set the domain's nameservers at GoDaddy to the two Cloudflare gives you. Use a subdomain for this service (`SITE_DOMAIN=account.albatrossvpn.online`); the website keeps the bare domain.
 
-Where a custom domain is blocked, the apps can also try the Worker's own `*.workers.dev` address: give `ACCOUNT_URL` both, comma separated, and they are tried in order.
+Where a custom domain is blocked, the apps also try the Worker's own `*.workers.dev` address, which stays on (`workers_dev = true`). Release builds find both by themselves (`build/account-url.sh` reads `SITE_DOMAIN`, the domains attached to the Worker and its workers.dev address from Cloudflare), and the apps try them in that order, starting with the one that answered last.
 
 **From GitHub (no tools on your computer).** In the repository's *Settings → Secrets and variables → Actions*:
 

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -203,7 +204,9 @@ func TestRevokedSessionSignsOut(t *testing.T) {
 
 func TestFallsBackToNextAddress(t *testing.T) {
 	// A block page (HTML, 200) and a failing address come before the service.
+	var blockedHits atomic.Int32
 	blocked := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		blockedHits.Add(1)
 		w.Header().Set("Content-Type", "text/html")
 		w.Write([]byte("<html>blocked</html>"))
 	}))
@@ -218,6 +221,14 @@ func TestFallsBackToNextAddress(t *testing.T) {
 	c, _ := newTestClient(t, blocked.URL, broken.URL, ts.URL)
 	if _, err := c.Login(context.Background(), "ada", "correct horse"); err != nil {
 		t.Fatalf("login did not reach the service behind the broken addresses: %v", err)
+	}
+	// Later calls start with the address that answered.
+	blockedHits.Store(0)
+	if _, err := c.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := blockedHits.Load(); n != 0 {
+		t.Errorf("the blocked address was tried again %d times", n)
 	}
 }
 

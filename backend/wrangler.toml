@@ -3,6 +3,9 @@
 name = "albatross-accounts"
 main = "src/index.js"
 compatibility_date = "2025-09-01"
+# Keep the workers.dev address next to a custom domain (SITE_DOMAIN): the
+# apps fall back to it where the domain is blocked.
+workers_dev = true
 
 [assets]
 directory = "./public"
