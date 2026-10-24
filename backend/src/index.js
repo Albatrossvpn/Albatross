@@ -33,6 +33,16 @@ const json = (data, status = 200) =>
 
 const now = () => Math.floor(Date.now() / 1000);
 
+function randomUsernameSuffix() {
+  const range = 1_000_000;
+  const limit = Math.floor(0x1_0000_0000 / range) * range;
+  const value = new Uint32Array(1);
+  do {
+    crypto.getRandomValues(value);
+  } while (value[0] >= limit);
+  return String(value[0] % range).padStart(6, "0");
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -385,7 +395,7 @@ async function adminBulk(request, env) {
   const made = [];
   for (let i = 0; i < n; i++) {
     for (let tries = 0; tries < 5; tries++) {
-      const name = `${prefix}${String(Math.floor(Math.random() * 1e6)).padStart(6, "0")}`;
+      const name = `${prefix}${randomUsernameSuffix()}`;
       const password = randomPassword();
       try {
         await createUser(env, name, password, limits, now());
