@@ -373,7 +373,10 @@ jobs:
           # disconnecting, which strands users where GitHub is filtered.
           if os.environ["FORCE"] == "true":
               m["require"] = v
-          m["message"] = os.environ.get("MESSAGE", "")
+          # A release without a message keeps the last one (it may tell
+          # older versions how to update).
+          if os.environ.get("MESSAGE"):
+              m["message"] = os.environ["MESSAGE"]
           m["files"] = files
           with open(path, "w") as f:
               json.dump(m, f, indent=2)

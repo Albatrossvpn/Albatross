@@ -132,23 +132,48 @@ public final class TunnelService extends VpnService {
         return b;
     }
 
+    // The notification follows the engine: "Connecting" while it searches
+    // or reconnects, "Connected" once traffic flows through a server.
+    private final android.os.Handler ticker = new android.os.Handler(android.os.Looper.getMainLooper());
+    private Boolean shown;
+    private final Runnable tick = new Runnable() {
+        @Override
+        public void run() {
+            boolean connected = Mobile.connected();
+            if (shown == null || shown != connected) {
+                shown = connected;
+                getSystemService(android.app.NotificationManager.class).notify(1, notification(connected));
+            }
+            ticker.postDelayed(this, 2000);
+        }
+    };
+
     private void foreground() {
+        shown = false;
+        Notification n = notification(false);
+        if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        else startForeground(1, n);
+        ticker.removeCallbacks(tick);
+        ticker.postDelayed(tick, 1000);
+    }
+
+    private Notification notification(boolean connected) {
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
         PendingIntent disconnect = PendingIntent.getService(this, 1,
                 new Intent(this, TunnelService.class).setAction(ACTION_DISCONNECT), PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder nb = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, App.CHANNEL) : new Notification.Builder(this);
-        Notification n = nb.setSmallIcon(R.drawable.ic_stat)
-                .setContentTitle(getString(R.string.connected))
-                .setContentText(getString(R.string.connected_text))
+        return nb.setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle(getString(connected ? R.string.connected : R.string.connecting))
+                .setContentText(getString(connected ? R.string.connected_text : R.string.connecting_text))
                 .setContentIntent(open)
                 .setOngoing(true)
+                .setOnlyAlertOnce(true)
                 .addAction(new Notification.Action.Builder(null, getString(R.string.disconnect), disconnect).build())
                 .build();
-        if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-        else startForeground(1, n);
     }
 
     private void close() {
+        ticker.removeCallbacks(tick);
         Mobile.stopTun();
         if (tun != null) {
             try {

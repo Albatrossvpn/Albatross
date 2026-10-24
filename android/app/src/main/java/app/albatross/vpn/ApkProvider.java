@@ -2,6 +2,7 @@ package app.albatross.vpn;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
+import android.content.Context;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
@@ -22,14 +23,21 @@ public final class ApkProvider extends ContentProvider {
     static final String UPDATE_NAME = "update.apk";
     static final Uri UPDATE_URI = Uri.parse("content://" + AUTHORITY + "/" + UPDATE_NAME);
     static final String TYPE = "application/vnd.android.package-archive";
-    // The downloaded new version (Bridge.installUpdate).
-    static volatile File update;
+    private static final String PREFS = "update";
+
+    // The downloaded new version (Bridge.installUpdate), remembered across
+    // process restarts.
+    static void setUpdate(Context ctx, File f) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("path", f.getAbsolutePath()).commit();
+    }
 
     private File apk(Uri uri) throws FileNotFoundException {
         String name = uri.getLastPathSegment();
         if (NAME.equals(name)) return new File(getContext().getApplicationInfo().sourceDir);
-        File u = update;
-        if (UPDATE_NAME.equals(name) && u != null) return u;
+        if (UPDATE_NAME.equals(name)) {
+            String path = getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("path", null);
+            if (path != null && new File(path).canRead()) return new File(path);
+        }
         throw new FileNotFoundException();
     }
 
