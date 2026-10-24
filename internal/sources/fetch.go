@@ -270,7 +270,7 @@ func Mirrors(u string) []string {
 }
 
 // ownRepo is the app's own repository, where the collector publishes.
-const ownRepo = "cezomagoanlace29861-jpg/vp"
+const ownRepo = "cezomagoanlace29861-jpg/Albatross"
 
 // githubAPI is the prefix of api.github.com contents URLs, which return
 // the raw file when asked for it.

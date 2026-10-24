@@ -3,7 +3,7 @@
 # Ubuntu machine (22.04 or 24.04, x86-64 or ARM, for example an Oracle
 # Cloud "Always Free" VM). Run as root:
 #
-#   curl -fsSL https://raw.githubusercontent.com/cezomagoanlace29861-jpg/vp/main/deploy/server/install.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/main/deploy/server/install.sh | sudo bash
 #
 # Optional environment:
 #   DOMAIN   a name pointing at this machine; default <ip>.sslip.io
