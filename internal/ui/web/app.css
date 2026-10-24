@@ -48,7 +48,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
 .mobile .desktop-only { display: none !important; }
-:not(.mobile) .mobile-only { display: none !important; }
+body:not(.mobile) .mobile-only { display: none !important; }
 .note { padding: 10px 2px; color: var(--text); font-size: 14px; line-height: 1.45; }
 .note + .note { border-top: 1px solid var(--line); }
 .note b { display: block; margin-bottom: 2px; }
