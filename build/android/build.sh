@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds the Android app: the Go engine as an Android library (gomobile),
-# the cores as native libraries, and one APK per ABI in dist/.
+# the cores as native libraries, and one APK for every phone in dist/
+# (64 and 32-bit ARM, Android 6 and up; ABIS picks others).
 #
 # Needs Go, Java 17+, and an Android SDK with the NDK
 # (ANDROID_HOME, and ANDROID_NDK_HOME or an NDK under $ANDROID_HOME/ndk).
@@ -35,9 +36,37 @@ gh="https://github.com"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+# The lowest Android version the app runs on (minSdk in build.gradle.kts).
+api=23
+ndkbin="$(ls -d "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin | head -1)"
+
+# gobuild <abi> <out> <go build args...> builds a Go program for one ABI
+# with the NDK at $api, for cores that publish no Android build for it (a
+# Linux build runs there but cannot find the phone's DNS servers).
+gobuild() {
+  local abi="$1" out="$2" goarch cc
+  shift 2
+  case "$abi" in
+    arm64-v8a) goarch=arm64 cc=aarch64-linux-android ;;
+    armeabi-v7a) goarch=arm cc=armv7a-linux-androideabi ;;
+    x86_64) goarch=amd64 cc=x86_64-linux-android ;;
+  esac
+  GOOS=android GOARCH="$goarch" GOARM=7 CGO_ENABLED=1 CC="$ndkbin/$cc$api-clang" GOTOOLCHAIN=auto \
+    go build -trimpath -buildvcs=false -o "$out" "$@"
+}
+
+# Xray publishes no 32-bit ARM Android build: build that one from its source.
+xraysrc() {
+  local src="$tmp/xray-src"
+  if [ ! -d "$src" ]; then
+    git clone -q --depth 1 --branch "v$XRAY_VERSION" "$gh/XTLS/Xray-core" "$src"
+  fi
+  echo "$src"
+}
+
 # Cores for each ABI. Android only lets an app run executables that ship as
-# native libraries, hence the lib*.so names. warp-plus has no x86_64
-# Android build; its static Linux build runs there.
+# native libraries, hence the lib*.so names. An empty asset name builds that
+# core from source.
 cores() { # abi sing-box-arch xray-asset warp-plus-asset
   local abi="$1" out="$jni/$1"
   rm -rf "$out" && mkdir -p "$out"
@@ -45,18 +74,36 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
   mkdir -p "$tmp/sb-$abi" && tar xzf "$dl/sing-box-$SINGBOX_VERSION-android-$2.tar.gz" -C "$tmp/sb-$abi" --strip-components=1
   cp "$tmp/sb-$abi/sing-box" "$out/libsingbox.so"
   cp "$tmp/sb-$abi/LICENSE" "$app/src/main/assets/licenses/sing-box-LICENSE.txt"
-  fetch "$gh/XTLS/Xray-core/releases/download/v$XRAY_VERSION/$3" "$dl/xray-$XRAY_VERSION-$3"
-  unzip -q -o "$dl/xray-$XRAY_VERSION-$3" xray LICENSE -d "$tmp/x-$abi"
-  cp "$tmp/x-$abi/xray" "$out/libxray.so"
-  cp "$tmp/x-$abi/LICENSE" "$app/src/main/assets/licenses/xray-LICENSE.txt"
-  fetch "$gh/bepass-org/warp-plus/releases/download/v$WARPPLUS_VERSION/$4" "$dl/warp-plus-$WARPPLUS_VERSION-$4"
-  unzip -q -o "$dl/warp-plus-$WARPPLUS_VERSION-$4" -d "$tmp/wp-$abi"
-  cp "$(find "$tmp/wp-$abi" -type f -iname 'warp-plus*' ! -iname '*.txt' | head -1)" "$out/libwarpplus.so"
-  cp "$(find "$tmp/wp-$abi" -iname 'LICENSE*' | head -1)" "$app/src/main/assets/licenses/warp-plus-LICENSE.txt"
+  if [ -n "$3" ]; then
+    fetch "$gh/XTLS/Xray-core/releases/download/v$XRAY_VERSION/$3" "$dl/xray-$XRAY_VERSION-$3"
+    unzip -q -o "$dl/xray-$XRAY_VERSION-$3" xray LICENSE -d "$tmp/x-$abi"
+    cp "$tmp/x-$abi/xray" "$out/libxray.so"
+    cp "$tmp/x-$abi/LICENSE" "$app/src/main/assets/licenses/xray-LICENSE.txt"
+  else
+    local src
+    src="$(xraysrc)"
+    (cd "$src" && gobuild "$abi" "$out/libxray.so" \
+      -ldflags "-X github.com/xtls/xray-core/core.build=$(git rev-parse --short HEAD) -s -w -buildid=" ./main)
+  fi
+  if [ -n "$4" ]; then
+    fetch "$gh/bepass-org/warp-plus/releases/download/v$WARPPLUS_VERSION/$4" "$dl/warp-plus-$WARPPLUS_VERSION-$4"
+    unzip -q -o "$dl/warp-plus-$WARPPLUS_VERSION-$4" -d "$tmp/wp-$abi"
+    cp "$(find "$tmp/wp-$abi" -type f -iname 'warp-plus*' ! -iname '*.txt' | head -1)" "$out/libwarpplus.so"
+    cp "$(find "$tmp/wp-$abi" -iname 'LICENSE*' | head -1)" "$app/src/main/assets/licenses/warp-plus-LICENSE.txt"
+  else
+    # A module of its own, so the app's go.mod does not decide its versions.
+    local wp="$tmp/wp-src"
+    if [ ! -d "$wp" ]; then
+      mkdir -p "$wp"
+      (cd "$wp" && go mod init warpbuild && go get "github.com/bepass-org/warp-plus@v$WARPPLUS_VERSION")
+    fi
+    (cd "$wp" && gobuild "$abi" "$out/libwarpplus.so" -ldflags "-s -w" github.com/bepass-org/warp-plus)
+  fi
   chmod 755 "$out"/*.so
 }
 cores arm64-v8a arm64 Xray-android-arm64-v8a.zip warp-plus_android-arm64.zip
-cores x86_64 amd64 Xray-android-amd64.zip warp-plus_linux-amd64.zip
+cores armeabi-v7a arm "" ""
+cores x86_64 amd64 Xray-android-amd64.zip ""
 
 # Tor, the last resort. Its Android bundle holds executables (libTor.so is
 # one, despite the name) that need only the system's libraries. They ship
@@ -80,22 +127,46 @@ tor() { # abi bundle-platform
   done
 }
 tor arm64-v8a android-aarch64
+tor armeabi-v7a android-armv7
 tor x86_64 android-x86_64
 mkdir -p "$app/src/main/assets/licenses"
 printf 'Tor and its pluggable transports are from the Tor Project (https://www.torproject.org), under the 3-clause BSD license.\n' > "$app/src/main/assets/licenses/tor-LICENSE.txt"
 
 # The engine, UI and tun2socks as one Android library.
 go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
-PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target=android/arm64,android/amd64 -androidapi 24 \
+PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target=android/arm64,android/arm,android/amd64 -androidapi "$api" \
   -javapkg app.albatross -trimpath \
   -ldflags "-s -w -X github.com/cezomagoanlace29861-jpg/vp/mobile.Version=$VERSION -X github.com/cezomagoanlace29861-jpg/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/cezomagoanlace29861-jpg/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/cezomagoanlace29861-jpg/vp/internal/sources.WorkerMirror=${ACCOUNT_URL:-}" \
   -o "$app/libs/albatross.aar" ./mobile
 
 cd "$root/android"
 VERSION="$VERSION" ./gradlew --no-daemon -q assembleRelease
-mkdir -p "$dist"
-for apk in app/build/outputs/apk/release/*.apk; do
-  abi="$(basename "$apk" .apk | sed -E 's/^app-(.*)-release$/\1/')"
-  cp "$apk" "$dist/Albatross-$VERSION-android-$abi.apk"
+apk="$dist/Albatross-$VERSION-android.apk"
+cp app/build/outputs/apk/release/app-release.apk "$apk"
+
+# Every library in the APK must run on the oldest phone: built for its ABI,
+# needing only the system's libraries, and calling only what Android $api's
+# libc has (the NDK's stubs for that version list it).
+x="$tmp/apk" && rm -rf "$x" && mkdir -p "$x" && unzip -q "$apk" 'lib/*' -d "$x"
+sysroot="$(dirname "$ndkbin")/sysroot/usr/lib"
+for dir in "$x"/lib/*; do
+  abi="$(basename "$dir")"
+  case "$abi" in
+    arm64-v8a) machine=AArch64 triple=aarch64-linux-android ;;
+    armeabi-v7a) machine=ARM triple=arm-linux-androideabi ;;
+    x86_64) machine=X86-64 triple=x86_64-linux-android ;;
+    *) echo "unexpected ABI $abi in the APK" >&2; exit 1 ;;
+  esac
+  have="$tmp/have-$abi"
+  "$ndkbin/llvm-nm" -D --defined-only "$sysroot/$triple/$api"/lib{c,dl,log,m,z,android,EGL,GLESv2,jnigraphics}.so |
+    awk 'NF > 1 {sub(/@.*/, "", $NF); print $NF}' | sort -u > "$have"
+  for so in "$dir"/*.so; do
+    "$readelf" -h "$so" | grep -q "Machine:.*$machine" || { echo "$abi/$(basename "$so") is not built for $abi" >&2; exit 1; }
+    bad="$("$readelf" -d "$so" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | grep -vxE 'lib(c|m|dl|log|z|android|EGL|GLESv2|jnigraphics)\.so' || true)"
+    [ -z "$bad" ] || { echo "$abi/$(basename "$so") needs libraries Android does not have: $bad" >&2; exit 1; }
+    new="$({ "$ndkbin/llvm-nm" -D --undefined-only "$so" 2> /dev/null || true; } | awk '$1 == "U" {sub(/@.*/, "", $2); print $2}' | sort -u | comm -23 - "$have")"
+    [ -z "$new" ] || { echo "$abi/$(basename "$so") calls what Android $api lacks: $new" >&2; exit 1; }
+  done
+  echo "$abi: $(ls "$dir" | tr '\n' ' ')"
 done
-ls -la "$dist"/*.apk
+ls -la "$apk"

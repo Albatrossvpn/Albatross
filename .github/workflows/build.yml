@@ -196,12 +196,22 @@ jobs:
             export ALBATROSS_KEYSTORE="$RUNNER_TEMP/albatross.jks"
           fi
           bash build/android/build.sh
-          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging dist/*arm64-v8a.apk | head -3
+          apk="$(ls dist/*-android.apk)"
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          "$tools/aapt2" dump badging "$apk" | grep -E "^(package|sdkVersion|native-code)"
+          # Android 6 knows only the v1 scheme, 7 and 8 v2, 9 and later v3
+          # (which also lets a future key replace this one).
+          "$tools/apksigner" verify --verbose --min-sdk-version 23 "$apk" | tee "$RUNNER_TEMP/sig.txt"
+          want="v1 v2"
+          [ -n "$KEYSTORE_BASE64" ] && want="v1 v2 v3"
+          for v in $want; do
+            grep -q "Verified using $v scheme.*: true" "$RUNNER_TEMP/sig.txt" || { echo "::error::The APK has no $v signature."; exit 1; }
+          done
           # Which key signed it: the release key's digest stays the same
           # from one version to the next.
-          signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist/*arm64-v8a.apk | grep -m1 'SHA-256' | awk '{print $NF}')"
+          signer="$("$tools/apksigner" verify --print-certs "$apk" | grep -m1 'SHA-256' | awk '{print $NF}')"
           echo "APK signer SHA-256: $signer"
-          echo "- APK signer SHA-256: \`$signer\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- APK signer SHA-256: \`$signer\`, signed with $want, $(du -m "$apk" | cut -f1) MB" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: Albatross-android-${{ env.VERSION }}
@@ -212,7 +222,7 @@ jobs:
       # is the proof for it.
       - name: Debuggable build for the emulator
         if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
-        run: cd android && ./gradlew --no-daemon -q assembleDebug
+        run: cd android && ABIS=x86_64 ./gradlew --no-daemon -q assembleDebug
       - name: Enable KVM
         if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -224,6 +234,17 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash build/android/selftest.sh
+      # The oldest Android the app supports.
+      - name: Connect on an Android 6 emulator
+        if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 23
           arch: x86_64
           target: google_apis
           disable-animations: true
@@ -357,10 +378,9 @@ jobs:
           name: Albatross-android-${{ needs.build.outputs.version }}
           path: dist
       # One download per platform: the Windows installer (added by the
-      # installer job) and one Android APK for 64-bit ARM phones. The x86_64
-      # APK is only for the emulator test.
+      # installer job) and one Android APK for every phone.
       - name: Name the APK
-        run: mv dist/*-android-arm64-v8a.apk "Albatross-${{ needs.build.outputs.version }}-android.apk"
+        run: mv dist/*-android.apk "Albatross-${{ needs.build.outputs.version }}-android.apk"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.build.outputs.version }}
@@ -368,7 +388,7 @@ jobs:
           # installs the first build signed with the release key only after
           # the old app is removed.
           body: |
-            Android: if you have 0.3.1 or older, uninstall it before installing this version (one time only). Later updates install over it.
+            Android: one APK for every phone, Android 6 and newer, 64 and 32-bit. If you have 0.3.1 or older, uninstall it before installing this version (one time only). Later updates install over it.
           files: Albatross-*-android.apk
       - uses: actions/checkout@v4
         with:
@@ -388,12 +408,15 @@ jobs:
           import json, os
           v = os.environ["VERSION"]
           rel = json.load(open("rel.json"))
-          keys = {"-android.apk": "android-arm64-v8a", "Setup-": "windows"}
+          # The one APK serves every ABI; 0.3.3 and earlier read only the
+          # arm64-v8a entry.
+          keys = {"-android.apk": ["android-arm64-v8a", "android-armeabi-v7a"], "Setup-": ["windows"]}
           files = {}
           for a in rel["assets"]:
-              for part, key in keys.items():
+              for part, names in keys.items():
                   if part in a["name"] and (a.get("digest") or "").startswith("sha256:"):
-                      files[key] = {"urls": [a["browser_download_url"]], "sha256": a["digest"][7:]}
+                      for key in names:
+                          files[key] = {"urls": [a["browser_download_url"]], "sha256": a["digest"][7:]}
           path = "repo/update.json"
           m = json.load(open(path))
           m["latest_version"] = v

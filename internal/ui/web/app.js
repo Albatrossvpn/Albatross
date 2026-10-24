@@ -13,7 +13,7 @@ const token = (() => {
 
 const $ = (id) => document.getElementById(id);
 const num = (n) => Number(n || 0).toLocaleString("en-US");
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 async function api(method, path, body) {
   const res = await fetch(path, {
@@ -305,7 +305,7 @@ $("share-send").addEventListener("click", async () => {
     $("share-code").value = r.code;
     if (r.sent) return; // the system share sheet took it
     $("share-code").select();
-    const copied = await navigator.clipboard?.writeText(r.code).then(() => true, () => false) || document.execCommand("copy");
+    const copied = (navigator.clipboard && await navigator.clipboard.writeText(r.code).then(() => true, () => false)) || document.execCommand("copy");
     toast(copied ? "Code copied. Paste it to your friend." : "Copy the code and send it to your friend.");
   } catch (e) {
     toast(e.message);
