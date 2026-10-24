@@ -203,6 +203,37 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 	return nil
 }
 
+// Through starts a temporary core holding nodes and calls try with each
+// node's proxy in turn until try reports it is done.
+func (t *Tester) Through(ctx context.Context, name string, nodes []*node.Node, try func(proxy *url.URL) bool) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	ports, err := core.FreePorts(1)
+	if err != nil {
+		return err
+	}
+	port := ports[0]
+	pass := randomHex(8)
+	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof, LineMbps: t.LineMbps}
+	run, err := t.Runtime.Run(ctx, name, nodes, opts, func(s *core.Set) map[string]any {
+		return testConfig(s, port, pass, t.LocalDNS, t.Mobile)
+	}, "127.0.0.1:"+strconv.Itoa(port))
+	if err != nil {
+		return err
+	}
+	defer run.Stop()
+	for _, tag := range run.Set.Tags {
+		if ctx.Err() != nil || !run.Alive() {
+			break
+		}
+		if try(&url.URL{Scheme: "http", User: url.UserPassword(tag, pass), Host: "127.0.0.1:" + strconv.Itoa(port)}) {
+			break
+		}
+	}
+	return nil
+}
+
 // Probe makes one real request through a proxy and returns delay, exit IP
 // and country.
 func Probe(ctx context.Context, proxy *url.URL, timeout time.Duration) Result {
