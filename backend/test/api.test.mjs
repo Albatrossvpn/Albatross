@@ -189,6 +189,7 @@ test("bulk creation gives working accounts; search and delete", async () => {
   assert.equal(r.status, 201);
   assert.equal(r.body.users.length, 5);
   assert.equal(new Set(r.body.users.map((u) => u.username)).size, 5);
+  assert.ok(r.body.users.every((u) => /^grp\d{6}$/.test(u.username)));
   const u = r.body.users[0];
   assert.equal((await call("POST", "login", { body: u })).status, 200);
   assert.equal((await call("POST", "admin/users/bulk", { token: admin, body: { prefix: "Bad Prefix", count: 1 } })).status, 400);
