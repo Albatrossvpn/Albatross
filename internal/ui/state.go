@@ -30,6 +30,9 @@ type state struct {
 	HelpAvailable  bool   `json:"help_available"`
 	Helping        bool   `json:"helping"`
 	CrowdAvailable bool   `json:"crowd_available"`
+	// LocationSetup is what the phone still needs before Albatross may set
+	// its location (Hooks.LocationSetup), while OverrideGPS is on.
+	LocationSetup string `json:"location_setup,omitempty"`
 }
 
 type conn struct {
@@ -56,13 +59,14 @@ type publicSettings struct {
 	AllowLAN        bool   `json:"allow_lan"`
 	HelpOthers      bool   `json:"help_others"`
 	ShareStats      bool   `json:"share_stats"`
+	OverrideGPS     bool   `json:"override_gps"`
 }
 
 func publicSettingsOf(s engine.Settings) publicSettings {
 	return publicSettings{
 		Mode: s.Mode, Bypass: s.Bypass, Protocol: s.Protocol, BlockAds: s.BlockAds,
 		SecureOnly: s.SecureOnly, AutoConnect: s.AutoConnect, StartWithSystem: s.StartWithSystem,
-		AllowLAN: s.AllowLAN, HelpOthers: s.HelpOthers, ShareStats: s.ShareStats,
+		AllowLAN: s.AllowLAN, HelpOthers: s.HelpOthers, ShareStats: s.ShareStats, OverrideGPS: s.OverrideGPS,
 	}
 }
 

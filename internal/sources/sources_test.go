@@ -49,6 +49,8 @@ func TestSealedOwnList(t *testing.T) {
 }
 
 func TestMirrorsUseGitHubAPIOnlyForOwnRepo(t *testing.T) {
+	defer func(old string) { WorkerMirror = old }(WorkerMirror)
+	WorkerMirror = "https://lists.example.workers.dev"
 	own := Mirrors(CentralBase + "fresh.txt")
 	if !slices.Contains(own, "https://api.github.com/repos/cezomagoanlace29861-jpg/vp/contents/fresh.txt?ref=servers") ||
 		!slices.Contains(own, WorkerMirror+"/list/servers/fresh.txt") {

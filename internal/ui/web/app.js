@@ -124,6 +124,7 @@ function render(s) {
   renderAccount(s.account);
   $("admin-chip").classList.toggle("hidden", !s.admin);
   if (!settingsBusy) fillSettings(s.settings);
+  renderGps(s);
   $("version").textContent = s.version ? "v" + s.version : "";
   if (sheetKind === "country") renderSheet();
 }
@@ -170,6 +171,9 @@ $("login-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("login-error").textContent = "";
   $("login-btn").disabled = true;
+  // Where the account service is filtered, signing in first finds a
+  // server to go through, which can take a while.
+  $("login-btn").textContent = "Signing in…";
   try {
     await api("POST", "/api/login", { username: $("login-user").value, password: $("login-pass").value });
     $("login-pass").value = "";
@@ -178,11 +182,8 @@ $("login-form").addEventListener("submit", async (e) => {
     $("login-error").textContent = err.message;
   } finally {
     $("login-btn").disabled = false;
+    $("login-btn").textContent = "Sign in";
   }
-});
-$("signup-link").addEventListener("click", () => {
-  const site = state && state.account.site_url;
-  if (site) api("POST", "/api/open", { url: site + "account.html#signup" }).catch((e) => toast(e.message));
 });
 $("logout-btn").addEventListener("click", async () => {
   await api("POST", "/api/logout").catch((e) => toast(e.message));
@@ -322,7 +323,7 @@ $("share-add").addEventListener("click", async () => {
 $("row-share-app").addEventListener("click", () => api("POST", "/api/share/app").catch((e) => toast(e.message)));
 $("country-search").addEventListener("input", renderSheet);
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") { closeSheet(); $("admin-modal").classList.add("hidden"); $("share-modal").classList.add("hidden"); }
+  if (e.key === "Escape") { closeSheet(); $("admin-modal").classList.add("hidden"); $("share-modal").classList.add("hidden"); $("gps-modal").classList.add("hidden"); }
 });
 
 $("sheet-list").addEventListener("click", async (e) => {
@@ -359,7 +360,7 @@ document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("cli
 // ---------- Settings ----------
 
 let settingsBusy = false;
-const toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats", "allow_lan"];
+const toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats", "allow_lan", "override_gps"];
 
 function fillSettings(st) {
   for (const k of toggles) $("set-" + k).checked = !!st[k];
@@ -401,6 +402,47 @@ $("admin-ok").addEventListener("click", async () => {
 });
 $("quit-btn").addEventListener("click", () => api("POST", "/api/quit").catch(() => {}));
 
+// ---------- GPS override ----------
+
+// Android lets one app set the phone's location, chosen in Developer
+// options. location_setup names the step still to do; the guide follows it
+// and closes once the phone is ready.
+let gpsWanted = false;
+const gpsSetup = (s) => (s.settings.override_gps && s.location_setup) || "";
+
+function gpsSteps(setup) {
+  $("gps-step-developer").classList.toggle("done", setup !== "developer");
+  $("gps-step-mock_app").classList.toggle("done", !setup);
+}
+
+function openGpsGuide() {
+  gpsSteps(gpsSetup(state));
+  $("gps-modal").classList.remove("hidden");
+}
+
+function renderGps(s) {
+  const setup = gpsSetup(s);
+  $("gps-setup").classList.toggle("hidden", !setup);
+  if (!$("gps-modal").classList.contains("hidden")) {
+    if (setup) gpsSteps(setup);
+    else {
+      $("gps-modal").classList.add("hidden");
+      if (s.settings.override_gps) toast("GPS override is ready");
+    }
+  }
+  // Just turned on: the guide opens if the phone needs the setup.
+  if (gpsWanted && s.settings.override_gps) {
+    gpsWanted = false;
+    if (setup) openGpsGuide();
+  }
+}
+
+$("set-override_gps").addEventListener("change", (e) => { gpsWanted = e.target.checked; });
+$("gps-setup").addEventListener("click", openGpsGuide);
+$("gps-close").addEventListener("click", () => $("gps-modal").classList.add("hidden"));
+$("gps-modal").querySelectorAll("[data-step]").forEach((b) => b.addEventListener("click", () =>
+  api("POST", "/api/location-settings", { step: b.dataset.step }).catch((e) => toast(e.message))));
+
 // The app downloads and opens the new version itself where it can; else the
 // download page opens.
 const getUpdate = async () => {
@@ -441,6 +483,7 @@ async function loadLogs() {
 window.albatrossBack = () => {
   if (!$("sheet").classList.contains("hidden")) { closeSheet(); return true; }
   if (!$("admin-modal").classList.contains("hidden")) { $("admin-modal").classList.add("hidden"); return true; }
+  if (!$("gps-modal").classList.contains("hidden")) { $("gps-modal").classList.add("hidden"); return true; }
   if (view === "logs") { show("settings"); return true; }
   if (view !== "home") { show("home"); return true; }
   return false;

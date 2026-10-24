@@ -300,10 +300,36 @@ func (p *fakeVPN) close() {
 	exec.Command("ip", "link", "del", tunName).Run()
 }
 
-func (p *fakeVPN) OpenURL(string)             {}
-func (p *fakeVPN) OpenVPNSettings()           {}
-func (p *fakeVPN) Quit()                      {}
-func (p *fakeVPN) ShareText(string)           {}
-func (p *fakeVPN) ShareApp()                  {}
-func (p *fakeVPN) LanAddrs() string           { return "" }
-func (p *fakeVPN) InstallUpdate(string) error { return nil }
+func (p *fakeVPN) OpenURL(string)              {}
+func (p *fakeVPN) OpenVPNSettings()            {}
+func (p *fakeVPN) Quit()                       {}
+func (p *fakeVPN) ShareText(string)            {}
+func (p *fakeVPN) ShareApp()                   {}
+func (p *fakeVPN) LanAddrs() string            { return "" }
+func (p *fakeVPN) InstallUpdate(string) error  { return nil }
+func (p *fakeVPN) LocationSetup() string       { return "" }
+func (p *fakeVPN) OpenLocationSettings(string) {}
+
+// The mock location stays near the place, keeps still for one server and
+// moves for another.
+func TestMockPoint(t *testing.T) {
+	if got := MockLocation(); got != "" {
+		t.Fatalf("MockLocation without an engine = %q", got)
+	}
+	for _, place := range [][2]float64{{52.5238, 13.3996}, {-34.6006, -58.3995}} {
+		a := mockPoint(place[0], place[1], "203.0.113.7")
+		if a != mockPoint(place[0], place[1], "203.0.113.7") {
+			t.Fatalf("%v moves for the same server", place)
+		}
+		if a == mockPoint(place[0], place[1], "198.51.100.20") {
+			t.Fatalf("%v stays put for another server", place)
+		}
+		lat, lon, _ := strings.Cut(a, ",")
+		for i, s := range []string{lat, lon} {
+			v, err := strconv.ParseFloat(s, 64)
+			if err != nil || len(s)-strings.IndexByte(s, '.') != 7 || v < place[i]-0.0201 || v > place[i]+0.0201 {
+				t.Fatalf("mockPoint(%v) = %q", place, a)
+			}
+		}
+	}
+}
