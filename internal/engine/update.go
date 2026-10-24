@@ -98,8 +98,9 @@ func (e *Engine) loadUpdate() {
 func (e *Engine) applyUpdate(m UpdateManifest) {
 	var info *UpdateInfo
 	cur, ok := parseVersion(e.opt.Version)
-	// Builds without a release version (dev, tests) are never held back.
-	if ok {
+	// Builds without a release version (dev, tests: "0.1.0-dev.12") are
+	// never held back.
+	if ok && !strings.Contains(e.opt.Version, "-") {
 		if requiredFrom(cur, m.MinVersion, m.Require) {
 			info = &UpdateInfo{Required: true}
 		} else if latest, ok := parseVersion(m.LatestVersion); ok && versionLess(cur, latest) {
