@@ -73,7 +73,9 @@ func Start(eng *engine.Engine, hooks Hooks, port int) (*Server, string, error) {
 // Close stops the server.
 func (s *Server) Close() { s.srv.Close() }
 
-func (s *Server) routes() http.Handler {
+func (s *Server) routes() http.Handler { return s.checkHost(s.mux()) }
+
+func (s *Server) mux() *http.ServeMux {
 	static, _ := fs.Sub(webFS, "web")
 	files := http.FileServer(http.FS(static))
 	mux := http.NewServeMux()
@@ -82,6 +84,8 @@ func (s *Server) routes() http.Handler {
 		"GET /api/state":              s.state,
 		"GET /api/logs":               s.logs,
 		"POST /api/connect":           s.connect,
+		"POST /api/login":             s.login,
+		"POST /api/logout":            s.logout,
 		"POST /api/disconnect":        s.disconnect,
 		"POST /api/target":            s.target,
 		"POST /api/settings":          s.settings,
@@ -98,7 +102,7 @@ func (s *Server) routes() http.Handler {
 	for pattern, h := range api {
 		mux.Handle(pattern, s.guard(h))
 	}
-	return s.checkHost(mux)
+	return mux
 }
 
 // checkHost blocks DNS-rebinding: only requests addressed to our own
