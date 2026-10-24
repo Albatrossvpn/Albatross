@@ -133,7 +133,8 @@ public final class TunnelService extends VpnService {
     }
 
     // The notification follows the engine: "Connecting" while it searches
-    // or reconnects, "Connected" once traffic flows through a server.
+    // or reconnects, "Connected" once traffic flows through a server. So
+    // does the phone's location while "Override GPS location" is on.
     private final android.os.Handler ticker = new android.os.Handler(android.os.Looper.getMainLooper());
     private Boolean shown;
     private final Runnable tick = new Runnable() {
@@ -144,9 +145,31 @@ public final class TunnelService extends VpnService {
                 shown = connected;
                 getSystemService(android.app.NotificationManager.class).notify(1, notification(connected));
             }
+            mockLocation();
             ticker.postDelayed(this, 2000);
         }
     };
+
+    private void mockLocation() {
+        String at = Mobile.mockLocation();
+        if (at.isEmpty()) {
+            MockLocation.clear(this);
+            return;
+        }
+        if (at.equals("keep")) {
+            MockLocation.keep(this);
+            return;
+        }
+        String[] p = at.split(",");
+        double lat, lon;
+        try {
+            lat = Double.parseDouble(p[0]);
+            lon = Double.parseDouble(p[1]);
+        } catch (RuntimeException e) {
+            return;
+        }
+        MockLocation.set(this, lat, lon);
+    }
 
     private void foreground() {
         shown = false;
@@ -182,6 +205,7 @@ public final class TunnelService extends VpnService {
             }
             tun = null;
         }
+        MockLocation.clear(this);
         stopForeground(true);
     }
 

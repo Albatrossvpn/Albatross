@@ -36,6 +36,13 @@ type Hooks struct {
 	ShareText func(string) error
 	// ShareApp shares the app's own installer (Android).
 	ShareApp func() error
+	// LocationSetup says what the phone still needs before the app may set
+	// its location (Android): "" when it is ready, "developer" while
+	// Developer options are off, "mock_app" until the app is the selected
+	// mock location app.
+	LocationSetup func() string
+	// OpenLocationSettings opens the system screen for one of those steps.
+	OpenLocationSettings func(step string) error
 }
 
 // Server is the local UI server. It listens on 127.0.0.1 only and every
@@ -72,20 +79,21 @@ func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/", noCache(files))
 	api := map[string]http.HandlerFunc{
-		"GET /api/state":         s.state,
-		"GET /api/logs":          s.logs,
-		"POST /api/connect":      s.connect,
-		"POST /api/disconnect":   s.disconnect,
-		"POST /api/target":       s.target,
-		"POST /api/settings":     s.settings,
-		"POST /api/admin":        s.admin,
-		"POST /api/open":         s.open,
-		"POST /api/update":       s.getUpdate,
-		"POST /api/vpn-settings": s.vpnSettings,
-		"POST /api/quit":         s.quit,
-		"POST /api/share":        s.share,
-		"POST /api/share/import": s.shareImport,
-		"POST /api/share/app":    s.shareApp,
+		"GET /api/state":              s.state,
+		"GET /api/logs":               s.logs,
+		"POST /api/connect":           s.connect,
+		"POST /api/disconnect":        s.disconnect,
+		"POST /api/target":            s.target,
+		"POST /api/settings":          s.settings,
+		"POST /api/admin":             s.admin,
+		"POST /api/open":              s.open,
+		"POST /api/update":            s.getUpdate,
+		"POST /api/vpn-settings":      s.vpnSettings,
+		"POST /api/location-settings": s.locationSettings,
+		"POST /api/quit":              s.quit,
+		"POST /api/share":             s.share,
+		"POST /api/share/import":      s.shareImport,
+		"POST /api/share/app":         s.shareApp,
 	}
 	for pattern, h := range api {
 		mux.Handle(pattern, s.guard(h))
@@ -163,7 +171,11 @@ func fail(w http.ResponseWriter, err error) {
 func ok(w http.ResponseWriter) { writeJSON(w, map[string]bool{"ok": true}) }
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, publicState(s.eng.Snapshot()))
+	st := publicState(s.eng.Snapshot())
+	if st.Settings.OverrideGPS && s.hooks.LocationSetup != nil {
+		st.LocationSetup = s.hooks.LocationSetup()
+	}
+	writeJSON(w, st)
 }
 
 func (s *Server) logs(w http.ResponseWriter, r *http.Request) { writeJSON(w, s.eng.Logs()) }
@@ -284,6 +296,25 @@ func (s *Server) vpnSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.hooks.OpenVPNSettings(); err != nil {
+		fail(w, err)
+		return
+	}
+	ok(w)
+}
+
+func (s *Server) locationSettings(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Step string `json:"step"`
+	}
+	if err := readJSON(r, &req); err != nil || (req.Step != "developer" && req.Step != "mock_app") {
+		fail(w, errors.New("bad step"))
+		return
+	}
+	if s.hooks.OpenLocationSettings == nil {
+		fail(w, errors.New("not supported"))
+		return
+	}
+	if err := s.hooks.OpenLocationSettings(req.Step); err != nil {
 		fail(w, err)
 		return
 	}
