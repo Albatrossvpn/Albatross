@@ -62,14 +62,19 @@ func fileExists(path string) bool {
 }
 
 // updateRules downloads fresh rule sets if the local ones are a day old.
-func updateRules(ctx context.Context, dir string, client func() *http.Client) {
+// private is for the Worker (sources.IsWorker).
+func updateRules(ctx context.Context, dir string, client, private func() *http.Client) {
 	for name, url := range ruleSets {
 		path := filepath.Join(dir, name)
 		if st, err := os.Stat(path); err == nil && time.Since(st.ModTime()) < 24*time.Hour {
 			continue
 		}
 		for _, u := range append([]string{url}, sources.Mirrors(url)...) {
-			b, err := download(ctx, client(), u, 8<<20)
+			c := client()
+			if sources.IsWorker(u) {
+				c = private()
+			}
+			b, err := download(ctx, c, u, 8<<20)
 			if err != nil || len(b) < 64 || !bytes.HasPrefix(b, []byte("SRS")) {
 				continue
 			}

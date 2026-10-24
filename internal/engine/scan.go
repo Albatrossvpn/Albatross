@@ -73,7 +73,7 @@ func (e *Engine) refreshLoop() {
 	for {
 		if time.Since(ruleCheck) > 6*time.Hour {
 			ruleCheck = time.Now()
-			go updateRules(e.ctx, filepath.Join(e.dir, "rules"), e.anyClient)
+			go updateRules(e.ctx, filepath.Join(e.dir, "rules"), e.anyClient, e.accountHTTP)
 			go e.checkUpdate()
 		}
 		e.refreshDue()
@@ -81,7 +81,8 @@ func (e *Engine) refreshLoop() {
 			e.updateRegime()
 		}
 		e.updateHelp()
-		if time.Since(e.crowdAt) > crowdEvery {
+		if time.Since(e.crowdAt) > crowdEvery && e.proxyClient() != nil {
+			// Reports go only through the VPN (crowdReport).
 			e.crowdAt = time.Now()
 			go e.crowdReport(e.ctx)
 		}
@@ -92,7 +93,7 @@ func (e *Engine) refreshLoop() {
 		if clean && e.cf.Age() > 2*time.Hour {
 			found := e.cf.Scan(e.ctx, 400, 8)
 			if len(found) > 0 {
-				e.logf("info", "%d clean edge addresses found (best: %s, %d ms).", len(found), found[0].IP, found[0].Latency/time.Millisecond)
+				e.logf("info", "%d clean edge addresses found (best: %d ms).", len(found), found[0].Latency/time.Millisecond)
 			}
 		}
 		if warp {
