@@ -240,8 +240,8 @@ func (f *Fetcher) getPage(ctx context.Context, c *http.Client, url string) (stri
 var rawGitHubRe = regexp.MustCompile(`^https?://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+)$`)
 
 // WorkerMirror is the project's Cloudflare Worker, which serves the app's
-// own lists (backend/src/index.js).
-const WorkerMirror = "https://albatross-accounts.albatross.workers.dev"
+// own lists (backend/src/index.js); empty while it has no address.
+var WorkerMirror = ""
 
 // Mirrors returns CDN copies of a raw GitHub URL, which often stay
 // reachable when raw.githubusercontent.com is filtered.
@@ -262,7 +262,9 @@ func Mirrors(u string) []string {
 	// hour per address, so only the app's own files go this way.
 	if strings.EqualFold(owner+"/"+repo, ownRepo) {
 		out = append(out, fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", owner, repo, path, branch))
-		out = append(out, WorkerMirror+"/list/"+branch+"/"+path)
+		if WorkerMirror != "" {
+			out = append(out, WorkerMirror+"/list/"+branch+"/"+path)
+		}
 	}
 	return out
 }
