@@ -64,7 +64,7 @@
     <div class="error" id="u-error" role="alert"></div>
     <div id="u-extra" class="hidden">
       <div class="row wrap-row">
-        <button type="button" class="btn small" id="u-reset-usage">Reset usage</button>
+        <button type="button" class="btn small" id="u-reset-usage" title="Sets used data and time back to zero">Recharge</button>
         <button type="button" class="btn small" id="u-reset-pass">New password</button>
         <button type="button" class="btn small" id="u-signout">Sign out devices</button>
         <button type="button" class="btn small" id="u-toggle">Turn off</button>
@@ -85,7 +85,7 @@
         <label class="field"><span>How many (1–200)</span><input id="b-count" type="number" min="1" max="200" value="10"></label>
         <label class="field"><span>Data per period (GB)</span><input id="b-quota" type="number" min="0" step="any" placeholder="0 = no limit"></label>
         <label class="field"><span>Time per period (hours)</span><input id="b-hours" type="number" min="0" step="any" placeholder="0 = no limit"></label>
-        <label class="field"><span>Renews every (days)</span><input id="b-reset" type="number" min="0" step="1" value="30"></label>
+        <label class="field"><span>Renews every (days)</span><input id="b-reset" type="number" min="0" step="1" value="0" placeholder="0 = never"></label>
         <label class="field"><span>Accounts end on</span><input id="b-expires" type="date"></label>
       </div>
       <label class="field"><span>Note</span><input id="b-note" maxlength="200"></label>
