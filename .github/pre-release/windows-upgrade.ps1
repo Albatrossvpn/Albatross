@@ -19,8 +19,8 @@ function Run-Setup([string]$exe, [string[]]$extra, [string]$logName) {
   $a = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$logName") + $extra
   $sw = [Diagnostics.Stopwatch]::StartNew()
   $p = Start-Process $exe -ArgumentList $a -Wait -PassThru
-  "  $([IO.Path]::GetFileName($exe)) $($extra -join ' '): exit $($p.ExitCode) in $([int]$sw.Elapsed.TotalSeconds) s"
-  return $p.ExitCode
+  Write-Host "  $([IO.Path]::GetFileName($exe)) $($extra -join ' '): exit $($p.ExitCode) in $([int]$sw.Elapsed.TotalSeconds) s"
+  return [int]$p.ExitCode
 }
 
 function Uninstall-From([string]$key) {
@@ -42,7 +42,7 @@ function Start-Headless([string]$exe, [int]$port, [string]$name) {
 
 # 1. Per-user 0.3.3, the installer's default (no UAC prompt).
 "== Per-user upgrade with 0.3.3 running"
-Run-Setup "$PWD\old-0.3.3.exe" @('/CURRENTUSER') 'old-user.log'
+[void](Run-Setup "$PWD\old-0.3.3.exe" @('/CURRENTUSER') 'old-user.log')
 $u = Get-ItemProperty $userKey -ErrorAction SilentlyContinue
 Check ($u.DisplayVersion -eq '0.3.3') "0.3.3 installed for the current user ($($u.DisplayVersion), $($u.InstallLocation))"
 $dir = "$($u.InstallLocation)".TrimEnd('\')
@@ -88,10 +88,10 @@ Set-ItemProperty $inet -Name ProxyEnable -Value 0 -Type DWord
 
 # 3. All-users 0.3.3, then the new installer with no mode chosen (silent default).
 "== All-users upgrade"
-Run-Setup "$PWD\old-0.3.3.exe" @('/ALLUSERS') 'old-machine.log'
+[void](Run-Setup "$PWD\old-0.3.3.exe" @('/ALLUSERS') 'old-machine.log')
 $m = Get-ItemProperty $machineKey -ErrorAction SilentlyContinue
 Check ($m.DisplayVersion -eq '0.3.3') "0.3.3 installed for all users ($($m.InstallLocation))"
-Run-Setup $new @() 'new-default.log'
+[void](Run-Setup $new @() 'new-default.log')
 $m2 = Get-ItemProperty $machineKey -ErrorAction SilentlyContinue
 $u3 = Get-ItemProperty $userKey -ErrorAction SilentlyContinue
 "  all-users entry: $($m2.DisplayVersion) $($m2.InstallLocation); per-user entry: $($u3.DisplayVersion) $($u3.InstallLocation)"

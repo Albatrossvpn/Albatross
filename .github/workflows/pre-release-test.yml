@@ -1,8 +1,10 @@
 # Pre-release checks run by the test thread. Lives only on this branch and
-# is never merged: it installs a Build run's APK on emulators from Android 5
-# to 16 (and the 32-bit ARM path through Android 11+ ARM translation),
-# connects a debuggable build on several Android versions, and upgrades a
-# Windows install of 0.3.3 to the Build run's installer.
+# is never merged: it checks a Build run's APK file (signatures, minSdk,
+# ABIs), installs it on emulators from Android 6 to 16 (its ARM code through
+# Android 11+ ARM translation, a debuggable x86_64 build of the same commit
+# on older emulators), connects a debuggable build on several Android
+# versions, and upgrades a Windows install of 0.3.3 to the Build run's
+# installer.
 name: Pre-release test
 
 on:
@@ -23,24 +25,50 @@ env:
   # The commit the debuggable app for the connection test is built from.
   DEBUG_REF: "858861fd9bafa7f67ff006e453bb5cdf8c30035c"
   GH_TOKEN: ${{ github.token }}
+  # The release key's certificate (DN CN=Albatross), as 0.3.3 is signed.
+  RELEASE_CERT: "73cc588ac98efae650cb158cbfe118e867cc013ab36827f64a45c70309ba3646"
   SINGBOX_VERSION: "1.14.3"
   XRAY_VERSION: "26.9.30"
   WARPPLUS_VERSION: "1.2.6"
 
 jobs:
+  apk-file:
+    name: Check the APK file
+    runs-on: ubuntu-latest
+    steps:
+      - name: Signatures, minSdk, ABIs, signer
+        run: |
+          gh run download "$BUILD_RUN" -R "$GITHUB_REPOSITORY" -p 'Albatross-android-*' -D dl
+          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          fails=0
+          for apk in $(find dl -name '*.apk'); do
+            echo "== $(basename "$apk"), $(du -m "$apk" | cut -f1) MB"
+            "$tools/aapt2" dump badging "$apk" | grep -E "^(package|sdkVersion|targetSdkVersion|native-code)"
+            "$tools/apksigner" verify --verbose --print-certs --min-sdk-version 23 "$apk" > sig.txt 2>&1 || { echo "FAIL apksigner refuses it for Android 6"; fails=1; }
+            grep -E 'Verified using|Signer #1 certificate (DN|SHA-256)|WARNING' sig.txt | head -12
+            for v in v1 v2 v3; do grep -q "Verified using $v scheme.*: true" sig.txt || { echo "FAIL no $v signature"; fails=1; }; done
+            grep -q "certificate SHA-256 digest: $RELEASE_CERT" sig.txt || { echo "FAIL not signed with the release key"; fails=1; }
+            "$tools/aapt2" dump badging "$apk" | grep -q "sdkVersion:'23'" || { echo "FAIL minSdk is not 23"; fails=1; }
+            for abi in arm64-v8a armeabi-v7a; do unzip -l "$apk" | grep -q "lib/$abi/libgojni.so" || { echo "FAIL no $abi engine"; fails=1; }; done
+            for abi in arm64-v8a armeabi-v7a; do
+              n="$(unzip -l "$apk" | grep -cE "lib/$abi/lib(singbox|xray|warpplus|tor|lyrebird)\.so" || true)"
+              [ "$n" -eq 5 ] || { echo "FAIL $abi has $n of the 5 cores"; fails=1; }
+            done
+          done
+          exit $fails
+
   apk:
     name: Install on Android API ${{ matrix.api }}
+    needs: debug-build
     runs-on: ubuntu-latest
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { api: 21, target: default }
-          - { api: 22, target: default }
           - { api: 23, target: default }
           - { api: 24, target: default }
-          - { api: 26, target: default }
+          - { api: 26, target: google_apis }
           - { api: 28, target: default }
           - { api: 29, target: default }
           - { api: 30, target: google_apis }
@@ -51,6 +79,10 @@ jobs:
           - { api: 36, target: google_apis }
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debug-apk
+          path: apk/debug
       - name: Get the APKs
         run: |
           mkdir -p apk dl
@@ -108,6 +140,8 @@ jobs:
       - name: Build
         env:
           VERSION: 0.1.0-dev.prerelease
+          # x86_64 for the emulators; ARM to connect through ARM translation.
+          ABIS: x86_64,armeabi-v7a,arm64-v8a
         run: |
           bash build/android/build.sh
           cd android && ./gradlew --no-daemon -q assembleDebug
@@ -127,10 +161,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { api: 21, target: default }
           - { api: 23, target: default }
-          - { api: 26, target: default }
+          - { api: 26, target: google_apis }
           - { api: 29, target: default }
+          - { api: 30, target: google_apis }
           - { api: 31, target: google_apis }
           - { api: 34, target: google_apis }
           - { api: 36, target: google_apis }
