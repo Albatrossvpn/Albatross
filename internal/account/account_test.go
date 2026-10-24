@@ -257,3 +257,27 @@ func TestRealService(t *testing.T) {
 	}
 	t.Logf("account %+v", after)
 }
+
+// A sign-in can go through a client of its own (a server the app found
+// working) while the usual one cannot reach the service.
+func TestWithClient(t *testing.T) {
+	srv := httptest.NewServer(&fakeService{})
+	defer srv.Close()
+	blocked := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("filtered")
+	})}
+	c := New([]string{srv.URL}, filepath.Join(t.TempDir(), "s.json"), func() *http.Client { return blocked })
+	if _, err := c.Login(context.Background(), "ada", "correct horse"); !errors.Is(err, ErrUnreachable) {
+		t.Fatalf("login through the blocked client: %v", err)
+	}
+	if _, err := c.Login(WithClient(context.Background(), srv.Client()), "ada", "correct horse"); err != nil {
+		t.Fatalf("login through its own client: %v", err)
+	}
+	if !c.View().SignedIn {
+		t.Fatal("not signed in")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

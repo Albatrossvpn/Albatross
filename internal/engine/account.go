@@ -3,10 +3,13 @@ package engine
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/account"
+	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
 )
 
 // AccountURL is the account service, set at build time with
@@ -36,6 +39,8 @@ const (
 	syncEvery  = time.Minute
 	// How long connecting waits for the service.
 	connectSync = 6 * time.Second
+	// How long signing in may take, finding a server to go through included.
+	signInWait = 75 * time.Second
 )
 
 // AccountState is the signed-in user's account as the UI shows it.
@@ -95,14 +100,64 @@ func (e *Engine) Login(username, password string) error {
 	if strings.TrimSpace(username) == "" || password == "" {
 		return errors.New("Enter your username and password.")
 	}
-	if _, err := e.acct.Login(context.Background(), username, password); err != nil {
-		if errors.Is(err, account.ErrUnreachable) {
+	ctx, cancel := context.WithTimeout(context.Background(), signInWait)
+	defer cancel()
+	login := func(ctx context.Context) error {
+		_, err := e.acct.Login(ctx, username, password)
+		return err
+	}
+	err := login(ctx)
+	if errors.Is(err, account.ErrUnreachable) && e.proxyClient() == nil {
+		// The service is filtered in many places; go through a server.
+		err = e.viaServer(ctx, login)
+	}
+	if err != nil {
+		if errors.Is(err, account.ErrUnreachable) || errors.Is(err, context.DeadlineExceeded) {
 			return errors.New("Cannot reach the account service. Check your internet connection and try again.")
 		}
 		return err
 	}
 	e.logf("info", "Signed in.")
 	return nil
+}
+
+// viaServer runs call through working servers, one after another, until
+// one of them reaches the account service. On a first start the servers
+// are still being found, so it waits for them.
+func (e *Engine) viaServer(ctx context.Context, call func(context.Context) error) error {
+	err := account.ErrUnreachable
+	tried := map[string]bool{}
+	for ctx.Err() == nil {
+		list := e.bestServers("", 6, tried)
+		if len(list) == 0 {
+			list = e.recentServers("", 6, tried)
+		}
+		var nodes []*node.Node
+		for _, s := range list {
+			tried[s.Key] = true
+			if n := s.runNode(); n != nil {
+				nodes = append(nodes, n)
+			}
+		}
+		if len(nodes) == 0 {
+			e.triggerRefill()
+			select {
+			case <-ctx.Done():
+			case <-time.After(3 * time.Second):
+			}
+			continue
+		}
+		e.logf("info", "Signing in through a server.")
+		e.tester.Through(ctx, "signin", nodes, func(proxy *url.URL) bool {
+			hc := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy), TLSHandshakeTimeout: 15 * time.Second}}
+			err = call(account.WithClient(ctx, hc))
+			return !errors.Is(err, account.ErrUnreachable)
+		})
+		if !errors.Is(err, account.ErrUnreachable) {
+			return err
+		}
+	}
+	return err
 }
 
 // Logout disconnects and forgets the session.
@@ -115,8 +170,9 @@ func (e *Engine) Logout() {
 }
 
 // AllowConnect says whether the signed-in user may connect now, asking the
-// service unless it answered a moment ago. With no service reachable the
-// last answer stands for a few days.
+// service unless it answered a moment ago. When the service cannot be
+// reached the last answer stands, and a session not confirmed for days is
+// checked through the VPN as soon as it is up (see meter).
 func (e *Engine) AllowConnect() error {
 	if e.acct == nil {
 		return nil
@@ -135,9 +191,9 @@ func (e *Engine) AllowConnect() error {
 			info = got
 		case errors.Is(err, account.ErrSignedOut):
 			return ErrLoginRequired
-		case v.Stale:
-			return errors.New("Cannot reach the account service. Check your internet connection and try again.")
 		}
+		// Otherwise the service is likely filtered here: connecting goes
+		// on, and the meter asks it through the VPN at once.
 	}
 	if why := info.Why(now); why != "" {
 		return &LimitError{Reason: why, Message: limitMessage(why, info)}
@@ -172,6 +228,10 @@ type meterState struct {
 // service whether the user may go on, until the connection ends.
 func (e *Engine) meter(ctx context.Context, c *connection) {
 	m := &meterState{at: time.Now(), synced: time.Now()}
+	if e.acct.View().Stale {
+		// Not confirmed for days: ask at the first step.
+		m.synced = time.Time{}
+	}
 	t := time.NewTicker(meterEvery)
 	defer t.Stop()
 	for {
