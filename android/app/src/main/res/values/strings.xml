@@ -9,5 +9,4 @@
     <string name="disconnect">Disconnect</string>
     <string name="start_failed">The app could not start</string>
     <string name="vpn_denied">Albatross cannot connect without VPN permission.</string>
-    <string name="update_failed">The new version could not be opened. Download it from the releases page.</string>
 </resources>
