@@ -259,6 +259,8 @@ jobs:
           api-level: 23
           arch: x86_64
           target: google_apis
+          # Its data partition is too small for the app otherwise.
+          disk-size: 2048M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: bash build/android/selftest.sh

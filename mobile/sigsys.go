@@ -72,7 +72,7 @@ static void albatross_catch_sigsys(void) {
 }
 
 #ifdef __ANDROID__
-__attribute__((constructor)) static void albatross_catch_sigsys_at_load(void) {
+__attribute__((constructor(101))) static void albatross_catch_sigsys_at_load(void) {
 	albatross_catch_sigsys();
 }
 #endif
