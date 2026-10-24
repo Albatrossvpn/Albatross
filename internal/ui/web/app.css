@@ -244,6 +244,19 @@ textarea:focus, .search:focus, .field input:focus { border-color: var(--accent);
 .group .row:first-child { border-top: 0; }
 .row .chev { width: 18px; height: 18px; color: var(--muted); }
 .check { width: 20px; height: 20px; color: var(--accent); flex: none; stroke-width: 2.6; }
+/* A step still to do under the switch above it */
+.row.follow { border-top: 0; padding-top: 0; }
+.row.follow small { color: var(--warn); }
+
+/* Setup steps */
+.steps { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+.step { display: flex; align-items: flex-start; gap: 12px; }
+.step-mark { width: 26px; height: 26px; border-radius: 50%; background: var(--surface-3); display: grid; place-items: center; font-weight: 800; font-size: 13px; flex: none; }
+.step .t-body .btn { align-self: flex-start; margin-top: 6px; }
+.step .check { display: none; }
+.step.done .step-mark { background: var(--ok-soft); }
+.step.done .step-num, .step.done .btn { display: none; }
+.step.done .check { display: block; width: 16px; height: 16px; color: var(--ok); }
 
 /* Account */
 .account .acc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }

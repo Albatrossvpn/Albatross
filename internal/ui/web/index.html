@@ -100,6 +100,8 @@
         <label class="toggle hidden" id="crowd-row"><input type="checkbox" id="set-share_stats"><span class="t-body"><b>Learn from other users</b><small>Shares which kinds of server work on your network, as counts only, with no addresses or IDs, and starts from what others found</small></span><span class="switch"></span></label>
         <label class="toggle desktop-only hidden" id="help-row"><input type="checkbox" id="set-help_others"><span class="t-body"><b>Help others get online</b><small id="help-note">Lets people in censored countries reach Tor through this computer. Shown only outside Iran.</small></span><span class="switch"></span></label>
         <label class="toggle"><input type="checkbox" id="set-allow_lan"><span class="t-body"><b>Share with other devices</b><small id="share-note">Phones, laptops and TVs on your hotspot or Wi-Fi can use this connection by setting an HTTP or SOCKS proxy</small></span><span class="switch"></span></label>
+        <label class="toggle mobile-only"><input type="checkbox" id="set-override_gps"><span class="t-body"><b>Override GPS location</b><small>Match your GPS location to your VPN location, so apps that use GPS see you in the VPN's country</small></span><span class="switch"></span></label>
+        <button class="row follow hidden" id="gps-setup"><span class="t-body"><small>One-time setup needed. Tap to finish.</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
         <label class="toggle desktop-only"><input type="checkbox" id="set-tun"><span class="t-body"><b>Protect the whole device</b><small>Covers every app and game; needs administrator rights</small></span><span class="switch"></span></label>
       </div>
 
@@ -140,6 +142,27 @@
       <div class="row-end">
         <button class="btn" id="admin-cancel">Not now</button>
         <button class="btn primary" id="admin-ok">Restart as administrator</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Override GPS location: Android lets only the chosen mock location app set the location -->
+  <div class="modal-backdrop hidden" id="gps-modal">
+    <div class="modal">
+      <h3>Set up GPS override</h3>
+      <p>Android lets one app set the phone's location. Pick Albatross for it once:</p>
+      <div class="steps">
+        <div class="step" id="gps-step-developer">
+          <span class="step-mark"><span class="step-num">1</span><svg class="check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></span>
+          <span class="t-body"><b>Turn on Developer options</b><small>Open About phone, then tap Build number 7 times until it says you are a developer.</small><button class="btn" data-step="developer">Open About phone</button></span>
+        </div>
+        <div class="step" id="gps-step-mock_app">
+          <span class="step-mark"><span class="step-num">2</span><svg class="check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg></span>
+          <span class="t-body"><b>Choose Albatross</b><small>Open Developer options, tap Select mock location app, and choose Albatross.</small><button class="btn" data-step="mock_app">Open Developer options</button></span>
+        </div>
+      </div>
+      <div class="row-end">
+        <button class="btn" id="gps-close">Close</button>
       </div>
     </div>
   </div>
