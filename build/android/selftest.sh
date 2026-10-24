@@ -33,5 +33,16 @@ if [ $ok -eq 0 ]; then
   fi
 fi
 adb logcat -d -s AlbatrossTest:I | tail -c 60000
+# Each core must start on this Android version: one built with the wrong Go
+# panics before doing anything, and WARP and Tor are not used above.
+libdir="$(adb shell pm dump app.albatross.vpn | tr -d '\r' | sed -n 's/.*legacyNativeLibraryDir=//p' | head -1)/x86_64"
+for c in "libsingbox.so version" "libxray.so version" "libwarpplus.so --help" "libtor.so --version"; do
+  out="$(adb shell run-as app.albatross.vpn "$libdir/${c% *}" "${c#* }" 2>&1 | tr -d '\r' | head -c 4000)"
+  echo "== $c: $(printf '%s' "$out" | head -3)"
+  if printf '%s' "$out" | grep -qE 'panic:|fatal error:|SIGSYS'; then
+    summary "Android emulator: FAIL, ${c% *} crashes at start: $(printf '%s' "$out" | grep -m1 -E 'panic:|fatal error:|SIGSYS')" >&2
+    ok=1
+  fi
+done
 [ $ok -eq 0 ] || summary "Android emulator: FAIL (see the log above)." >&2
 exit $ok
