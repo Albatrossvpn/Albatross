@@ -56,7 +56,7 @@ iscc /DAppVersion=0.1.0 build/windows/installer.iss   # on Windows, needs Inno S
 Android (needs Go, Java 17 and an Android SDK with the NDK):
 
 ```sh
-ANDROID_HOME=/path/to/sdk VERSION=0.1.0 bash build/android/build.sh   # dist/Albatross-0.1.0-android-<abi>.apk
+ANDROID_HOME=/path/to/sdk VERSION=0.1.0 bash build/android/build.sh   # dist/Albatross-0.1.0-android.apk
 ```
 
 On Android the engine runs in the app process (gomobile) and the cores run as executables shipped as native libraries. Where Windows sets the system proxy, Android starts a `VpnService`; tun2socks carries the tunnel's packets to the local proxy. Set the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` repository secrets so CI signs APKs with one key (otherwise each build is signed with a throwaway debug key and cannot update the previous install).
