@@ -82,8 +82,9 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
   else
     local src
     src="$(xraysrc)"
+    # As Xray's own release builds: a dependency links into net's internals.
     (cd "$src" && gobuild "$abi" "$out/libxray.so" \
-      -ldflags "-X github.com/xtls/xray-core/core.build=$(git rev-parse --short HEAD) -s -w -buildid=" ./main)
+      -ldflags "-X github.com/xtls/xray-core/core.build=$(git rev-parse --short HEAD) -s -w -buildid= -checklinkname=0" ./main)
   fi
   if [ -n "$4" ]; then
     fetch "$gh/bepass-org/warp-plus/releases/download/v$WARPPLUS_VERSION/$4" "$dl/warp-plus-$WARPPLUS_VERSION-$4"
@@ -95,9 +96,9 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
     local wp="$tmp/wp-src"
     if [ ! -d "$wp" ]; then
       mkdir -p "$wp"
-      (cd "$wp" && go mod init warpbuild && go get "github.com/bepass-org/warp-plus@v$WARPPLUS_VERSION")
+      (cd "$wp" && go mod init warpbuild && go get "github.com/bepass-org/warp-plus/cmd/warp-plus@v$WARPPLUS_VERSION")
     fi
-    (cd "$wp" && gobuild "$abi" "$out/libwarpplus.so" -ldflags "-s -w" github.com/bepass-org/warp-plus)
+    (cd "$wp" && gobuild "$abi" "$out/libwarpplus.so" -ldflags "-s -w" github.com/bepass-org/warp-plus/cmd/warp-plus)
   fi
   chmod 755 "$out"/*.so
 }

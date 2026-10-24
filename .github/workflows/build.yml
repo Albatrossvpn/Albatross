@@ -239,6 +239,18 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: bash build/android/selftest.sh
+      # Android 8 to 11 forbid apps some system calls (a forbidden one
+      # used to kill the app as soon as it started a core).
+      - name: Connect on an Android 11 emulator
+        if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash build/android/selftest.sh
       # The oldest Android the app supports.
       - name: Connect on an Android 6 emulator
         if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
