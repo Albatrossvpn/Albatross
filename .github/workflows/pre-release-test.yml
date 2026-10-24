@@ -3,8 +3,9 @@
 # ABIs), installs it on emulators from Android 6 to 16 (its ARM code through
 # Android 11+ ARM translation, a debuggable x86_64 build of the same commit
 # on older emulators), connects a debuggable build on several Android
-# versions, and upgrades a Windows install of 0.3.3 to the Build run's
-# installer.
+# versions, signs in and out on a desktop build that has an account service
+# (a local stand-in), and upgrades a Windows install of 0.3.3 to the Build
+# run's installer.
 name: Pre-release test
 
 on:
@@ -22,9 +23,9 @@ concurrency:
 env:
   # The Build run whose APK and installer are tested; empty tests only the
   # debuggable build (when the commit's own Build run has no APK).
-  BUILD_RUN: "40134091043"
+  BUILD_RUN: "40136804426"
   # The commit the debuggable app for the tests is built from.
-  DEBUG_REF: "9036aeb14daa726beaaf228f7aac65ce32d8bf87"
+  DEBUG_REF: "fe988bd2ad787b1b7aa5ad7d55e71b93b5f702a8"
   # 1 switches off the app's fatal NewApi lint in the debuggable build only,
   # so a commit that fails it can still be tested on newer Android.
   SKIP_NEWAPI_LINT: "0"
@@ -121,6 +122,34 @@ jobs:
         if: always()
         with:
           name: apk-api-${{ matrix.api }}
+          path: out/
+
+  sign-in:
+    name: Sign in on a build with an account service
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEBUG_REF }}
+          path: app
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+      - name: Sign in and out through the page's API
+        run: bash .github/pre-release/signin-check.sh app out
+      - name: Result
+        if: always()
+        run: |
+          cat out/result.txt || true
+          { echo "### Sign-in"; sed 's/^/    /' out/result.txt; } >> "$GITHUB_STEP_SUMMARY" || true
+          grep -q '^PASS sign-out' out/result.txt && ! grep -q '^FAIL' out/result.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sign-in
           path: out/
 
   debug-build:
