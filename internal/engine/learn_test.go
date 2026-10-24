@@ -117,14 +117,11 @@ func TestParseAnswer(t *testing.T) {
 		d string
 	}
 	get := func(r rec) (int, string) { return r.t, r.d }
-	a := parseAnswer(
-		[]rec{{dnsCNAME, "Edge.Example.IR."}, {dnsA, "185.143.232.10"}, {dnsA, "bad"}, {dnsNS, "ns1.host.com."}, {28, "::1"}},
-		[]rec{{dnsSOA, "ns.arvan.ir. admin.arvan.ir. 1 2 3 4 5"}},
-		get)
+	a := parseAnswer([]rec{{dnsCNAME, "Edge.Example.IR."}, {dnsA, "185.143.232.10"}, {dnsA, "bad"}, {2, "ns1.host.com."}, {28, "::1"}}, get)
 	if len(a.addrs) != 1 || a.addrs[0] != netip.MustParseAddr("185.143.232.10") {
 		t.Errorf("addrs = %v", a.addrs)
 	}
-	if want := []string{"edge.example.ir", "ns1.host.com", "ns.arvan.ir"}; !slices.Equal(a.names, want) {
+	if want := []string{"edge.example.ir"}; !slices.Equal(a.names, want) {
 		t.Errorf("names = %v, want %v", a.names, want)
 	}
 }
@@ -145,28 +142,30 @@ func TestIsLocal(t *testing.T) {
 		Type int    `json:"type"`
 		Data string `json:"data"`
 	}
-	// zone answers each name and type the way a resolver would.
+	// zone answers each name the way a resolver would. Sites whose DNS is
+	// hosted in the region but served from abroad stay on the VPN: only
+	// where a site is served counts.
 	zone := map[string][]rec{
-		"shop.com/1":           {{dnsA, "185.143.232.10"}},
-		"alias.com/1":          {{dnsCNAME, "shop.cdn.ir."}, {dnsA, "104.16.1.1"}},
-		"ns-ir.com/1":          {{dnsA, "104.16.1.2"}},
-		"ns-ir.com/2":          {{dnsNS, "a.dns.ir."}},
-		"ns-local.com/1":       {{dnsA, "104.16.1.3"}},
-		"ns-local.com/2":       {{dnsNS, "ns1.provider.com."}},
-		"ns1.provider.com/1":   {{dnsA, "185.143.232.20"}},
-		"foreign.com/1":        {{dnsA, "104.16.1.4"}},
-		"foreign.com/2":        {{dnsNS, "ns1.cloudflare.com."}},
-		"ns1.cloudflare.com/1": {{dnsA, "173.245.58.1"}},
+		"shop.com":       {{dnsA, "185.143.232.10"}},
+		"alias.com":      {{dnsCNAME, "shop.cdn.ir."}, {dnsA, "104.16.1.1"}},
+		"www.alias.com":  {{dnsCNAME, "alias.com."}, {dnsCNAME, "shop.cdn.ir."}, {dnsA, "104.16.1.1"}},
+		"dns-in-ir.com":  {{dnsA, "104.16.1.2"}},
+		"foreign.com":    {{dnsA, "104.16.1.4"}},
+		"cdn-abroad.com": {{dnsCNAME, "cdn-abroad.com.cdn.cloudflare.net."}, {dnsA, "104.16.1.5"}},
 	}
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		q := req.URL.Query()
-		json.NewEncoder(w).Encode(map[string]any{"Answer": zone[q.Get("name")+"/"+q.Get("type")]})
+		if q.Get("type") != "A" {
+			t.Errorf("asked for %s records", q.Get("type"))
+		}
+		json.NewEncoder(w).Encode(map[string]any{"Answer": zone[q.Get("name")]})
 	}))
 	defer srv.Close()
 	defer func(s []string) { dohServers = s }(dohServers)
 	dohServers = []string{srv.URL}
 	for host, want := range map[string]bool{
-		"shop.com": true, "alias.com": true, "ns-ir.com": true, "ns-local.com": true, "foreign.com": false, "missing.com": false,
+		"shop.com": true, "alias.com": true, "www.alias.com": true,
+		"dns-in-ir.com": false, "foreign.com": false, "cdn-abroad.com": false, "missing.com": false,
 	} {
 		if got := l.isLocal(context.Background(), srv.Client(), host, r.Subnet); got != want {
 			t.Errorf("isLocal(%q) = %v", host, got)

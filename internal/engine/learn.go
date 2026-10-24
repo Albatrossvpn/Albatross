@@ -14,7 +14,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,8 +27,9 @@ import (
 // foreign visitors. While connected, the names the VPN carries are looked up
 // through the VPN, and those that belong to the region are added to a list
 // of their own: names that resolve to the region's addresses or to a name of
-// the region (a CNAME such as *.arvancloud.ir), or whose DNS is hosted there.
-// The core reloads that list by itself, and the name's open connections are
+// the region (a CNAME such as *.arvancloud.ir). Where a site's DNS is hosted
+// says nothing about where it is served, so that is never a sign. The core
+// reloads that list by itself, and the name's open connections are
 // closed so apps reconnect directly at once. The local resolver is never
 // asked (it would see every site the user opens), and a failed lookup
 // changes nothing.
@@ -154,28 +154,11 @@ func (l *learner) ownName(names []string) bool {
 	return false
 }
 
-// isLocal looks host up through client and reports whether it belongs to
-// the region: its addresses, a name it is an alias of, or the servers that
-// hold its DNS.
+// isLocal looks host up through client and reports whether it is served
+// from the region: its addresses, or a name of the region it is an alias of.
 func (l *learner) isLocal(ctx context.Context, client *http.Client, host, subnet string) bool {
-	a, err := lookupThrough(ctx, client, host, dnsA, subnet)
-	if err != nil {
-		return false
-	}
-	if l.local(a.addrs) || l.ownName(a.names) {
-		return true
-	}
-	ns, err := lookupThrough(ctx, client, host, dnsNS, "")
-	if err != nil || len(ns.names) == 0 {
-		return false
-	}
-	if l.ownName(ns.names) {
-		return true
-	}
-	// DNS hosted in the region (such as ArvanCloud's, whose servers abroad
-	// answer for the region's sites) marks the site as the region's.
-	a, err = lookupThrough(ctx, client, ns.names[0], dnsA, "")
-	return err == nil && l.local(a.addrs)
+	a, err := lookupThrough(ctx, client, host, subnet)
+	return err == nil && (l.local(a.addrs) || l.ownName(a.names))
 }
 
 // add records host as local and rewrites the list.
@@ -300,13 +283,11 @@ func (c *connection) closeHost(ctx context.Context, host string) {
 // DNS record types.
 const (
 	dnsA     = 1
-	dnsNS    = 2
 	dnsCNAME = 5
-	dnsSOA   = 6
 )
 
-// dnsAnswer is what a lookup found: IPv4 addresses, and the names it led to
-// (CNAME and NS targets, and the primary server of the zone, from its SOA).
+// dnsAnswer is what a lookup found: IPv4 addresses, and the names it is an
+// alias of (CNAME targets).
 type dnsAnswer struct {
 	addrs []netip.Addr
 	names []string
@@ -314,13 +295,13 @@ type dnsAnswer struct {
 
 // lookupThrough looks host up with DNS-over-HTTPS through client, as asked
 // from subnet (see region.Subnet) where the server supports it.
-func lookupThrough(ctx context.Context, client *http.Client, host string, qtype int, subnet string) (dnsAnswer, error) {
+func lookupThrough(ctx context.Context, client *http.Client, host, subnet string) (dnsAnswer, error) {
 	if client == nil {
 		return dnsAnswer{}, errors.New("not connected")
 	}
 	var lastErr error
 	for _, s := range dohServers {
-		a, err := dohQuery(ctx, client, s, host, qtype, subnet)
+		a, err := dohQuery(ctx, client, s, host, subnet)
 		if err == nil {
 			return a, nil
 		}
@@ -329,10 +310,10 @@ func lookupThrough(ctx context.Context, client *http.Client, host string, qtype 
 	return dnsAnswer{}, lastErr
 }
 
-func dohQuery(ctx context.Context, client *http.Client, server, host string, qtype int, subnet string) (dnsAnswer, error) {
+func dohQuery(ctx context.Context, client *http.Client, server, host, subnet string) (dnsAnswer, error) {
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	q := url.Values{"name": {host}, "type": {strconv.Itoa(qtype)}}
+	q := url.Values{"name": {host}, "type": {"A"}}
 	if subnet != "" {
 		q.Set("edns_client_subnet", subnet)
 	}
@@ -354,36 +335,27 @@ func dohQuery(ctx context.Context, client *http.Client, server, host string, qty
 		Data string `json:"data"`
 	}
 	var r struct {
-		Status    int      `json:"Status"`
-		Answer    []record `json:"Answer"`
-		Authority []record `json:"Authority"`
+		Status int      `json:"Status"`
+		Answer []record `json:"Answer"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&r); err != nil {
 		return dnsAnswer{}, err
 	}
-	return parseAnswer(r.Answer, r.Authority, func(x record) (int, string) { return x.Type, x.Data }), nil
+	return parseAnswer(r.Answer, func(x record) (int, string) { return x.Type, x.Data }), nil
 }
 
-// parseAnswer collects the addresses and names of a DNS-over-HTTPS answer.
-func parseAnswer[T any](answer, authority []T, get func(T) (int, string)) dnsAnswer {
+// parseAnswer collects the addresses and CNAME targets of a DNS-over-HTTPS
+// answer.
+func parseAnswer[T any](answer []T, get func(T) (int, string)) dnsAnswer {
 	var out dnsAnswer
-	name := func(s string) string { return strings.ToLower(strings.TrimSuffix(s, ".")) }
 	for _, x := range answer {
 		switch t, data := get(x); t {
 		case dnsA:
 			if ip, err := netip.ParseAddr(data); err == nil {
 				out.addrs = append(out.addrs, ip)
 			}
-		case dnsCNAME, dnsNS:
-			out.names = append(out.names, name(data))
-		}
-	}
-	for _, x := range authority {
-		// "ns1.example.com. hostmaster.example.com. 2024010101 ..."
-		if t, data := get(x); t == dnsSOA {
-			if f := strings.Fields(data); len(f) > 0 {
-				out.names = append(out.names, name(f[0]))
-			}
+		case dnsCNAME:
+			out.names = append(out.names, strings.ToLower(strings.TrimSuffix(data, ".")))
 		}
 	}
 	return out
