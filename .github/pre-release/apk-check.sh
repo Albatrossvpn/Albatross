@@ -92,6 +92,10 @@ install() { # label args...
 if [ "$api" -ge 30 ] && [ -n "$apkfile" ] && [ -f apk/old-0.3.3.apk ] && echo "$abis" | grep -q arm64-v8a; then
   res="$(install old033 apk/old-0.3.3.apk)"
   if echo "$res" | grep -q Success; then
+    # Baseline: does the released 0.3.3 (arm64) run under this emulator's
+    # ARM translation? If it crashes too, an arm64 crash below is the
+    # translator's, not the new build's.
+    launch old033-arm64
     res="$(install over033 -r "$apkfile")"
     if echo "$res" | grep -q VERSION_DOWNGRADE; then
       log "INFO over 0.3.3: test build has a lower versionCode; retrying with -d"
