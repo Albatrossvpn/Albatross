@@ -12,6 +12,8 @@ package mobile
 
 import (
 	"errors"
+	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -19,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/engine"
+	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/ui"
 )
@@ -47,6 +50,14 @@ type Platform interface {
 	// InstallUpdate opens the system installer on a downloaded APK of a
 	// newer version, which installs over this one (same signing key).
 	InstallUpdate(path string) error
+	// LocationSetup says what the phone still needs before the app may set
+	// its location: "" when it is ready, "developer" while Developer
+	// options are off, "mock_app" until Albatross is the selected mock
+	// location app.
+	LocationSetup() string
+	// OpenLocationSettings shows the system screen for one of those steps:
+	// About phone for "developer", Developer options for "mock_app".
+	OpenLocationSettings(step string)
 }
 
 var (
@@ -108,11 +119,13 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 	}
 	e.Start()
 	s, u, err := ui.Start(e, ui.Hooks{
-		Quit:            func() { go p.Quit() },
-		OpenURL:         func(link string) error { p.OpenURL(link); return nil },
-		ShareText:       func(text string) error { p.ShareText(text); return nil },
-		ShareApp:        func() error { p.ShareApp(); return nil },
-		OpenVPNSettings: func() error { p.OpenVPNSettings(); return nil },
+		Quit:                 func() { go p.Quit() },
+		OpenURL:              func(link string) error { p.OpenURL(link); return nil },
+		ShareText:            func(text string) error { p.ShareText(text); return nil },
+		ShareApp:             func() error { p.ShareApp(); return nil },
+		OpenVPNSettings:      func() error { p.OpenVPNSettings(); return nil },
+		LocationSetup:        p.LocationSetup,
+		OpenLocationSettings: func(step string) error { p.OpenLocationSettings(step); return nil },
 	}, 0)
 	if err != nil {
 		e.Close()
@@ -166,6 +179,41 @@ func Connected() bool {
 	e := eng
 	mu.Unlock()
 	return e != nil && e.Snapshot().Status == engine.StatusConnected
+}
+
+// MockLocation is where the phone should say it is, for the VPN service's
+// ticker. It is "" while the engine is not running or Override GPS location
+// is off (the app removes its mock location), and "keep" while no country
+// with a known place is connected yet (the app keeps the location it set).
+// Otherwise it is "lat,lon": a point in the exit country.
+func MockLocation() string {
+	mu.Lock()
+	e := eng
+	mu.Unlock()
+	if e == nil || !e.Settings().OverrideGPS {
+		return ""
+	}
+	c := e.Snapshot().Conn
+	if c == nil {
+		return "keep"
+	}
+	lat, lon, ok := geo.Place(c.Country)
+	if !ok {
+		return "keep"
+	}
+	return mockPoint(lat, lon, c.ExitIP)
+}
+
+// mockPoint moves a place by up to about 0.02 degrees each way, by an amount
+// that comes from the exit address: the point changes with the server, not
+// every time it is asked for.
+func mockPoint(lat, lon float64, exitIP string) string {
+	h := fnv.New32a()
+	h.Write([]byte(exitIP))
+	v := h.Sum32()
+	lat += (float64(v&0xffff)/0xffff - 0.5) * 0.04
+	lon += (float64(v>>16)/0xffff - 0.5) * 0.04
+	return fmt.Sprintf("%.6f,%.6f", lat, lon)
 }
 
 // SetDNS tells the engine the current network's resolver; the app calls it
