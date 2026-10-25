@@ -297,18 +297,29 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 	if c := e.proxyClient(); c != nil {
 		clients = append(clients, c)
 	}
-	clients = append(clients, directUpdateClient())
+	direct := directUpdateClient()
+	clients = append(clients, direct)
 	err := errors.New("no address")
 	for _, c := range clients {
+		isDirect := c == direct
 		c = withHeaderTimeout(c)
 		for _, u := range f.URLs {
 			if !strings.HasPrefix(u, "https://") {
 				continue
 			}
+			uc := c
+			if isDirect && sources.IsWorker(u) {
+				// The project's own storage shares the account service's
+				// name: never a plain direct call (sources.IsWorker).
+				if e.privateDirect == nil {
+					continue
+				}
+				uc = withHeaderTimeout(e.privateDirect)
+			}
 			// A cut line resumes where it stopped (fetchUpdate keeps the
 			// partial file), so a few tries finish a large file.
 			for try := 0; try < 4; try++ {
-				if err = e.fetchUpdate(c, u, path, version); err == nil || e.ctx != nil && e.ctx.Err() != nil {
+				if err = e.fetchUpdate(uc, u, path, version); err == nil || e.ctx != nil && e.ctx.Err() != nil {
 					break
 				}
 			}

@@ -89,7 +89,7 @@ func updateRules(ctx context.Context, dir string, client, private func() *http.C
 			continue
 		}
 		slow, got := 0, false
-		for _, u := range append([]string{url}, sources.Mirrors(url)...) {
+		for _, u := range sources.Addresses(url) {
 			c := client()
 			if sources.IsWorker(u) {
 				c = private()

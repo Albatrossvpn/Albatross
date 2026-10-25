@@ -7,10 +7,8 @@ on:
     tags: ["v*"]
     paths-ignore: ["update.json"]
   pull_request:
-  # Every night, so a broken core, list or Tor change shows up without
-  # anyone looking.
-  schedule:
-    - cron: "17 1 * * *"
+  # No nightly run: a private repository has 2,000 free Actions minutes a
+  # month, and a full build takes about half an hour of them.
   workflow_dispatch:
     inputs:
       release:
@@ -171,7 +169,8 @@ jobs:
             # release goes on with a warning.
             [ -n "$OWN_KEY" ] || echo "::warning::The OWN_KEY secret is not set: this release cannot open the project's own servers."
             ACCOUNT_URL="$(bash build/account-url.sh)"
-            export ACCOUNT_URL
+            MIRROR_URL="$(bash build/mirror-urls.sh)"
+            export ACCOUNT_URL MIRROR_URL
           fi
           bash build/package.sh
       - uses: actions/upload-artifact@v4
@@ -226,7 +225,8 @@ jobs:
           # Releases ask users to sign in; see the Windows build.
           if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             ACCOUNT_URL="$(bash build/account-url.sh)"
-            export ACCOUNT_URL
+            MIRROR_URL="$(bash build/mirror-urls.sh)"
+            export ACCOUNT_URL MIRROR_URL
           fi
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/albatross.jks"
@@ -571,4 +571,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "Tell installed copies about $VERSION" && git push origin HEAD:main
+          cd ..
+          # Installed copies read the manifest from the project's own storage
+          # first, and copies of 0.4.0 and older reach it there through the
+          # account service once the repository is private.
+          bash repo/deploy/files/publish-lists.sh "${ACCOUNT_URL%%,*}" main repo/update.json
           echo "- Released v$VERSION; update.json points at it (forced: $FORCE)." >> "$GITHUB_STEP_SUMMARY"

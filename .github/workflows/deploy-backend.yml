@@ -108,6 +108,35 @@ jobs:
             while read -r url sha; do
               bash ../deploy/files/push.sh "$account" "$site" "${url##*/}" "$url" "$sha" || echo "::warning::$url could not be stored; the website will serve it once a release or a later deploy stores it."
             done
+      # The app's own files (lists, ad list, update manifest) from the
+      # branches CI publishes them to, so the storage holds them from the
+      # first deploy on; the collectors and releases keep them current.
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: servers
+          path: branch-servers
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: rules
+          path: branch-rules
+      - name: Keep the app's own files in storage
+        env:
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          account="https://$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml | head -1)"
+          publish() { # branch dir names...
+            local branch="$1" dir="$2" files=() f
+            shift 2
+            for f in "$@"; do [ -f "$dir/$f" ] && files+=("$dir/$f"); done
+            if [ ${#files[@]} -eq 0 ]; then echo "::warning::nothing to store from the $branch branch"; return 0; fi
+            bash ../deploy/files/publish-lists.sh "$account" "$branch" "${files[@]}" || echo "::warning::the $branch files could not all be stored"
+          }
+          publish servers ../branch-servers hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt tor.json meta.json
+          publish rules ../branch-rules ads.srs ads.json README.md LICENSE-GPL-3.0.txt LICENSE-AGPL-3.0.txt
+          publish main .. update.json
 
   edge:
     # The edge: a Worker that carries the app's traffic (edge/README.md).

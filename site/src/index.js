@@ -1,9 +1,11 @@
 // The website: static pages, plus the release files at /download/<name>
 // from the project's own storage, so getting the app never depends on
 // GitHub (backend/src/files.js). /download/ lists what is stored, and
-// /update.json is the apps' release manifest, fetched by the edge (and
-// kept ten minutes) so the page's buttons never reach GitHub themselves.
-import { FILE_NAME, serveFile } from "../../backend/src/files.js";
+// /update.json is the apps' release manifest, from the project's own
+// storage (or GitHub while it is not there yet), so the page's buttons
+// never reach GitHub themselves. /list/<path> serves the app's own files
+// from the same storage, one more address for the apps.
+import { FILE_NAME, serveFile, serveList } from "../../backend/src/files.js";
 
 const MANIFEST = [
   "https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json",
@@ -13,7 +15,11 @@ const MANIFEST = [
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/update.json") return manifest();
+    if (url.pathname === "/update.json") return (await serveList(request, env.FILES, "main/update.json")) || manifest();
+    if (url.pathname.startsWith("/list/")) {
+      const r = await serveList(request, env.FILES, url.pathname.slice("/list/".length));
+      return r || new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
     const m = /^\/download\/([^/]*)$/.exec(url.pathname);
     if (!m) return env.ASSETS.fetch(request);
     if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
