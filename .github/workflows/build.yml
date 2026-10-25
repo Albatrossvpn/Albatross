@@ -469,29 +469,40 @@ jobs:
       - name: Tell installed copies
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           VERSION: ${{ needs.build.outputs.version }}
           FORCE: ${{ github.event_name != 'workflow_dispatch' || inputs.force_update }}
           MESSAGE: ${{ inputs.update_message }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" > rel.json
-          # The account service also serves the files (/dl/, backend/src/index.js):
-          # GitHub's downloads break off or are filtered on many networks.
+          # The files go into the project's own storage and are served by
+          # the website (/download/) and the account service (/dl/), so no
+          # download depends on GitHub, whose downloads break off or are
+          # filtered on many networks.
           ACCOUNT_URL="$(bash repo/build/account-url.sh)"
-          export ACCOUNT_URL
+          SITE_URL="https://$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' repo/site/wrangler.toml | head -1)"
+          export ACCOUNT_URL SITE_URL
+          jq -r '.assets[] | select(.digest != null) | "\(.name) \(.browser_download_url) \(.digest | ltrimstr("sha256:"))"' rel.json |
+            while read -r name url sha; do
+              bash repo/deploy/files/push.sh "${ACCOUNT_URL%%,*}" "$SITE_URL" "$name" "$url" "$sha"
+            done
           python3 - <<'PY'
           import json, os, re, sys
           v = os.environ["VERSION"]
           rel = json.load(open("rel.json"))
+          site = os.environ["SITE_URL"].rstrip("/")
           mirrors = [m.strip().rstrip("/") for m in os.environ.get("ACCOUNT_URL", "").split(",") if m.strip()]
           # The one APK serves every ABI; 0.3.3 and earlier read only the
-          # arm64-v8a entry. The mirror comes first: it is reachable where
-          # GitHub is not, and the SHA-256 guards the file either way.
+          # arm64-v8a entry. The website comes first, then the account
+          # service, then GitHub as the last resort for the app alone; the
+          # SHA-256 guards the file either way.
           keys = {"-android.apk": ["android-arm64-v8a", "android-armeabi-v7a"], "Setup-": ["windows"]}
           files = {}
           for a in rel["assets"]:
               for part, names in keys.items():
                   if part in a["name"] and (a.get("digest") or "").startswith("sha256:"):
-                      urls = [f"{m}/dl/v{v}/{a['name']}" for m in mirrors] + [a["browser_download_url"]]
+                      urls = [f"{site}/download/{a['name']}"] + [f"{m}/dl/v{v}/{a['name']}" for m in mirrors] + [a["browser_download_url"]]
                       for key in names:
                           files[key] = {"urls": urls, "sha256": a["digest"][7:]}
           path = "repo/update.json"
@@ -503,10 +514,10 @@ jobs:
           # message tells them, in one paragraph (they show it as plain
           # text), how to reinstall.
           apk = files.get("android-arm64-v8a", {}).get("urls", [""])[0]
-          page = "https://github.com/" + os.environ["GITHUB_REPOSITORY"] + "/releases/latest"
           # Every platform opens download_url when it cannot update itself
           # (0.3.0 and 0.3.1 always, Windows without files.windows), so it
-          # is the releases page, never one platform's file.
+          # is the website's download page, never one platform's file.
+          page = site + "/#download"
           m["download_url"] = page
           if os.environ["FORCE"] == "true":
               # A forced update with a platform's file missing would cut

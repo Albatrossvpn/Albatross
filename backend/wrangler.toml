@@ -16,6 +16,12 @@ binding = "ASSETS"
 # Only the API runs code; pages are served as static files.
 run_worker_first = ["/api/*"]
 
+# The release files, served at /dl/<tag>/<name> and stored by the
+# administrator's call (deploy/files/push.sh).
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "albatross-files"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "albatross"

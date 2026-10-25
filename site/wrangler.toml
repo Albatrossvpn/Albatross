@@ -1,6 +1,7 @@
 # The public website (albatrossvpn.online): static pages served by a Worker.
 # Deployed by .github/workflows/deploy-backend.yml next to the account service.
 name = "albatross-site"
+main = "src/index.js"
 compatibility_date = "2025-09-01"
 workers_dev = false
 preview_urls = false
@@ -13,4 +14,12 @@ routes = [
 
 [assets]
 directory = "./public"
+binding = "ASSETS"
 not_found_handling = "404-page"
+# Only the downloads run code; pages are served as static files.
+run_worker_first = ["/download/*"]
+
+# The release files, put there at release time (deploy/files/push.sh).
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "albatross-files"

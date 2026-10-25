@@ -13,6 +13,13 @@
 # At the end it prints one share link per protocol and saves them in
 # /root/albatross-links.txt. See deploy/server/README.md for what to do
 # with them.
+#
+# Relay mode, for a machine inside the country (RELAY_TO=<server ip>):
+# installs nothing but forwarding rules that send every Albatross port
+# (TCP, UDP, ICMP) on to the server abroad, and rewrites the server's
+# links (LINKS=<file or https address>) to this machine's address. When
+# only domestic addresses can be reached, the app connects here and this
+# machine's own link to the outside carries the traffic.
 set -euo pipefail
 
 SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
@@ -378,7 +385,104 @@ print("vmess://" + base64.b64encode(json.dumps(v, separators=(",", ":")).encode(
 PY
 }
 
+# relay_rules writes the forwarding rules for the relay as a script that
+# runs now and at every boot.
+relay_rules() {
+  local to="$1" f="$OUT/relay.sh" p
+  mkdir -p "$OUT"
+  {
+    echo '#!/bin/sh'
+    echo 'sysctl -qw net.ipv4.ip_forward=1'
+    echo "iptables -t nat -C POSTROUTING -d $to -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -d $to -j MASQUERADE"
+    for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_HTTP; do
+      echo "iptables -t nat -C PREROUTING -p tcp --dport $p -j DNAT --to-destination $to 2>/dev/null || iptables -t nat -A PREROUTING -p tcp --dport $p -j DNAT --to-destination $to"
+      echo "iptables -C FORWARD -p tcp -d $to --dport $p -j ACCEPT 2>/dev/null || iptables -I FORWARD -p tcp -d $to --dport $p -j ACCEPT"
+    done
+    for p in $P_SS $P_HY2 $P_TUIC 53 $HOP_RANGE; do
+      echo "iptables -t nat -C PREROUTING -p udp --dport $p -j DNAT --to-destination $to 2>/dev/null || iptables -t nat -A PREROUTING -p udp --dport $p -j DNAT --to-destination $to"
+      echo "iptables -C FORWARD -p udp -d $to --dport $p -j ACCEPT 2>/dev/null || iptables -I FORWARD -p udp -d $to --dport $p -j ACCEPT"
+    done
+    # The ICMP carrier: echo requests go on to the server, its replies come back.
+    echo "iptables -t nat -C PREROUTING -p icmp --icmp-type echo-request -j DNAT --to-destination $to 2>/dev/null || iptables -t nat -A PREROUTING -p icmp --icmp-type echo-request -j DNAT --to-destination $to"
+    echo "iptables -C FORWARD -p icmp -d $to -j ACCEPT 2>/dev/null || iptables -I FORWARD -p icmp -d $to -j ACCEPT"
+    echo "iptables -C FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -I FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
+  } > "$f"
+  chmod 755 "$f"
+  if [ "$DRY_RUN" != 1 ]; then
+    cat > /etc/systemd/system/albatross-relay.service <<EOF2
+[Unit]
+Description=Albatross relay: forwards every Albatross port to $to
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$f
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF2
+    systemctl daemon-reload
+    systemctl enable --now albatross-relay.service
+  fi
+}
+
+# relay_links rewrites the server's links to point at this machine: the
+# address changes, the names used for TLS (sni, host) stay the server's.
+relay_links() {
+  local here="$1" src="$2" script
+  # The script is passed as an argument: the links come in on stdin.
+  script="$(cat <<'PY'
+import base64, json, re, sys
+here = sys.argv[1]
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    if line.startswith("vmess://"):
+        v = json.loads(base64.b64decode(line[8:] + "=" * (-len(line[8:]) % 4)))
+        if v.get("tls") and not v.get("sni"):
+            v["sni"] = v["add"]
+        v["add"] = here
+        v["ps"] = v.get("ps", "") + "-relay"
+        print("vmess://" + base64.b64encode(json.dumps(v, separators=(",", ":")).encode()).decode())
+        continue
+    m = re.match(r"^([a-z0-9+.-]+://(?:[^@/]*@)?)([^:/?#]+)(:\d+)(.*)$", line)
+    if not m:
+        continue
+    head, host, port, rest = m.groups()
+    if "security=tls" in rest and "sni=" not in rest:
+        rest = re.sub(r"(\?|&)", lambda mm: mm.group(1) + "sni=" + host + "&", rest, count=1)
+    rest = re.sub(r"#(.*)$", lambda mm: "#" + mm.group(1) + "-relay", rest) if "#" in rest else rest + "#relay"
+    print(head + here + port + rest)
+PY
+)"
+  case "$src" in
+    https://*) curl -fsSL "$src" ;;
+    *) cat "$src" ;;
+  esac | python3 -c "$script" "$here"
+}
+
+relay_main() {
+  need_root
+  IP="${IP:-$(public_ip)}"
+  log "Relay $IP -> $RELAY_TO"
+  relay_rules "$RELAY_TO"
+  if [ -n "${LINKS:-}" ]; then
+    relay_links "$IP" "$LINKS" | tee "$OUT/links.txt"
+    [ "$DRY_RUN" = 1 ] || cp "$OUT/links.txt" /root/albatross-links.txt
+    log "Done. The relay's links are in $OUT/links.txt; add them to the app's own list next to the server's."
+  else
+    log "Done. Run again with LINKS=/root/albatross-links.txt (the server's links file) to get this relay's links."
+  fi
+}
+
 main() {
+  if [ -n "${RELAY_TO:-}" ]; then
+    relay_main
+    return
+  fi
   if [ "$DRY_RUN" != 1 ]; then
     log "Installing sing-box $SINGBOX_VERSION and Xray $XRAY_VERSION"
     install_cores

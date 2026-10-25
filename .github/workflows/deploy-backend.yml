@@ -95,6 +95,19 @@ jobs:
           done
           # The edge's user id, the same one the edge job derives (edge/README.md).
           printf '%s' "$(../edge/uuid.sh)" | npx wrangler secret put EDGE_UUID
+      - name: Keep the current release's files in storage
+        # The website serves them (/download/); a release stores its own
+        # files, this covers the release before that and a new bucket.
+        env:
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          account="https://$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml | head -1)"
+          site="https://$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' ../site/wrangler.toml | head -1)"
+          jq -r '.files | to_entries[] | .value | "\(.urls[] | select(startswith("https://github.com/"))) \(.sha256)"' ../update.json | sort -u |
+            while read -r url sha; do
+              bash ../deploy/files/push.sh "$account" "$site" "${url##*/}" "$url" "$sha" || echo "::warning::$url could not be stored; the website will serve it once a release or a later deploy stores it."
+            done
 
   edge:
     # The edge: a Worker that carries the app's traffic (edge/README.md).

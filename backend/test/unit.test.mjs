@@ -94,3 +94,21 @@ test("edge links name the edge on Cloudflare's TLS ports, or none without an edg
   assert.deepEqual(edgeLinks("edge.example.org", ""), []);
   assert.deepEqual(edgeLinks("edge.example.org", "not-a-uuid"), []);
 });
+
+test("release files: names, sources and ranges", async () => {
+  const { FILE_NAME, FILE_SOURCE, parseRange } = await import("../src/files.js");
+  assert.ok(FILE_NAME.test("Albatross-0.4.1-android.apk"));
+  assert.ok(FILE_NAME.test("Albatross-Setup-0.4.1.exe"));
+  assert.ok(!FILE_NAME.test("../x.apk"));
+  assert.ok(!FILE_NAME.test("Albatross-0.4.1-android.apk.part"));
+  const src = "https://github.com/Albatrossvpn/Albatross/releases/download/v0.4.1/Albatross-0.4.1-android.apk";
+  assert.equal(FILE_SOURCE.exec(src)[1], "Albatross-0.4.1-android.apk");
+  assert.equal(FILE_SOURCE.exec("https://example.org/Albatross-0.4.1-android.apk"), null);
+  assert.deepEqual(parseRange("bytes=0-99", 1000), { offset: 0, length: 100 });
+  assert.deepEqual(parseRange("bytes=900-", 1000), { offset: 900, length: 100 });
+  assert.deepEqual(parseRange("bytes=-100", 1000), { offset: 900, length: 100 });
+  assert.deepEqual(parseRange("bytes=0-5000", 1000), { offset: 0, length: 1000 });
+  assert.deepEqual(parseRange("bytes=1000-", 1000), { invalid: true });
+  assert.equal(parseRange("", 1000), null);
+  assert.equal(parseRange("items=0-1", 1000), null);
+});

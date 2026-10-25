@@ -3,6 +3,7 @@
 import {
   DAY, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, randomPassword, rollPeriod, safeEqual, sign, tag, verify, verifyPassword,
 } from "./lib.js";
+import { pullFile, serveFile } from "./files.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -47,7 +48,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/list/")) return mirror(url);
-    if (url.pathname.startsWith("/dl/")) return download(request, url);
+    if (url.pathname.startsWith("/dl/")) return download(request, url, env);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
     try {
       if (!env.TOKEN_SECRET || env.TOKEN_SECRET.length < 24) throw new HttpError(503, "The service is not configured yet.");
@@ -80,6 +81,7 @@ async function route(request, env, url) {
     case "POST admin/users/bulk": return adminBulk(request, env);
     case "GET admin/settings": return adminSettings(request, env);
     case "PUT admin/settings": return adminSaveSettings(request, env);
+    case "POST admin/files": return adminPullFile(request, env);
     case "POST stats": return crowdReport(request, env);
     case "GET stats": return crowdSummary(request, env, url);
   }
@@ -352,6 +354,18 @@ async function adminLogin(request, env) {
   return json({ token: await sign({ adm: 1, exp: now() + ADMIN_SESSION }, env.TOKEN_SECRET) });
 }
 
+/** The administrator (the release workflow) stores a release file from GitHub in the project's own storage. */
+async function adminPullFile(request, env) {
+  await authAdmin(request, env);
+  if (!env.FILES) throw new HttpError(503, "No file storage is bound.");
+  const { name, url, force } = await body(request);
+  try {
+    return json(await pullFile(env.FILES, String(name || ""), String(url || ""), { force: !!force }));
+  } catch (e) {
+    throw new HttpError(400, e.message);
+  }
+}
+
 /** A user as the administrator sees them. */
 function adminView(u, t) {
   const a = accountOf(u, t);
@@ -593,9 +607,13 @@ async function crowdSummary(request, env, url) {
 // Only those files; ranges pass through so interrupted downloads resume,
 // and the edge keeps a copy for a day.
 const DOWNLOADS = /^\/dl\/(v\d+\.\d+\.\d+)\/(Albatross-\d+\.\d+\.\d+-android\.apk|Albatross-Setup-\d+\.\d+\.\d+\.exe)$/;
-async function download(request, url) {
+async function download(request, url, env) {
   const m = DOWNLOADS.exec(url.pathname);
   if (!m) return new Response("Not found", { status: 404 });
+  if (env.FILES) {
+    const r = await serveFile(request, env.FILES, m[2]);
+    if (r) return r;
+  }
   const headers = {};
   const range = request.headers.get("Range");
   if (range) headers.Range = range;
