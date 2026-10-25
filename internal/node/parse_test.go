@@ -227,3 +227,20 @@ func TestHysteria2AsksForLineSpeed(t *testing.T) {
 		t.Fatal("asked for a speed nobody measured")
 	}
 }
+
+func TestParseOutlineJSON(t *testing.T) {
+	text := `{"server":"1.2.3.4","server_port":8388,"password":"pw","method":"chacha20-ietf-poly1305","prefix":"\u0016\u0003\u0001"}`
+	nodes, seen := ParseText(text)
+	if seen != 1 || len(nodes) != 1 {
+		t.Fatalf("want one node, got %d (%d seen)", len(nodes), seen)
+	}
+	n := nodes[0]
+	if n.Proto != "shadowsocks" || n.Server != "1.2.3.4" || n.Port != 8388 || n.Method != "chacha20-ietf-poly1305" || n.Password != "pw" {
+		t.Fatalf("bad node: %+v", n)
+	}
+	for _, bad := range []string{`{"server":"1.2.3.4"}`, `{"a":1}`, `[]`, `ss://x`} {
+		if ParseOutlineJSON(bad) != nil {
+			t.Fatalf("%q should not parse", bad)
+		}
+	}
+}
