@@ -138,16 +138,31 @@ usqsrc() {
   echo "$src"
 }
 
+# sing-box's own Android builds are linked for 4 KB memory pages, which
+# phones with 16 KB pages refuse to run: every ABI is built from its source
+# with the tags and flags of its release builds (release/ in its tree).
+sbsrc() {
+  local src="$tmp/sing-box-src"
+  if [ ! -d "$src" ]; then
+    git clone -q --depth 1 --branch "v$SINGBOX_VERSION" "$gh/SagerNet/sing-box" "$src"
+    (cd "$src" && CGO_ENABLED=0 GOTOOLCHAIN=auto go build -trimpath -buildvcs=false -tags "$(cat release/DEFAULT_BUILD_TAGS_OTHERS)" \
+      -ldflags "$(cat release/LDFLAGS) -s -w" -o "$tmp/sing-box-host" ./cmd/sing-box)
+    smoke sing-box "$tmp/sing-box-host" version
+  fi
+  echo "$src"
+}
+
 # Cores for each ABI. Android only lets an app run executables that ship as
 # native libraries, hence the lib*.so names. An empty asset name builds that
 # core from source.
 cores() { # abi sing-box-arch xray-asset warp-plus-asset
   local abi="$1" out="$jni/$1"
   rm -rf "$out" && mkdir -p "$out"
-  fetch "$gh/SagerNet/sing-box/releases/download/v$SINGBOX_VERSION/sing-box-$SINGBOX_VERSION-android-$2.tar.gz" "$dl/sing-box-$SINGBOX_VERSION-android-$2.tar.gz"
-  mkdir -p "$tmp/sb-$abi" && tar xzf "$dl/sing-box-$SINGBOX_VERSION-android-$2.tar.gz" -C "$tmp/sb-$abi" --strip-components=1
-  cp "$tmp/sb-$abi/sing-box" "$out/libsingbox.so"
-  cp "$tmp/sb-$abi/LICENSE" "$app/src/main/assets/licenses/sing-box-LICENSE.txt"
+  local sb
+  sb="$(sbsrc)"
+  (cd "$sb" && gobuild "$abi" "$out/libsingbox.so" -tags "$(cat release/DEFAULT_BUILD_TAGS_OTHERS)" \
+    -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=$SINGBOX_VERSION' $(cat release/LDFLAGS) -s -w -buildid=" ./cmd/sing-box)
+  cp "$sb/LICENSE" "$app/src/main/assets/licenses/sing-box-LICENSE.txt"
   if [ -n "$3" ]; then
     fetch "$gh/XTLS/Xray-core/releases/download/v$XRAY_VERSION/$3" "$dl/xray-$XRAY_VERSION-$3"
     unzip -q -o "$dl/xray-$XRAY_VERSION-$3" xray LICENSE -d "$tmp/x-$abi"
