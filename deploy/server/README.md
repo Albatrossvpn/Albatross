@@ -15,6 +15,7 @@ rest:
 | VMess + HTTPUpgrade + TLS | 2096/tcp |
 | AnyTLS | 8880/tcp |
 | Shadowsocks 2022 | 8388/tcp+udp |
+| Shadowsocks 2022 behind ShadowTLS v3 | 8445/tcp |
 | Hysteria 2 + Salamander, port hopping 20000–40000 and 53 | 443/udp |
 | TUIC v5 (BBR) | 8444/udp |
 | VMess (AEAD) + HTTPUpgrade, no TLS | 80/tcp |
@@ -38,7 +39,7 @@ session travels inside echo packets, slowly, but it connects.
    owner's identity and a card for verification.
 2. In the cloud's firewall (Oracle: *Networking → Virtual cloud networks →
    the subnet's security list*), allow inbound TCP 80, 443, 2053, 2083, 2087,
-   2096, 8388, 8443, 8880, UDP 53, 443, 8388, 8444, 20000–40000, and ICMP
+   2096, 8388, 8443, 8445, 8880, UDP 53, 443, 8388, 8444, 20000–40000, and ICMP
    echo requests (type 8) from everywhere, which carry the ICMP protocol.
 3. On the machine, as root:
    ```sh
