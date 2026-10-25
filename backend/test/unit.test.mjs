@@ -115,7 +115,8 @@ test("release files: names, sources and ranges", async () => {
 
 test("the app's own files: names and types", async () => {
   const { LIST_PATH, listType } = await import("../src/files.js");
-  for (const p of ["servers/hot.txt", "servers/all-8.txt", "servers/tor.json", "main/update.json", "rules/ads.srs", "rules/ads.json", "rules/LICENSE-GPL-3.0.txt"]) assert.ok(LIST_PATH.test(p), p);
+  for (const p of ["servers/hot.txt", "servers/all-8.txt", "servers/tor.json", "servers/crowd.json", "servers/iran.json", "main/update.json", "rules/ads.srs", "rules/ads.json", "rules/LICENSE-GPL-3.0.txt", "tools/collect-linux-amd64"]) assert.ok(LIST_PATH.test(p), p);
+  assert.equal(listType("tools/collect-linux-amd64"), "application/octet-stream");
   for (const p of ["servers/all-9.txt", "main/README.md", "../x", "servers/hot.txt/..", "rules/other.json"]) assert.ok(!LIST_PATH.test(p), p);
   assert.equal(listType("main/update.json"), "application/json; charset=utf-8");
   assert.equal(listType("rules/ads.srs"), "application/octet-stream");

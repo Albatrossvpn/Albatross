@@ -135,7 +135,7 @@ func hotList(ordered []*entry, passed map[*entry]time.Duration, max int, crowd c
 	var cands []*entry
 	seen := map[string]bool{}
 	for _, e := range ordered {
-		if _, ok := passed[e]; !ok || crowd.tier(e.key) == 2 {
+		if _, ok := passed[e]; !ok || !crowd.keep(e.key) {
 			continue
 		}
 		if e.endpoint != "" {

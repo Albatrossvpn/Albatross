@@ -6,63 +6,108 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// crowdStats is what users' apps reported about servers (backend
-// list/servers/crowd.json): per server key, tests passed and made from
-// their networks. The collector's own test runs abroad and cannot see the
-// filtering users face; this can, so servers that work for users come
-// first in hot.txt and servers that fail for them are left out of it.
-type crowdStats map[uint64][2]float64
+// crowdStats is what was learned about servers from inside the country:
+// per server key, tests passed and made. It comes from two kinds of file
+// (-crowd, comma separated), both in the same form (crowdFile): the account
+// service's sums of users' reports (list/servers/crowd.json), and the
+// report of a tester running inside the country (deploy/tester,
+// list/servers/iran.json). The collector's own test runs abroad and cannot
+// see the filtering; these can, so servers confirmed from inside come first
+// in hot.txt and servers that fail there are left out. With a fresh tester
+// report that confirms enough servers, hot.txt holds only confirmed ones.
+type crowdStats struct {
+	rates  map[uint64][2]float64
+	strict bool
+}
 
-// loadCrowd reads the file; a missing or unreadable one is no stats.
-func loadCrowd(path string) crowdStats {
-	if path == "" {
-		return nil
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		log.Printf("crowd: %v", err)
-		return nil
-	}
-	var f struct {
-		Servers map[string][2]float64 `json:"servers"`
-	}
-	if err := json.Unmarshal(b, &f); err != nil {
-		log.Printf("crowd: %v", err)
-		return nil
-	}
-	out := crowdStats{}
-	for k, v := range f.Servers {
-		key, err := strconv.ParseUint(k, 16, 64)
-		if err == nil && v[1] > 0 {
-			out[key] = v
+// crowdFile is the file form: servers maps a server key (hex) to [passed,
+// tests]; tester names the tester that wrote it (empty for users' reports);
+// updated is when.
+type crowdFile struct {
+	Updated time.Time             `json:"updated"`
+	Tester  string                `json:"tester,omitempty"`
+	Days    int                   `json:"days,omitempty"`
+	Servers map[string][2]float64 `json:"servers"`
+}
+
+// testerFresh is how long a tester's report counts as current.
+const testerFresh = 12 * time.Hour
+
+// strictMin is how many servers a fresh tester report must confirm before
+// hot.txt is limited to confirmed servers.
+const strictMin = 100
+
+// loadCrowd reads the files; a missing or unreadable one adds nothing.
+func loadCrowd(paths string) crowdStats {
+	out := crowdStats{rates: map[uint64][2]float64{}}
+	for _, path := range strings.Split(paths, ",") {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
 		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			log.Printf("crowd: %v", err)
+			continue
+		}
+		var f crowdFile
+		if err := json.Unmarshal(b, &f); err != nil {
+			log.Printf("crowd: %s: %v", path, err)
+			continue
+		}
+		confirmed := 0
+		for k, v := range f.Servers {
+			key, err := strconv.ParseUint(k, 16, 64)
+			if err != nil || v[1] <= 0 {
+				continue
+			}
+			r := out.rates[key]
+			r[0] += v[0]
+			r[1] += v[1]
+			out.rates[key] = r
+			if v[1] >= 2 && v[0] == v[1] {
+				confirmed++
+			}
+		}
+		fresh := time.Since(f.Updated) < testerFresh
+		if f.Tester != "" && fresh && confirmed >= strictMin {
+			out.strict = true
+		}
+		log.Printf("crowd: %s: %d servers (tester %q, %d confirmed, fresh %v)", path, len(f.Servers), f.Tester, confirmed, fresh)
 	}
-	log.Printf("crowd: %d servers reported by users", len(out))
 	return out
 }
 
-// tier ranks a server by users' tests: 0 works for them, 1 unknown or
-// mixed, 2 fails for them (enough tests, few passes).
+// tier ranks a server by the tests from inside: 0 works there, 1 unknown
+// or mixed, 2 fails there (enough tests, few passes).
 func (c crowdStats) tier(key uint64) int {
-	v, ok := c[key]
+	v, ok := c.rates[key]
 	if !ok {
 		return 1
 	}
 	ok1, n := v[0], v[1]
 	switch {
-	case n >= 3 && ok1/n >= 0.5:
+	case n >= 2 && ok1/n >= 0.5:
 		return 0
-	case n >= 5 && ok1/n < 0.25:
+	case n >= 2 && ok1 == 0, n >= 5 && ok1/n < 0.25:
 		return 2
 	}
 	return 1
 }
 
-// crowdOrder sorts passed servers: those users confirmed first, then by
-// delay.
+// keep reports whether a server may be hot: never one that fails inside,
+// and only confirmed ones while a tester inside confirms enough.
+func (c crowdStats) keep(key uint64) bool {
+	t := c.tier(key)
+	return t == 0 || t == 1 && !c.strict
+}
+
+// crowdOrder sorts passed servers: those confirmed from inside first, then
+// by delay.
 func crowdOrder(es []*entry, passed map[*entry]time.Duration, c crowdStats) {
 	sort.SliceStable(es, func(i, j int) bool {
 		a, b := c.tier(es[i].key), c.tier(es[j].key)
@@ -71,4 +116,26 @@ func crowdOrder(es []*entry, passed map[*entry]time.Duration, c crowdStats) {
 		}
 		return passed[es[i]] < passed[es[j]]
 	})
+}
+
+// writeReport writes this run's results in the crowd file form, for a
+// tester running inside the country (deploy/tester): ok counts the passes
+// of the first test and the confirmation, n the tests made.
+func writeReport(path, tester string, first, confirmed map[*entry]time.Duration, tested map[*entry]bool) {
+	f := crowdFile{Updated: time.Now().UTC(), Tester: tester, Servers: map[string][2]float64{}}
+	for e := range tested {
+		var ok, n float64 = 0, 1
+		if _, p := first[e]; p {
+			ok, n = 1, 2
+			if _, c := confirmed[e]; c {
+				ok = 2
+			}
+		}
+		f.Servers[strconv.FormatUint(e.key, 16)] = [2]float64{ok, n}
+	}
+	b, _ := json.MarshalIndent(f, "", " ")
+	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("wrote the report of %d servers to %s", len(f.Servers), path)
 }

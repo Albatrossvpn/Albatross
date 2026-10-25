@@ -80,7 +80,7 @@ func readLines(path string) []string {
 // refreshHot re-tests the servers listed in path (the last hot.txt and the
 // top of fresh.txt) and writes the ones that still work to hot.txt. It runs
 // between full collections so the list the apps try first stays current.
-func refreshHot(path, out string, n int, crowd crowdStats) {
+func refreshHot(path, out string, n int, crowd crowdStats, report, tester string) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatal(err)
@@ -99,8 +99,11 @@ func refreshHot(path, out string, n int, crowd crowdStats) {
 		}
 		list = append(list, e)
 	}
-	passed, _ := realTest(list, n)
-	passed = confirm(passed)
+	first, tested := realTest(list, n)
+	passed := confirm(first)
+	if report != "" {
+		writeReport(report, tester, first, passed, tested)
+	}
 	sort.SliceStable(list, func(i, j int) bool {
 		_, oki := passed[list[i]]
 		_, okj := passed[list[j]]
@@ -183,11 +186,13 @@ func main() {
 	real := flag.Int("real", 8000, "connect through this many of the fresh servers with the cores in SING_BOX and XRAY; 0 skips")
 	prev := flag.String("prev", "", "directory holding the last published lists, for new.txt")
 	hotFrom := flag.String("hot-from", "", "only rewrite hot.txt in -out from the servers listed in this file that pass the real test")
-	crowdPath := flag.String("crowd", "", "users' reports about servers (list/servers/crowd.json): confirmed servers first in hot.txt, failing ones left out")
+	crowdPath := flag.String("crowd", "", "comma-separated reports about servers from inside the country (list/servers/crowd.json, iran.json): confirmed servers first in hot.txt, failing ones left out")
+	report := flag.String("report", "", "with -hot-from: write this run's results in the report form to this file (for a tester inside the country, deploy/tester)")
+	tester := flag.String("tester", "", "the tester's name in -report (for example iran)")
 	flag.Parse()
 	crowd := loadCrowd(*crowdPath)
 	if *hotFrom != "" {
-		refreshHot(*hotFrom, *out, *real, crowd)
+		refreshHot(*hotFrom, *out, *real, crowd, *report, *tester)
 		return
 	}
 
