@@ -15,11 +15,16 @@
 # with them.
 set -euo pipefail
 
-SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.3}"
-XRAY_VERSION="${XRAY_VERSION:-26.9.30}"
+SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
+XRAY_VERSION="${XRAY_VERSION:-26.10.21}"
 DRY_RUN="${DRY_RUN:-0}"
 OUT="${OUT:-/etc/albatross}"
 REALITY_DEST="${REALITY_DEST:-www.microsoft.com}"
+# DNS_TUNNEL, when set (e.g. t.example.com), is a name whose NS record
+# points at this server: the app then tunnels through DNS queries to any
+# resolver (Xray xdns), which is what still works when every foreign
+# address is cut. UDP 53 then serves the tunnel instead of Hysteria 2.
+DNS_TUNNEL="${DNS_TUNNEL:-}"
 
 # Ports. Each protocol has its own so one being blocked leaves the rest.
 P_REALITY=443        # VLESS + Reality + Vision (TCP)
@@ -30,6 +35,7 @@ P_GRPC=2087          # VLESS + gRPC + TLS
 P_UPGRADE=2096       # VMess + HTTPUpgrade + TLS
 P_ANYTLS=8880        # AnyTLS
 P_SS=8388            # Shadowsocks 2022 (TCP and UDP)
+P_STLS=8445          # Shadowsocks 2022 behind ShadowTLS v3 (TCP): a real TLS handshake with REALITY_DEST
 P_HY2=443            # Hysteria 2 + Salamander (UDP), hops over HOP_RANGE
 HOP_RANGE="20000:40000"
 P_TUIC=8444          # TUIC v5 (UDP)
@@ -37,6 +43,12 @@ P_HTTP=80            # VMess (AEAD) + HTTPUpgrade, no TLS: looks like plain HTTP
 # UDP 53 also lands on Hysteria 2: in the June 2025 shutdown it was the
 # only UDP port that still got out.
 P_HY2_DNS=53
+# TCP 53 as well: allowlists that keep DNS open often keep both transports.
+P_TCP53=53
+# VMess over mKCP carried in ICMP echo (Xray xicmp): ping is what stays
+# open when both TCP and UDP to foreign addresses are cut. The port only
+# names the mKCP session inside the echo packets.
+P_ICMP=7
 
 log() { echo "== $*" >&2; }
 need_root() { [ "$DRY_RUN" = 1 ] || [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }; }
@@ -91,9 +103,18 @@ secrets() {
       echo "WS_PATH=/$("$SB" generate rand --hex 6)"
       echo "GRPC_NAME=$("$SB" generate rand --hex 6)"
       echo "XHTTP_PATH=/$("$SB" generate rand --hex 6)"
+      echo "KCP_SEED=$("$SB" generate rand --hex 8)"
+      echo "STLS_PASS=$("$SB" generate rand --hex 16)"
     } >"$f"
     chmod 600 "$f"
   fi
+  # The tunnel name is kept with the secrets so a rerun keeps it.
+  if [ -n "$DNS_TUNNEL" ]; then
+    sed -i '/^DNS_TUNNEL=/d' "$f" && echo "DNS_TUNNEL=$DNS_TUNNEL" >>"$f"
+  fi
+  # Servers set up before the ICMP carrier get its seed added.
+  grep -q "^KCP_SEED=" "$f" || echo "KCP_SEED=$("$SB" generate rand --hex 8)" >>"$f"
+  grep -q "^STLS_PASS=" "$f" || echo "STLS_PASS=$("$SB" generate rand --hex 16)" >>"$f"
   # shellcheck disable=SC1090
   . "$f"
 }
@@ -150,10 +171,18 @@ singbox_config() {
      "users": [{"password": "$PASS"}], $tls},
     {"type": "shadowsocks", "tag": "ss", "listen": "::", "listen_port": $P_SS,
      "method": "2022-blake3-aes-256-gcm", "password": "$SS_KEY"},
+    {"type": "shadowtls", "tag": "stls", "listen": "::", "listen_port": $P_STLS, "version": 3,
+     "users": [{"password": "$STLS_PASS"}],
+     "handshake": {"server": "$REALITY_DEST", "server_port": 443}, "detour": "ss-stls"},
+    {"type": "shadowsocks", "tag": "ss-stls", "listen": "127.0.0.1", "listen_port": 18445,
+     "method": "2022-blake3-aes-256-gcm", "password": "$SS_KEY"},
     {"type": "hysteria2", "tag": "hy2", "listen": "::", "listen_port": $P_HY2,
      "users": [{"password": "$PASS"}],
      "obfs": {"type": "salamander", "password": "$OBFS"}, $tls},
     {"type": "vmess", "tag": "http", "listen": "::", "listen_port": $P_HTTP,
+     "users": [{"uuid": "$UUID", "alterId": 0}],
+     "transport": {"type": "httpupgrade", "path": "$WS_PATH"}},
+    {"type": "vmess", "tag": "tcp53", "listen": "::", "listen_port": $P_TCP53,
      "users": [{"uuid": "$UUID", "alterId": 0}],
      "transport": {"type": "httpupgrade", "path": "$WS_PATH"}},
     {"type": "tuic", "tag": "tuic", "listen": "::", "listen_port": $P_TUIC,
@@ -176,6 +205,25 @@ json.dump(c, open(p, "w"), indent=2)
 PY
 }
 
+# dns_tunnel_inbound prints the DNS tunnel inbound (with its leading comma)
+# when DNS_TUNNEL is set: VMess over mKCP inside DNS queries for the
+# tunnel name, on UDP 53. The small mKCP MTU is Xray's recommendation for
+# TXT answers.
+dns_tunnel_inbound() {
+  [ -n "$DNS_TUNNEL" ] || return 0
+  cat <<EOF
+, {
+    "tag": "xdns", "listen": "0.0.0.0", "port": 53, "protocol": "vmess",
+    "settings": {"clients": [{"id": "$UUID"}]},
+    "streamSettings": {
+      "network": "kcp",
+      "kcpSettings": {"seed": "$KCP_SEED", "mtu": 900, "tti": 200, "header": {"type": "none"}},
+      "finalmask": {"udp": [{"type": "xdns", "settings": {"domains": [{"names": ["$DNS_TUNNEL"]}]}}]}
+    }
+  }
+EOF
+}
+
 xray_config() {
   cat >"$OUT/xray.json" <<EOF
 {
@@ -189,7 +237,15 @@ xray_config() {
       "realitySettings": {"target": "$REALITY_DEST:443", "serverNames": ["$REALITY_DEST"],
                           "privateKey": "$REALITY_PRIVATE", "shortIds": ["$SHORT_ID"]}
     }
-  }],
+  }, {
+    "tag": "icmp", "listen": "0.0.0.0", "port": $P_ICMP, "protocol": "vmess",
+    "settings": {"clients": [{"id": "$UUID"}]},
+    "streamSettings": {
+      "network": "kcp",
+      "kcpSettings": {"seed": "$KCP_SEED", "mtu": 1250, "tti": 50, "header": {"type": "none"}},
+      "finalmask": {"udp": [{"type": "xicmp"}]}
+    }
+  }$(dns_tunnel_inbound)],
   "outbounds": [{"protocol": "freedom", "tag": "direct"},
                 {"protocol": "blackhole", "tag": "block"}],
   "routing": {"rules": [{"ip": ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
@@ -229,10 +285,21 @@ EOF
   systemctl restart albatross-sing-box albatross-xray
 }
 
+# free_port53 stops systemd-resolved's stub listener, which holds port 53 on
+# the loopback address and would keep the cores from binding it; the
+# machine keeps resolving through the upstream list resolved maintains.
+free_port53() {
+  [ -d /run/systemd/system ] || return 0
+  mkdir -p /etc/systemd/resolved.conf.d
+  printf '[Resolve]\nDNSStubListener=no\n' >/etc/systemd/resolved.conf.d/albatross.conf
+  ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+  systemctl restart systemd-resolved 2>/dev/null || true
+}
+
 firewall() {
   # Oracle's Ubuntu images reject everything but SSH in iptables; the
   # cloud's own security list must allow the same ports (see README).
-  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS 80; do
+  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 80; do
     iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$p" -j ACCEPT
   done
   for p in $P_SS $P_HY2 $P_TUIC $HOP_RANGE; do
@@ -240,11 +307,21 @@ firewall() {
   done
   # Hysteria 2 port hopping: the whole range, and UDP 53, land on its one
   # port.
-  for r in "$HOP_RANGE" "$P_HY2_DNS"; do
+  local hy2ports="$HOP_RANGE $P_HY2_DNS"
+  if [ -n "$DNS_TUNNEL" ]; then
+    # UDP 53 serves the DNS tunnel; an older rule sending it to Hysteria goes.
+    hy2ports="$HOP_RANGE"
+    iptables -t nat -D PREROUTING -p udp --dport "$P_HY2_DNS" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null || true
+    iptables -C INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport 53 -j ACCEPT
+  fi
+  for r in $hy2ports; do
     iptables -C INPUT -p udp --dport "$r" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$r" -j ACCEPT
     iptables -t nat -C PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null ||
       iptables -t nat -A PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2"
   done
+  # The ICMP carrier: echo requests must get in (the cloud's security
+  # list too).
+  iptables -C INPUT -p icmp --icmp-type echo-request -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp --icmp-type echo-request -j ACCEPT
   netfilter-persistent save >/dev/null 2>&1 || true
   # Faster on lossy, long routes such as Iran to Europe.
   cat >/etc/sysctl.d/90-albatross.conf <<EOF
@@ -267,23 +344,34 @@ vless://$UUID@$DOMAIN:$P_WS?security=tls&sni=$DOMAIN&fp=chrome&type=ws&host=$DOM
 vless://$UUID@$DOMAIN:$P_GRPC?security=tls&sni=$DOMAIN&fp=chrome&type=grpc&serviceName=$GRPC_NAME#$n-gRPC
 $(vmess_link "$DOMAIN" "$P_UPGRADE" tls Albatross-HTTPUpgrade)
 $(vmess_link "$h" "$P_HTTP" "" Albatross-HTTP80)
+$(vmess_link "$h" "$P_TCP53" "" Albatross-TCP53)
+$(vmess_link "$h" "$P_ICMP" "" Albatross-ICMP icmp)
+$([ -z "$DNS_TUNNEL" ] || vmess_link "$h" 53 "" Albatross-DNS "dns:$DNS_TUNNEL")
 anytls://$PASS@$DOMAIN:$P_ANYTLS?sni=$DOMAIN#$n-AnyTLS
 ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_SS#$n-SS2022
-hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS&mport=$P_HY2_DNS,$hop#$n-Hysteria2
+ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_STLS?plugin=$(urlenc "shadow-tls;host=$REALITY_DEST;password=$STLS_PASS;version=3")#$n-ShadowTLS
+hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS&mport=$([ -n "$DNS_TUNNEL" ] || printf '%s,' "$P_HY2_DNS")$hop#$n-Hysteria2
 tuic://$UUID:$PASS@$DOMAIN:$P_TUIC?sni=$DOMAIN&alpn=h3&congestion_control=bbr#$n-TUIC
 EOF
 }
 
 urlenc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$1"; }
 
-# vmess_link host port tls|"" name. Without TLS the content is still
-# encrypted end to end by VMess's AEAD; only the outer layer is plain HTTP.
+# vmess_link host port tls|"" name [icmp]. Without TLS the content is still
+# encrypted end to end by VMess's AEAD; only the outer layer is plain HTTP
+# (or, for icmp, mKCP inside ICMP echo packets, which the app's Xray reads
+# through the fm field).
 vmess_link() {
-  python3 - "$UUID" "$1" "$2" "$WS_PATH" "$3" "$4" <<'PY'
+  python3 - "$UUID" "$1" "$2" "$WS_PATH" "$3" "$4" "${5:-}" "$KCP_SEED" <<'PY'
 import base64, json, sys
-uuid, host, port, path, tls, name = sys.argv[1:]
+uuid, host, port, path, tls, name, carrier, seed = sys.argv[1:]
 v = {"v": "2", "ps": name, "add": host, "port": port, "id": uuid, "aid": "0",
      "scy": "aes-128-gcm", "net": "httpupgrade", "host": host, "path": path, "tls": tls}
+if carrier == "icmp":
+    v.update(net="kcp", type="none", path=seed, host="", fm={"udp": [{"type": "xicmp"}]})
+elif carrier.startswith("dns:"):
+    v.update(net="kcp", type="none", path=seed, host="",
+             fm={"udp": [{"type": "xdns", "settings": {"domains": [{"names": [carrier[4:]]}]}}]})
 if tls:
     v.update(sni=host, fp="chrome")
 print("vmess://" + base64.b64encode(json.dumps(v, separators=(",", ":")).encode()).decode())
@@ -305,6 +393,7 @@ main() {
   "$SB" check -c "$OUT/sing-box.json"
   "$XRAY" run -test -c "$OUT/xray.json" >/dev/null
   if [ "$DRY_RUN" != 1 ]; then
+    free_port53
     firewall
     services
   fi

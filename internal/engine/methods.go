@@ -20,11 +20,22 @@ var psiphonCountries = []string{
 
 // methodNodes lists the warp-plus methods: plain WARP, WARP in WARP, and
 // Psiphon in every country it offers.
-func methodNodes() []*node.Node {
-	out := []*node.Node{node.WarpPlus("warp", ""), node.WarpPlus("gool", "")}
-	for _, c := range psiphonCountries {
-		out = append(out, node.WarpPlus("psiphon", c))
+func methodNodes(warpPlus, usque bool) []*node.Node {
+	var out []*node.Node
+	if usque {
+		// WARP over MASQUE looks like HTTPS to Cloudflare; the TCP form gets
+		// through networks that throttle UDP.
+		out = append(out, node.WarpPlus("masque", ""), node.WarpPlus("masque2", ""))
 	}
+	if warpPlus {
+		out = append(out, node.WarpPlus("warp", ""), node.WarpPlus("gool", ""))
+		for _, c := range psiphonCountries {
+			out = append(out, node.WarpPlus("psiphon", c))
+		}
+	}
+	// No server at all, with the TLS hello fragmented: the last resort when
+	// nothing else connects (see Engine.lastResort).
+	out = append(out, node.Direct())
 	return out
 }
 
@@ -35,9 +46,6 @@ var methodsTested = map[string]time.Time{}
 // start, so only a few run at a time, and the user's chosen country goes
 // first.
 func (e *Engine) refreshWarp() {
-	if e.bin.WarpPlus == "" && e.bin.Tor == "" {
-		return
-	}
 	e.mu.Lock()
 	target := e.target
 	searching := e.wantConnect && e.conn == nil
@@ -45,10 +53,7 @@ func (e *Engine) refreshWarp() {
 	now := time.Now()
 	var due []*node.Node
 	methodsMu.Lock()
-	for _, n := range methodNodes() {
-		if e.bin.WarpPlus == "" {
-			break
-		}
+	for _, n := range methodNodes(e.bin.WarpPlus != "", e.bin.Usque != "") {
 		every := 3 * time.Hour
 		if searching || (target != "" && n.WPCountry == target) {
 			every = 30 * time.Minute
@@ -103,6 +108,10 @@ func (e *Engine) refreshWarp() {
 				s.Source = "warp-plus"
 				if r.Node.WPMode == "tor" {
 					s.Source = "tor"
+				} else if r.Node.Usque() {
+					s.Source = "usque"
+				} else if r.Node.Proto == "direct" {
+					s.Source = "direct"
 				}
 			}
 			e.mu.Unlock()

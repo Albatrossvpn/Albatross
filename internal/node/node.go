@@ -76,6 +76,7 @@ type Node struct {
 	SpiderX    string `json:"spx,omitempty"`
 	ECH        string `json:"ech,omitempty"`
 	PinnedCert string `json:"pcs,omitempty"`
+	HostKey    string `json:"host_key,omitempty"` // ssh: the server's public host key
 	VerifyName string `json:"vcn,omitempty"`
 	Fragment   bool   `json:"fragment,omitempty"` // link asked for TLS ClientHello fragmentation
 	FinalMask  string `json:"fm,omitempty"`       // raw Xray finalmask JSON
@@ -106,7 +107,9 @@ type Node struct {
 	// OpenVPN (VPN Gate) material.
 	OVPN *OpenVPN `json:"ovpn,omitempty"`
 
-	// warp-plus methods: "warp", "gool" (WARP in WARP) or "psiphon".
+	// warp-plus methods: "warp", "gool" (WARP in WARP) or "psiphon"; "tor";
+	// and usque's "masque" (WARP over MASQUE, HTTP/3) and "masque2" (the
+	// same over TCP and HTTP/2, for networks that throttle UDP).
 	WPMode    string `json:"wp_mode,omitempty"`
 	WPCountry string `json:"wp_country,omitempty"`
 
@@ -275,7 +278,7 @@ func (n *Node) xraySupported() bool {
 func (n *Node) Validate() error {
 	if n.Proto == "warpplus" {
 		switch n.WPMode {
-		case "warp", "gool", "tor":
+		case "warp", "gool", "tor", "masque", "masque2":
 			return nil
 		case "psiphon":
 			if len(n.WPCountry) == 2 {
@@ -283,6 +286,9 @@ func (n *Node) Validate() error {
 			}
 		}
 		return fmt.Errorf("bad warp-plus method")
+	}
+	if n.Proto == "direct" {
+		return nil // no server: the device's own connection
 	}
 	if n.Server == "" || strings.ContainsAny(n.Server, " \t/\\?#@,\"'") {
 		return fmt.Errorf("bad server %q", n.Server)
@@ -316,8 +322,11 @@ func (n *Node) Validate() error {
 		if strings.HasPrefix(n.Method, "2022-") && !validSS2022Key(n.Method, n.Password) {
 			return fmt.Errorf("bad 2022 key")
 		}
-		if n.Plugin != "" && n.Plugin != "obfs-local" && n.Plugin != "v2ray-plugin" {
+		if n.Plugin != "" && n.Plugin != "obfs-local" && n.Plugin != "v2ray-plugin" && n.Plugin != "shadow-tls" {
 			return fmt.Errorf("unsupported plugin %q", n.Plugin)
+		}
+		if n.Plugin == "shadow-tls" && n.pluginOpt("password") == "" {
+			return fmt.Errorf("shadow-tls needs a password")
 		}
 	case "hysteria":
 		if n.ObfsPassword == "" && n.Password == "" {
@@ -337,7 +346,11 @@ func (n *Node) Validate() error {
 		if len(n.LocalAddress) == 0 {
 			return fmt.Errorf("wireguard needs an address")
 		}
-	case "socks", "http":
+	case "socks", "http", "direct":
+	case "ssh":
+		if n.Username == "" || n.Password == "" {
+			return fmt.Errorf("ssh needs a user and a password")
+		}
 	case "openvpn":
 		if n.OVPN == nil || len(n.OVPN.CA) == 0 {
 			return fmt.Errorf("openvpn needs a CA")
@@ -466,8 +479,35 @@ func (n *Node) Style() uint8 {
 	case "kcp", "quic":
 		tr = 6
 	}
+	if n.ICMP() {
+		tr = 7
+	}
+	if n.DNSTunnel() {
+		sec, tr = 3, 6 // 31: the one value the kcp wire and this class share
+	}
 	return sec*8 + tr + 1 + n.portClass()<<5 // 0 means unknown
 }
+
+// DNSTunnel reports whether the node travels inside DNS queries (Xray's
+// xdns mask) through whatever resolver the network offers.
+func (n *Node) DNSTunnel() bool {
+	return strings.Contains(n.FinalMask, `"xdns"`)
+}
+
+// StyleDNSTunnel reports whether a style byte names a DNS tunnel.
+func StyleDNSTunnel(s uint8) bool { return StyleWire(s) == 31 }
+
+// ICMP reports whether the node travels inside ICMP echo packets (Xray's
+// xicmp mask): neither TCP nor UDP, so neither probe says anything about it.
+func (n *Node) ICMP() bool {
+	return strings.Contains(n.FinalMask, `"xicmp"`)
+}
+
+// StyleICMP reports whether a style byte names an ICMP carrier.
+func StyleICMP(s uint8) bool { return (StyleWire(s)-1)%8 == 7 }
+
+// StyleDNSPort reports whether a style byte names port 53.
+func StyleDNSPort(s uint8) bool { return StylePort(s) == 5 }
 
 // portClass groups ports the way filtering treats them: 443 is watched
 // hardest, Cloudflare's other HTTPS ports and the plain-HTTP ports less.
@@ -479,6 +519,9 @@ func (n *Node) portClass() uint8 {
 		return 2
 	case 80, 8080, 8880, 2052, 2082, 2086, 2095:
 		return 3
+	case 53:
+		// The one UDP port left open in the June 2025 shutdown.
+		return 5
 	case 0:
 		return 0
 	}
@@ -497,3 +540,17 @@ func (n *Node) fp() string {
 	}
 	return n.HelloFP
 }
+
+// pluginOpt reads one key of PluginOpts ("host=a;password=b;version=3").
+func (n *Node) pluginOpt(key string) string {
+	for _, kv := range strings.Split(n.PluginOpts, ";") {
+		if k, v, ok := strings.Cut(kv, "="); ok && strings.TrimSpace(k) == key {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+// NoEndpoint reports whether the node has no server address to probe: the
+// sidecar methods (warp-plus, usque, Tor) and the serverless method.
+func (n *Node) NoEndpoint() bool { return n.Proto == "warpplus" || n.Proto == "direct" }

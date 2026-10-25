@@ -53,7 +53,9 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 		n.sbServer(out)
 		out["method"] = n.Method
 		out["password"] = n.Password
-		if n.Plugin != "" {
+		if n.Plugin == "shadow-tls" {
+			out["detour"] = tag + "-stls"
+		} else if n.Plugin != "" {
 			out["plugin"] = n.Plugin
 			if n.PluginOpts != "" {
 				out["plugin_opts"] = n.PluginOpts
@@ -118,6 +120,21 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 		n.sbServer(out)
 		out["password"] = n.Password
 		out["tls"] = n.sbTLS(o)
+	case "direct":
+		// Nothing to connect to: the ClientHello of every TLS connection is
+		// split so a name-based filter does not see the name whole.
+		out["type"] = "direct"
+		out["tls_fragment"] = true
+		out["tls_record_fragment"] = true
+		return out, false
+	case "ssh":
+		out["type"] = "ssh"
+		n.sbServer(out)
+		out["user"] = n.Username
+		out["password"] = n.Password
+		if n.HostKey != "" {
+			out["host_key"] = []string{n.HostKey}
+		}
 	case "socks":
 		out["type"] = "socks"
 		n.sbServer(out)
@@ -425,4 +442,26 @@ func (n *Node) sbOpenVPN(out map[string]any) map[string]any {
 	}
 	out["route_no_pull"] = true
 	return out
+}
+
+// SingBoxHelpers returns the extra outbounds a node needs beside its own:
+// for Shadowsocks behind ShadowTLS v3, the shadowtls outbound that makes
+// the real TLS handshake with the disguise site and that the Shadowsocks
+// outbound detours through. The tags end in "-stls".
+func (n *Node) SingBoxHelpers(tag string) []map[string]any {
+	if n.Proto != "shadowsocks" || n.Plugin != "shadow-tls" {
+		return nil
+	}
+	host := firstNonEmpty(n.pluginOpt("host"), n.SNI, n.Server)
+	version := atoi(n.pluginOpt("version"))
+	if version == 0 {
+		version = 3
+	}
+	return []map[string]any{{
+		"type": "shadowtls", "tag": tag + "-stls",
+		"server": n.Server, "server_port": n.Port,
+		"version": version, "password": n.pluginOpt("password"),
+		"tls": map[string]any{"enabled": true, "server_name": host,
+			"utls": map[string]any{"enabled": true, "fingerprint": "chrome"}},
+	}}
 }

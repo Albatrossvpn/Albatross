@@ -275,12 +275,15 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 // into other countries only when that country runs short.
 func (e *Engine) pickGroup(country, home string, exclude map[string]bool, size int) []*Server {
 	if country != "" {
-		return e.bestServers(country, size, exclude)
+		if g := e.bestServers(country, size, exclude); len(g) > 0 {
+			return g
+		}
+		return e.lastResort(exclude)
 	}
 	if home == "" {
 		best := e.bestServers("", 1, exclude)
 		if len(best) == 0 {
-			return nil
+			return e.lastResort(exclude)
 		}
 		home = best[0].Country
 	}
@@ -353,7 +356,7 @@ func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Se
 	var wg sync.WaitGroup
 	for i, s := range list {
 		nd := s.Node()
-		if nd == nil || nd.UDPBased() {
+		if nd == nil || nd.UDPBased() || nd.NoEndpoint() {
 			ok[i] = nd != nil
 			continue
 		}
@@ -639,6 +642,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		FragmentFor: func(n *node.Node) bool { return fragFor[n] },
 		OnLine:      c.watchLog,
 		LineMbps:    e.net.lineMbps(),
+		LocalDNS:    e.dns(),
 	}
 	if set.SpoofSNI != "" && e.opt.IsAdmin() {
 		build.Spoof = set.SpoofSNI
@@ -669,7 +673,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	for i, n := range run.Set.Nodes {
 		if s := byNode[n]; s != nil {
 			m := &member{tag: run.Set.Tags[i], server: s, country: s.Country}
-			if !n.UDPBased() && n.Proto != "warpplus" {
+			if !n.UDPBased() && !n.NoEndpoint() {
 				m.endpoint = n.Endpoint()
 			}
 			c.members = append(c.members, m)
@@ -743,16 +747,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	}
 	c.exitIP, c.exitCC, c.delay, c.healthy = r.ExitIP, r.Country, int(r.Delay/time.Millisecond), true
 	if set.Mode == "proxy" {
-		bypass := []string{"localhost", "127.*", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*", "172.30.*", "172.31.*", "192.168.*", "169.254.*", "<local>"}
-		if r, ok := findRegion(set.Bypass); ok {
-			for _, s := range r.Suffixes {
-				bypass = append(bypass, "*"+s)
-			}
-			for _, d := range r.Extra {
-				bypass = append(bypass, d, "*."+d)
-			}
-		}
-		switch err := e.setProxy(gen, c.proxyTarget(), bypass); {
+		switch err := e.setProxy(gen, c.proxyTarget(), proxyBypass(set.Bypass, set.BlockAds)); {
 		case errors.Is(err, errStale):
 			run.Stop()
 			return err
@@ -850,6 +845,26 @@ func (e *Engine) Resume() bool {
 		go e.Connect(target)
 	}
 	return true
+}
+
+// proxyBypass lists the addresses the system proxy leaves alone: the local
+// network and, unless ads are blocked, the bypass region's sites. Programs
+// open those without the proxy at all, so blocking ads leaves only the local
+// network there: the region's ad networks must reach the core to be blocked,
+// and the core still opens the region's sites directly.
+func proxyBypass(code string, blockAds bool) []string {
+	bypass := []string{"localhost", "127.*", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*", "172.30.*", "172.31.*", "192.168.*", "169.254.*", "<local>"}
+	r, ok := findRegion(code)
+	if !ok || blockAds {
+		return bypass
+	}
+	for _, s := range r.Suffixes {
+		bypass = append(bypass, "*"+s)
+	}
+	for _, d := range r.Extra {
+		bypass = append(bypass, d, "*."+d)
+	}
+	return bypass
 }
 
 // setProxy points the system (on Android, the VPN) at addr unless the user
@@ -1028,24 +1043,34 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		rules = append(rules, map[string]any{"process_name": procs, "outbound": "direct"})
 	}
 	if o.blockAds {
-		ruleSets = append(ruleSets, localRuleSet("geosite-ads", o.rulesDir))
-		rules = append(rules, map[string]any{"rule_set": []string{"geosite-ads"}, "action": "reject"})
+		ruleSets = append(ruleSets, localRuleSet("ads", o.rulesDir))
+		// no_drop: sing-box otherwise drops, silently, after 50 rejects in
+		// 30 seconds, which ordinary browsing reaches; then pages hang on
+		// ad connections instead of giving up on them at once.
+		rules = append(rules, map[string]any{"rule_set": []string{"ads"}, "action": "reject", "no_drop": true})
 	}
 	dnsRules := []any{}
+	if o.blockAds {
+		// Apps learn at once that an ad server does not exist, instead of
+		// waiting on a connection that is then refused, and the name is
+		// not even looked up.
+		dnsRules = append(dnsRules, map[string]any{"rule_set": []string{"ads"}, "action": "predefined", "rcode": "NXDOMAIN"})
+	}
 	if r, ok := findRegion(o.bypass); ok {
 		// The learned list holds the region's sites the domain list misses
 		// (learn.go); the core reloads it whenever the engine adds one.
 		ruleSets = append(ruleSets, localRuleSet(r.geoSiteTag(), o.rulesDir), localRuleSet(r.geoIPTag(), o.rulesDir),
 			map[string]any{"type": "local", "tag": r.learnedTag(), "format": "source", "path": r.learnedFile(o.rulesDir)})
-		rules = append(rules, map[string]any{
+		// Shared names are left out by name only: one at a region's
+		// address still goes direct (TUN mode sees addresses).
+		rules = append(rules, r.unlessShared(map[string]any{
 			"domain_suffix": r.names(),
-			"rule_set":      []string{r.geoSiteTag(), r.learnedTag(), r.geoIPTag()},
-			"outbound":      "direct",
-		})
-		dnsRules = append(dnsRules, map[string]any{
+			"rule_set":      []string{r.geoSiteTag(), r.learnedTag()},
+		}, map[string]any{"outbound": "direct"}),
+			map[string]any{"rule_set": []string{r.geoIPTag()}, "outbound": "direct"})
+		dnsRules = append(dnsRules, r.unlessShared(map[string]any{
 			"domain_suffix": r.names(), "rule_set": []string{r.geoSiteTag(), r.learnedTag()},
-			"action": "route", "server": "local",
-		})
+		}, map[string]any{"action": "route", "server": "local"}))
 	}
 	if o.secureOnly {
 		// Last among the rules that send traffic elsewhere, so local sites
@@ -1111,6 +1136,21 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		cfg["endpoints"] = eps
 	}
 	return cfg
+}
+
+// unlessShared is the rule doing action for names matching match, except
+// names under the region's shared hosting (region.Shared).
+func (r region) unlessShared(match, action map[string]any) map[string]any {
+	rule := match
+	if len(r.Shared) > 0 {
+		rule = map[string]any{"type": "logical", "mode": "and", "rules": []any{
+			match, map[string]any{"domain_suffix": r.Shared, "invert": true},
+		}}
+	}
+	for k, v := range action {
+		rule[k] = v
+	}
+	return rule
 }
 
 func localRuleSet(tag, dir string) map[string]any {
@@ -1192,4 +1232,20 @@ var stickyDomains = []string{
 	"chatgpt.com", "openai.com", "claude.ai", "anthropic.com", "gemini.google.com",
 	"instagram.com", "facebook.com", "x.com", "twitter.com", "linkedin.com",
 	"github.com", "steampowered.com", "steamcommunity.com", "web.telegram.org",
+}
+
+// lastResort is the serverless method (node.Direct), offered only when no
+// server at all is usable: connecting through the device's own line with
+// the TLS hello fragmented beats not connecting, and the app says so in
+// the method's name. Exits in the home country are otherwise never used.
+func (e *Engine) lastResort(exclude map[string]bool) []*Server {
+	now := time.Now()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, s := range e.good {
+		if s.Proto == "direct" && !exclude[s.Key] && s.usable(now) {
+			return []*Server{s}
+		}
+	}
+	return nil
 }

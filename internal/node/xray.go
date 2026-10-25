@@ -2,6 +2,8 @@ package node
 
 import (
 	"encoding/json"
+	"net"
+	"runtime"
 	"strings"
 )
 
@@ -234,6 +236,13 @@ func (n *Node) xrayStream() map[string]any {
 	if n.FinalMask != "" {
 		var fm map[string]any
 		if json.Unmarshal([]byte(n.FinalMask), &fm) == nil {
+			fixICMPMask(fm)
+			if n.DNSTunnel() {
+				if k, ok := s["kcpSettings"].(map[string]any); ok {
+					// A DNS answer carries little: Xray's recommended values.
+					k["mtu"], k["tti"] = 130, 200
+				}
+			}
 			s["finalmask"] = fm
 		}
 	}
@@ -298,4 +307,55 @@ func itoa(i int) string {
 		b[p] = '-'
 	}
 	return string(b[p:])
+}
+
+// fixICMPMask sets how the xicmp mask opens its socket: a datagram ICMP
+// socket needs no privilege on Linux and Android, while Windows only has
+// raw sockets (the app runs elevated there when it protects the device).
+func fixICMPMask(fm map[string]any) {
+	udp, _ := fm["udp"].([]any)
+	for _, m := range udp {
+		mask, _ := m.(map[string]any)
+		if mask == nil || mask["type"] != "xicmp" {
+			continue
+		}
+		settings, _ := mask["settings"].(map[string]any)
+		if settings == nil {
+			settings = map[string]any{}
+			mask["settings"] = settings
+		}
+		settings["dgram"] = runtime.GOOS != "windows"
+	}
+}
+
+// SetDNSTunnelResolvers points a DNS tunnel at the resolvers to send its
+// queries through: the network's own first (it is what still answers when
+// foreign addresses are cut), then public ones. ob is an Xray outbound.
+func SetDNSTunnelResolvers(ob map[string]any, localDNS string) {
+	stream, _ := ob["streamSettings"].(map[string]any)
+	fm, _ := stream["finalmask"].(map[string]any)
+	udp, _ := fm["udp"].([]any)
+	for _, m := range udp {
+		mask, _ := m.(map[string]any)
+		if mask == nil || mask["type"] != "xdns" {
+			continue
+		}
+		settings, _ := mask["settings"].(map[string]any)
+		if settings == nil {
+			settings = map[string]any{}
+			mask["settings"] = settings
+		}
+		if _, has := settings["resolvers"]; has {
+			continue
+		}
+		var addrs []string
+		if localDNS != "" {
+			if _, _, err := net.SplitHostPort(localDNS); err != nil {
+				localDNS = net.JoinHostPort(localDNS, "53")
+			}
+			addrs = append(addrs, "udp://"+localDNS)
+		}
+		addrs = append(addrs, "udp://1.1.1.1:53", "udp://8.8.8.8:53", "udp://9.9.9.9:53")
+		settings["resolvers"] = []any{map[string]any{"addrs": addrs}}
+	}
 }
