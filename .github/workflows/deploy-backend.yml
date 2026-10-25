@@ -74,7 +74,7 @@ jobs:
         run: |
           rc=0
           api="https://api.cloudflare.com/client/v4/zones"
-          for zone in $(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml ../site/wrangler.toml ../edge/wrangler.toml | sed 's/^[^.]*\.//' | sort -u); do
+          for zone in $(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml ../site/wrangler.toml ../edge/wrangler.toml | awk -F. '{print $(NF-1)"."$NF}' | sort -u); do
             id="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api?name=$zone" | jq -r '.result[0].id // empty')"
             [ -n "$id" ] || { echo "::warning::The API token cannot see the zone $zone; turn ECH and HTTP/3 off in its dashboard (SSL/TLS > Edge Certificates, Network)."; rc=1; continue; }
             for setting in ech http3; do
