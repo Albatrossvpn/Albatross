@@ -444,6 +444,11 @@ jobs:
         run: mv dist/*-android.apk "Albatross-${{ needs.build.outputs.version }}-android.apk"
       - uses: softprops/action-gh-release@v2
         with:
+          # The workflow's own token creates the release; a RELEASE_TOKEN
+          # secret (a fine-grained token with Contents read and write on
+          # this repository) is used instead when the repository's
+          # settings keep the workflow token from doing so.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
           tag_name: v${{ needs.build.outputs.version }}
           target_commitish: ${{ github.sha }}
           # 0.3.1 and earlier were signed with a throwaway key; Android
@@ -463,7 +468,7 @@ jobs:
       # each platform's installer and SHA-256 so they update in place.
       - name: Tell installed copies
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           VERSION: ${{ needs.build.outputs.version }}
           FORCE: ${{ github.event_name != 'workflow_dispatch' || inputs.force_update }}
           MESSAGE: ${{ inputs.update_message }}
