@@ -76,6 +76,7 @@ type Node struct {
 	SpiderX    string `json:"spx,omitempty"`
 	ECH        string `json:"ech,omitempty"`
 	PinnedCert string `json:"pcs,omitempty"`
+	HostKey    string `json:"host_key,omitempty"` // ssh: the server's public host key
 	VerifyName string `json:"vcn,omitempty"`
 	Fragment   bool   `json:"fragment,omitempty"` // link asked for TLS ClientHello fragmentation
 	FinalMask  string `json:"fm,omitempty"`       // raw Xray finalmask JSON
@@ -338,6 +339,10 @@ func (n *Node) Validate() error {
 			return fmt.Errorf("wireguard needs an address")
 		}
 	case "socks", "http":
+	case "ssh":
+		if n.Username == "" || n.Password == "" {
+			return fmt.Errorf("ssh needs a user and a password")
+		}
 	case "openvpn":
 		if n.OVPN == nil || len(n.OVPN.CA) == 0 {
 			return fmt.Errorf("openvpn needs a CA")

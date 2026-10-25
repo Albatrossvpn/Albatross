@@ -321,3 +321,7 @@ https://raw.githubusercontent.com/coldwater-10/HiN-VPN/main/subscription/source/
 https://raw.githubusercontent.com/coldwater-10/HiN-VPN/main/subscription/source/normal/iP_CF
 https://raw.githubusercontent.com/coldwater-10/HiN-VPN/main/subscription/source/normal/s0013_Official
 https://raw.githubusercontent.com/coldwater-10/HiN-VPN/main/subscription/source/normal/vip_vpn_2022
+https://raw.githubusercontent.com/barry-far/V2ray-Config/main/All_Configs_Sub.txt
+https://raw.githubusercontent.com/Epodonios/v2ray-configs/main/All_Configs_Sub.txt
+https://raw.githubusercontent.com/freefq/free/master/v2
+https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.txt
