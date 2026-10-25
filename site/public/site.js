@@ -17,13 +17,24 @@
     Object.keys(m.files || {}).forEach(function (key) {
       var f = m.files[key];
       var a = document.querySelector('[data-dl="' + key + '"]');
-      // The site's own copy (or the account service's); never a GitHub address.
-      var own = (f.urls || []).filter(function (u) { return u.indexOf("https://github.com/") !== 0; })[0];
-      if (a && own) a.href = own;
+      var name = f.urls && f.urls[0] ? f.urls[0].split("/").pop() : "";
+      // Only a file this site stores itself, so visitors never leave it.
+      if (a && /^(Albatross-\d+\.\d+\.\d+-android\.apk|Albatross-Setup-\d+\.\d+\.\d+\.exe)$/.test(name)) {
+        var href = "/download/" + name;
+        fetch(href, { method: "HEAD" }).then(function (r) {
+          if (!r.ok) return;
+          a.href = href;
+          var n = +r.headers.get("content-length");
+          if (n) a.textContent += " (" + Math.round(n / 1048576) + " MB)";
+        }).catch(function () {});
+      }
       var s = document.querySelector('[data-sha="' + key + '"]');
-      if (s && f.sha256) s.textContent = "SHA-256 " + f.sha256;
+      if (s && f.sha256) { s.textContent = f.sha256; s.closest("details").hidden = false; }
     });
-    if (v) document.querySelectorAll("[data-ver]").forEach(function (e) { e.textContent = "Version " + v + " · " + e.textContent; });
+    if (v) document.querySelectorAll("[data-ver]").forEach(function (e) { e.textContent += " · version " + v; });
   }
+  document.querySelectorAll(".menu-panel a").forEach(function (a) {
+    a.addEventListener("click", function () { a.closest("details").open = false; });
+  });
   tryNext(0);
 })();
