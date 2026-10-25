@@ -107,7 +107,9 @@ type Node struct {
 	// OpenVPN (VPN Gate) material.
 	OVPN *OpenVPN `json:"ovpn,omitempty"`
 
-	// warp-plus methods: "warp", "gool" (WARP in WARP) or "psiphon".
+	// warp-plus methods: "warp", "gool" (WARP in WARP) or "psiphon"; "tor";
+	// and usque's "masque" (WARP over MASQUE, HTTP/3) and "masque2" (the
+	// same over TCP and HTTP/2, for networks that throttle UDP).
 	WPMode    string `json:"wp_mode,omitempty"`
 	WPCountry string `json:"wp_country,omitempty"`
 
@@ -276,7 +278,7 @@ func (n *Node) xraySupported() bool {
 func (n *Node) Validate() error {
 	if n.Proto == "warpplus" {
 		switch n.WPMode {
-		case "warp", "gool", "tor":
+		case "warp", "gool", "tor", "masque", "masque2":
 			return nil
 		case "psiphon":
 			if len(n.WPCountry) == 2 {

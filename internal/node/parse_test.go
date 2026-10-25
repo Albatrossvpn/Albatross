@@ -330,3 +330,29 @@ func TestShadowTLS(t *testing.T) {
 		}
 	}
 }
+
+func TestUsqueMethods(t *testing.T) {
+	m := WarpPlus("masque", "")
+	m2 := WarpPlus("masque2", "")
+	if !m.Usque() || !m2.Usque() || WarpPlus("warp", "").Usque() {
+		t.Fatal("Usque() must name only the MASQUE methods")
+	}
+	if m.Engine() != EngineWarpPlus || m2.Engine() != EngineWarpPlus {
+		t.Fatalf("MASQUE methods run as sidecar methods: %v %v", m.Engine(), m2.Engine())
+	}
+	if m.Key() == m2.Key() || m.Name == m2.Name {
+		t.Fatal("the two MASQUE methods must differ")
+	}
+	a := m2.UsqueArgs("127.0.0.1", "1080", "/tmp/x")
+	got := strings.Join(a, " ")
+	if !strings.Contains(got, "-c /tmp/x/config.json socks -b 127.0.0.1 -p 1080") || !strings.Contains(got, "--http2") {
+		t.Fatalf("masque2 args: %v", a)
+	}
+	if strings.Contains(strings.Join(m.UsqueArgs("127.0.0.1", "1080", "/tmp/x"), " "), "--http2") {
+		t.Fatal("masque (HTTP/3) must not ask for HTTP/2")
+	}
+	r := strings.Join(UsqueRegisterArgs("/tmp/x"), " ")
+	if !strings.Contains(r, "register -a") || !strings.Contains(r, "-c /tmp/x/config.json") {
+		t.Fatalf("register args: %q", r)
+	}
+}

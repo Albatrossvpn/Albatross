@@ -11,6 +11,7 @@ VERSION="${VERSION:-0.0.0-dev}"
 SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
 XRAY_VERSION="${XRAY_VERSION:-26.10.21}"
 WARPPLUS_VERSION="${WARPPLUS_VERSION:-1.2.6}"
+USQUE_VERSION="${USQUE_VERSION:-4.2.1}"
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
@@ -94,6 +95,18 @@ wpsrc() {
 }
 wptoolchain() { sed -n 's/^toolchain //p' "$1/go.mod" | grep . || echo auto; }
 
+# usque (WARP over MASQUE) has an Android build for 64-bit ARM only; every
+# ABI gets one from its source.
+usqsrc() {
+  local src="$tmp/usque-src"
+  if [ ! -d "$src" ]; then
+    git clone -q --depth 1 --branch "v$USQUE_VERSION" "$gh/Diniboy1123/usque" "$src"
+    (cd "$src" && CGO_ENABLED=0 GOTOOLCHAIN=auto go build -trimpath -buildvcs=false -o "$tmp/usque-host" .)
+    smoke usque "$tmp/usque-host" --help
+  fi
+  echo "$src"
+}
+
 # Cores for each ABI. Android only lets an app run executables that ship as
 # native libraries, hence the lib*.so names. An empty asset name builds that
 # core from source.
@@ -127,6 +140,10 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
     (cd "$wp" && toolchain="$(wptoolchain "$wp")" gobuild "$abi" "$out/libwarpplus.so" -ldflags "-s -w" ./cmd/warp-plus)
     cp "$wp/LICENSE" "$app/src/main/assets/licenses/warp-plus-LICENSE.txt"
   fi
+  local us
+  us="$(usqsrc)"
+  (cd "$us" && gobuild "$abi" "$out/libusque.so" -ldflags "-s -w" .)
+  cp "$us/LICENSE.md" "$app/src/main/assets/licenses/usque-LICENSE.txt"
   chmod 755 "$out"/*.so
 }
 cores arm64-v8a arm64 Xray-android-arm64-v8a.zip warp-plus_android-arm64.zip

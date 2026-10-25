@@ -22,6 +22,7 @@ type Binaries struct {
 	SingBox  string
 	Xray     string
 	WarpPlus string
+	Usque    string // WARP over MASQUE
 	Tor      string
 	// Snowflake is the Snowflake proxy for "Help others" (tools/snowflake).
 	Snowflake string
@@ -61,7 +62,7 @@ func Locate(dirs ...string) Binaries {
 	if tor == "" {
 		tor = find("tor")
 	}
-	return Binaries{SingBox: find("sing-box"), Xray: find("xray"), WarpPlus: find("warp-plus"), Tor: tor, Snowflake: find("snowflake-helper")}
+	return Binaries{SingBox: find("sing-box"), Xray: find("xray"), WarpPlus: find("warp-plus"), Usque: find("usque"), Tor: tor, Snowflake: find("snowflake-helper")}
 }
 
 func fileExists(p string) bool {
