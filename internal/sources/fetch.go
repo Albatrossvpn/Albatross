@@ -104,11 +104,16 @@ func (f *Fetcher) Fetch(ctx context.Context, s Source) Result {
 		}
 		return f.fallback(res, err)
 	default:
-		if proxy != nil {
-			attempts = append(attempts, attempt{"proxy", s.URL, proxy})
+		// Outline dynamic keys name an HTTPS address with their own scheme.
+		url := s.URL
+		if strings.HasPrefix(url, "ssconf://") {
+			url = "https://" + strings.TrimPrefix(url, "ssconf://")
 		}
-		attempts = append(attempts, attempt{"direct", s.URL, f.Direct})
-		for i, m := range Mirrors(s.URL) {
+		if proxy != nil {
+			attempts = append(attempts, attempt{"proxy", url, proxy})
+		}
+		attempts = append(attempts, attempt{"direct", url, f.Direct})
+		for i, m := range Mirrors(url) {
 			c := f.Direct
 			if IsWorker(m) {
 				if c = proxy; c == nil {

@@ -968,6 +968,10 @@ func EachText(text string, fn func(*Node)) (seen int) {
 		}
 		return len(clash)
 	}
+	if n := ParseOutlineJSON(text); n != nil {
+		fn(n)
+		return 1
+	}
 	links := ExtractLinks(text)
 	for _, l := range links {
 		if n, err := ParseLink(l); err == nil {
@@ -1026,4 +1030,35 @@ func (n *Node) WarpPlusArgs(bind, cacheDir string) []string {
 		args = append(args, "--cfon", "--country", n.WPCountry)
 	}
 	return args
+}
+
+// ParseOutlineJSON reads the answer of an Outline dynamic access key
+// (ssconf://host/path, fetched over HTTPS): a JSON object naming one
+// Shadowsocks server. Anything else gives nil.
+func ParseOutlineJSON(text string) *Node {
+	t := strings.TrimSpace(text)
+	if !strings.HasPrefix(t, "{") || len(t) > 1<<16 {
+		return nil
+	}
+	var k struct {
+		Server string `json:"server"`
+		Port   int    `json:"server_port"`
+		Pass   string `json:"password"`
+		Method string `json:"method"`
+		Prefix string `json:"prefix"`
+		Name   string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(t), &k); err != nil || k.Server == "" || k.Port <= 0 || k.Method == "" {
+		return nil
+	}
+	name := k.Name
+	if name == "" {
+		name = "Outline " + k.Server
+	}
+	n := &Node{Proto: "shadowsocks", Name: cleanName(name), Server: k.Server, Port: k.Port, Method: strings.ToLower(k.Method), Password: k.Pass}
+	n.normalize()
+	if n.Validate() != nil {
+		return nil
+	}
+	return n
 }
