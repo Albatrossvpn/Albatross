@@ -185,6 +185,10 @@ func requiredFrom(cur [3]int, mins ...string) bool {
 // manifest; the UI opens the download page instead.
 var ErrNoInAppUpdate = errors.New("no in-app update")
 
+// errUpdating means GetUpdate is already downloading; the caller may try
+// again later.
+var errUpdating = errors.New("already downloading")
+
 // updateKey names this platform's entry in UpdateManifest.Files.
 func updateKey(mobile bool) string {
 	if mobile {
@@ -213,7 +217,7 @@ func (e *Engine) GetUpdate() error {
 	}
 	if e.updating {
 		e.mu.Unlock()
-		return nil
+		return errUpdating
 	}
 	e.updating = true
 	f, version := *u.file, u.Latest
@@ -439,6 +443,12 @@ func (e *Engine) forceUpdate(version string) {
 			e.setStatus(StatusIdle, "Install the new version to connect.")
 			return
 		}
+		// A download the user started (or an earlier call) is still running:
+		// wait for it rather than treating it as done.
+		wait := updateRetry
+		if errors.Is(err, errUpdating) {
+			wait = updatePoll
+		}
 		done := context.Background().Done()
 		if e.ctx != nil {
 			done = e.ctx.Done()
@@ -446,13 +456,14 @@ func (e *Engine) forceUpdate(version string) {
 		select {
 		case <-done:
 			return
-		case <-time.After(updateRetry):
+		case <-time.After(wait):
 		}
 	}
 }
 
-// updateRetry is how long forceUpdate waits after a failed download.
-var updateRetry = 3 * time.Minute
+// updateRetry is how long forceUpdate waits after a failed download, and
+// updatePoll how often it looks again while another download is running.
+var updateRetry, updatePoll = 3 * time.Minute, 5 * time.Second
 
 // updateRequired reports whether this version may no longer connect. A
 // version that downloads its update itself may still connect until the
