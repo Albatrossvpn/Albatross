@@ -399,27 +399,28 @@ func parseStandard(link, scheme string) (*Node, error) {
 
 // vmessJSON is the v2rayN share format. Numbers arrive as strings or numbers.
 type vmessJSON struct {
-	PS          any `json:"ps"`
-	Add         any `json:"add"`
-	Port        any `json:"port"`
-	ID          any `json:"id"`
-	Aid         any `json:"aid"`
-	Scy         any `json:"scy"`
-	Net         any `json:"net"`
-	Type        any `json:"type"`
-	Host        any `json:"host"`
-	Path        any `json:"path"`
-	TLS         any `json:"tls"`
-	SNI         any `json:"sni"`
-	ALPN        any `json:"alpn"`
-	FP          any `json:"fp"`
-	Insecure    any `json:"insecure"`
-	AllowInsec  any `json:"allowInsecure"`
-	SkipVerify  any `json:"skip-cert-verify"`
-	ServiceName any `json:"serviceName"`
-	Mode        any `json:"mode"`
-	PBK         any `json:"pbk"`
-	SID         any `json:"sid"`
+	FM          json.RawMessage `json:"fm"` // Xray finalmask (own servers)
+	PS          any             `json:"ps"`
+	Add         any             `json:"add"`
+	Port        any             `json:"port"`
+	ID          any             `json:"id"`
+	Aid         any             `json:"aid"`
+	Scy         any             `json:"scy"`
+	Net         any             `json:"net"`
+	Type        any             `json:"type"`
+	Host        any             `json:"host"`
+	Path        any             `json:"path"`
+	TLS         any             `json:"tls"`
+	SNI         any             `json:"sni"`
+	ALPN        any             `json:"alpn"`
+	FP          any             `json:"fp"`
+	Insecure    any             `json:"insecure"`
+	AllowInsec  any             `json:"allowInsecure"`
+	SkipVerify  any             `json:"skip-cert-verify"`
+	ServiceName any             `json:"serviceName"`
+	Mode        any             `json:"mode"`
+	PBK         any             `json:"pbk"`
+	SID         any             `json:"sid"`
 }
 
 func str(v any) string {
@@ -503,6 +504,9 @@ func parseVMess(link string) (*Node, error) {
 	}
 	if n.Transport == "kcp" || n.Transport == "mkcp" {
 		n.Seed = n.Path
+	}
+	if len(j.FM) > 0 && j.FM[0] == '{' {
+		n.FinalMask = string(j.FM)
 	}
 	return n, nil
 }

@@ -37,6 +37,10 @@ P_HTTP=80            # VMess (AEAD) + HTTPUpgrade, no TLS: looks like plain HTTP
 # UDP 53 also lands on Hysteria 2: in the June 2025 shutdown it was the
 # only UDP port that still got out.
 P_HY2_DNS=53
+# VMess over mKCP carried in ICMP echo (Xray xicmp): ping is what stays
+# open when both TCP and UDP to foreign addresses are cut. The port only
+# names the mKCP session inside the echo packets.
+P_ICMP=7
 
 log() { echo "== $*" >&2; }
 need_root() { [ "$DRY_RUN" = 1 ] || [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }; }
@@ -91,9 +95,12 @@ secrets() {
       echo "WS_PATH=/$("$SB" generate rand --hex 6)"
       echo "GRPC_NAME=$("$SB" generate rand --hex 6)"
       echo "XHTTP_PATH=/$("$SB" generate rand --hex 6)"
+      echo "KCP_SEED=$("$SB" generate rand --hex 8)"
     } >"$f"
     chmod 600 "$f"
   fi
+  # Servers set up before the ICMP carrier get its seed added.
+  grep -q "^KCP_SEED=" "$f" || echo "KCP_SEED=$("$SB" generate rand --hex 8)" >>"$f"
   # shellcheck disable=SC1090
   . "$f"
 }
@@ -189,6 +196,14 @@ xray_config() {
       "realitySettings": {"target": "$REALITY_DEST:443", "serverNames": ["$REALITY_DEST"],
                           "privateKey": "$REALITY_PRIVATE", "shortIds": ["$SHORT_ID"]}
     }
+  }, {
+    "tag": "icmp", "listen": "0.0.0.0", "port": $P_ICMP, "protocol": "vmess",
+    "settings": {"clients": [{"id": "$UUID"}]},
+    "streamSettings": {
+      "network": "kcp",
+      "kcpSettings": {"seed": "$KCP_SEED", "mtu": 1250, "tti": 50, "header": {"type": "none"}},
+      "finalmask": {"udp": [{"type": "xicmp"}]}
+    }
   }],
   "outbounds": [{"protocol": "freedom", "tag": "direct"},
                 {"protocol": "blackhole", "tag": "block"}],
@@ -245,6 +260,9 @@ firewall() {
     iptables -t nat -C PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null ||
       iptables -t nat -A PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2"
   done
+  # The ICMP carrier: echo requests must get in (the cloud's security
+  # list too).
+  iptables -C INPUT -p icmp --icmp-type echo-request -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp --icmp-type echo-request -j ACCEPT
   netfilter-persistent save >/dev/null 2>&1 || true
   # Faster on lossy, long routes such as Iran to Europe.
   cat >/etc/sysctl.d/90-albatross.conf <<EOF
@@ -267,6 +285,7 @@ vless://$UUID@$DOMAIN:$P_WS?security=tls&sni=$DOMAIN&fp=chrome&type=ws&host=$DOM
 vless://$UUID@$DOMAIN:$P_GRPC?security=tls&sni=$DOMAIN&fp=chrome&type=grpc&serviceName=$GRPC_NAME#$n-gRPC
 $(vmess_link "$DOMAIN" "$P_UPGRADE" tls Albatross-HTTPUpgrade)
 $(vmess_link "$h" "$P_HTTP" "" Albatross-HTTP80)
+$(vmess_link "$h" "$P_ICMP" "" Albatross-ICMP icmp)
 anytls://$PASS@$DOMAIN:$P_ANYTLS?sni=$DOMAIN#$n-AnyTLS
 ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_SS#$n-SS2022
 hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS&mport=$P_HY2_DNS,$hop#$n-Hysteria2
@@ -276,14 +295,18 @@ EOF
 
 urlenc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$1"; }
 
-# vmess_link host port tls|"" name. Without TLS the content is still
-# encrypted end to end by VMess's AEAD; only the outer layer is plain HTTP.
+# vmess_link host port tls|"" name [icmp]. Without TLS the content is still
+# encrypted end to end by VMess's AEAD; only the outer layer is plain HTTP
+# (or, for icmp, mKCP inside ICMP echo packets, which the app's Xray reads
+# through the fm field).
 vmess_link() {
-  python3 - "$UUID" "$1" "$2" "$WS_PATH" "$3" "$4" <<'PY'
+  python3 - "$UUID" "$1" "$2" "$WS_PATH" "$3" "$4" "${5:-}" "$KCP_SEED" <<'PY'
 import base64, json, sys
-uuid, host, port, path, tls, name = sys.argv[1:]
+uuid, host, port, path, tls, name, carrier, seed = sys.argv[1:]
 v = {"v": "2", "ps": name, "add": host, "port": port, "id": uuid, "aid": "0",
      "scy": "aes-128-gcm", "net": "httpupgrade", "host": host, "path": path, "tls": tls}
+if carrier == "icmp":
+    v.update(net="kcp", type="none", path=seed, host="", fm={"udp": [{"type": "xicmp"}]})
 if tls:
     v.update(sni=host, fp="chrome")
 print("vmess://" + base64.b64encode(json.dumps(v, separators=(",", ":")).encode()).decode())

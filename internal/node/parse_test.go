@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/base64"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -269,5 +270,31 @@ func TestParseSSH(t *testing.T) {
 	}
 	if _, err := ParseLink("ssh://1.2.3.4:22"); err == nil {
 		t.Fatal("a link without a user must not parse")
+	}
+}
+
+func TestVMessICMPCarrier(t *testing.T) {
+	j := `{"v":"2","ps":"Albatross-ICMP","add":"203.0.113.9","port":"7","id":"007a5c24-cdbe-4adc-a79f-ca2768fef8bb","aid":"0","scy":"aes-128-gcm","net":"kcp","type":"none","path":"abcd1234","host":"","tls":"","fm":{"udp":[{"type":"xicmp"}]}}`
+	n := mustParse(t, "vmess://"+base64.StdEncoding.EncodeToString([]byte(j)))
+	if n.Transport != "kcp" || n.Seed != "abcd1234" || n.FinalMask == "" {
+		t.Fatalf("kcp seed or finalmask lost: %+v", n)
+	}
+	if n.Engine() != EngineXray {
+		t.Fatalf("an mKCP node runs on Xray, got %v", n.Engine())
+	}
+	s := n.xrayStream()
+	k, _ := s["kcpSettings"].(map[string]any)
+	if k == nil || k["seed"] != "abcd1234" {
+		t.Fatalf("kcp settings: %v", s)
+	}
+	fm, _ := s["finalmask"].(map[string]any)
+	udp, _ := fm["udp"].([]any)
+	if len(udp) != 1 {
+		t.Fatalf("finalmask: %v", s)
+	}
+	mask := udp[0].(map[string]any)
+	settings, _ := mask["settings"].(map[string]any)
+	if mask["type"] != "xicmp" || settings == nil || settings["dgram"] != (runtime.GOOS != "windows") {
+		t.Fatalf("xicmp mask: %v", mask)
 	}
 }

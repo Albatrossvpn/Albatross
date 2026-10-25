@@ -2,6 +2,7 @@ package node
 
 import (
 	"encoding/json"
+	"runtime"
 	"strings"
 )
 
@@ -234,6 +235,7 @@ func (n *Node) xrayStream() map[string]any {
 	if n.FinalMask != "" {
 		var fm map[string]any
 		if json.Unmarshal([]byte(n.FinalMask), &fm) == nil {
+			fixICMPMask(fm)
 			s["finalmask"] = fm
 		}
 	}
@@ -298,4 +300,23 @@ func itoa(i int) string {
 		b[p] = '-'
 	}
 	return string(b[p:])
+}
+
+// fixICMPMask sets how the xicmp mask opens its socket: a datagram ICMP
+// socket needs no privilege on Linux and Android, while Windows only has
+// raw sockets (the app runs elevated there when it protects the device).
+func fixICMPMask(fm map[string]any) {
+	udp, _ := fm["udp"].([]any)
+	for _, m := range udp {
+		mask, _ := m.(map[string]any)
+		if mask == nil || mask["type"] != "xicmp" {
+			continue
+		}
+		settings, _ := mask["settings"].(map[string]any)
+		if settings == nil {
+			settings = map[string]any{}
+			mask["settings"] = settings
+		}
+		settings["dgram"] = runtime.GOOS != "windows"
+	}
 }
