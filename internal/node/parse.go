@@ -20,7 +20,7 @@ var schemes = []string{
 	"tuic://", "wireguard://", "wg://", "anytls://", "socks5://", "socks://", "socks4://",
 }
 
-var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|ssr?|hysteria2|hy2|hysteria|tuic|wireguard|wg|anytls|socks5?|socks4)://`)
+var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|anytls|socks5?|socks4)://`)
 
 // ErrUnsupported marks links that parse but cannot be run by any core.
 var ErrUnsupported = errors.New("unsupported")
@@ -174,6 +174,8 @@ func ParseLink(link string) (*Node, error) {
 		n, err = parseAnyTLS(link)
 	case "wireguard", "wg":
 		n, err = parseWireGuard(link)
+	case "ssh":
+		return parseSSH(link)
 	case "socks", "socks5":
 		n, err = parseSocks(link)
 	case "albatross":
@@ -1061,4 +1063,32 @@ func ParseOutlineJSON(text string) *Node {
 		return nil
 	}
 	return n
+}
+
+// parseSSH reads ssh://user:password@host:port?hk=<host key>#name, the
+// form sing-box runs as an ssh outbound: the connection is a plain SSH
+// session whose port forwarding carries the traffic. hk, optional, is the
+// server's public host key ("ssh-ed25519 AAAA..."); without it any key is
+// accepted, as with a first connection in a terminal.
+func parseSSH(link string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{Proto: "ssh", Name: cleanName(u.fragment), Server: u.host, Port: atoi(u.port)}
+	if n.Port == 0 {
+		n.Port = 22
+	}
+	user := unescape(u.user)
+	if !strings.Contains(user, ":") {
+		if dec, err := decodeB64(user); err == nil && strings.Contains(string(dec), ":") {
+			user = string(dec)
+		}
+	}
+	n.Username, n.Password, _ = strings.Cut(user, ":")
+	if n.Username == "" || n.Password == "" {
+		return nil, fmt.Errorf("ssh link needs user:password")
+	}
+	n.HostKey = firstNonEmpty(u.query["hk"], u.query["host_key"], u.query["hostkey"])
+	return n, nil
 }

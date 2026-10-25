@@ -118,6 +118,14 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 		n.sbServer(out)
 		out["password"] = n.Password
 		out["tls"] = n.sbTLS(o)
+	case "ssh":
+		out["type"] = "ssh"
+		n.sbServer(out)
+		out["user"] = n.Username
+		out["password"] = n.Password
+		if n.HostKey != "" {
+			out["host_key"] = []string{n.HostKey}
+		}
 	case "socks":
 		out["type"] = "socks"
 		n.sbServer(out)
