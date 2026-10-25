@@ -28,8 +28,10 @@ permissions:
   contents: write
 
 # A newer push to the same pull request or branch makes the older run moot.
+# A release has a group of its own: a push or the nightly run on main would
+# otherwise cancel it while it waits.
 concurrency:
-  group: build-${{ github.ref }}
+  group: ${{ inputs.release != '' && format('release-{0}', inputs.release) || format('build-{0}', github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -68,6 +70,28 @@ jobs:
           go vet ./...
           GOOS=windows go vet ./...
           test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - name: Build-time variables exist
+        # -X skips a name that moved without a word: a release would then
+        # connect without an account or the project's own servers.
+        run: |
+          mod="$(go list -m)"
+          for x in $(grep -ho -- '-X [^ ="]*' build/package.sh build/android/build.sh | cut -c4- | sort -u); do
+            case "$x" in
+              main.*) x="$mod/cmd/albatross.${x#main.}" ;; # package.sh builds ./cmd/albatross
+              "$mod"/*) ;;
+              *) continue ;; # another module's (the cores')
+            esac
+            go doc -u "$x" | grep -q '^var ' || { echo "::error::$x, set with -X by the build scripts, is not a variable any more."; exit 1; }
+            echo "found $x"
+          done
+      - name: The page runs on old WebViews
+        # Android 6's WebView is Chrome 44: one newer piece of syntax and the
+        # page stays blank. old-webview.js tells such users what to update,
+        # so it must run on anything. The page's policy blocks inline scripts.
+        run: |
+          npx --yes acorn@8.19.0 --ecma5 --silent internal/ui/web/app.js
+          npx --yes acorn@8.19.0 --ecma3 --silent internal/ui/web/old-webview.js
+          ! grep -nE '<script>|\son[a-z]+=' internal/ui/web/index.html || { echo "::error::index.html has an inline script or event handler."; exit 1; }
       - name: Collector smoke test
         run: go run ./cmd/collect -limit 6 -probe=false -out /tmp/collect && cat /tmp/collect/meta.json
       - name: Download cores for end-to-end tests
@@ -120,8 +144,15 @@ jobs:
         env:
           RELEASE: ${{ inputs.release }}
         run: |
-          if [[ "$RELEASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then v="$RELEASE"
+          if [ -n "$RELEASE" ]; then v="$RELEASE"
           elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF#refs/tags/v}"; else v="0.1.0-dev.${GITHUB_RUN_NUMBER}"; fi
+          # A release named otherwise ("v0.3.4", "0.3") would still be
+          # published and marked latest, and installed copies cannot
+          # compare it.
+          if { [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; } && ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::A release version must be three numbers like 0.3.4, with no v or spaces."
+            exit 1
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Package
         env:
@@ -134,6 +165,9 @@ jobs:
           # Releases ask users to sign in (backend/); test builds connect
           # without an account.
           if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            # Without it a release cannot open the project's own servers.
+            # Both platforms embed it, and every later job needs this one.
+            [ -n "$OWN_KEY" ] || { echo "::error::A release needs the OWN_KEY secret."; exit 1; }
             ACCOUNT_URL="$(bash build/account-url.sh)"
             export ACCOUNT_URL
           fi
@@ -197,12 +231,34 @@ jobs:
             export ALBATROSS_KEYSTORE="$RUNNER_TEMP/albatross.jks"
           fi
           bash build/android/build.sh
-          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging dist/*arm64-v8a.apk | head -3
+          apk="$(ls dist/*-android.apk)"
+          # A release's sign-in is not tried on the emulators: look for the
+          # address in the engine itself (counts only, the address stays out
+          # of the log). The linker keeps it once however many -X names
+          # carry it, so this only shows that it got in at all; the test
+          # job checks that each name still exists.
+          if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            for abi in arm64-v8a armeabi-v7a; do
+              n="$(unzip -p "$apk" "lib/$abi/libgojni.so" | grep -acF -- "$ACCOUNT_URL" || true)"
+              echo "$abi engine: account service address found ${n:-0} times"
+              [ "${n:-0}" -gt 0 ] || { echo "::error::The $abi engine has no account service address."; exit 1; }
+            done
+          fi
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          "$tools/aapt2" dump badging "$apk" | grep -E "^(package|sdkVersion|native-code)"
+          # Android 6 knows only the v1 scheme, 7 and 8 v2, 9 and later v3
+          # (which also lets a future key replace this one).
+          "$tools/apksigner" verify --verbose --min-sdk-version 23 "$apk" | tee "$RUNNER_TEMP/sig.txt"
+          want="v1 v2"
+          [ -n "$KEYSTORE_BASE64" ] && want="v1 v2 v3"
+          for v in $want; do
+            grep -q "Verified using $v scheme.*: true" "$RUNNER_TEMP/sig.txt" || { echo "::error::The APK has no $v signature."; exit 1; }
+          done
           # Which key signed it: the release key's digest stays the same
           # from one version to the next.
-          signer="$("$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist/*arm64-v8a.apk | grep -m1 'SHA-256' | awk '{print $NF}')"
+          signer="$("$tools/apksigner" verify --print-certs "$apk" | grep -m1 'SHA-256' | awk '{print $NF}')"
           echo "APK signer SHA-256: $signer"
-          echo "- APK signer SHA-256: \`$signer\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- APK signer SHA-256: \`$signer\`, signed with $want, $(du -m "$apk" | cut -f1) MB" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: Albatross-android-${{ env.VERSION }}
@@ -214,7 +270,7 @@ jobs:
       # is the proof for it.
       - name: Debuggable build for the emulator
         if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
-        run: cd android && ./gradlew --no-daemon -q assembleDebug
+        run: cd android && ABIS=x86_64 ./gradlew --no-daemon -q assembleDebug
       - name: Enable KVM
         if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -228,6 +284,31 @@ jobs:
           api-level: 34
           arch: x86_64
           target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash build/android/selftest.sh
+      # Android 8 to 11 forbid apps some system calls (a forbidden one
+      # used to kill the app as soon as it started a core).
+      - name: Connect on an Android 11 emulator
+        if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash build/android/selftest.sh
+      # The oldest Android the app supports.
+      - name: Connect on an Android 6 emulator
+        if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
+        uses: reactivecircus/android-emulator-runner@v2.38.0
+        with:
+          api-level: 23
+          arch: x86_64
+          target: google_apis
+          # Its data partition is too small for the app otherwise.
+          disk-size: 2048M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           script: bash build/android/selftest.sh
@@ -339,40 +420,39 @@ jobs:
           name: Albatross-Setup-${{ env.VERSION }}
           path: dist/Albatross-Setup-*.exe
           retention-days: 7
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ env.VERSION }}
-          target_commitish: ${{ github.sha }}
-          files: dist/Albatross-Setup-*.exe
-          generate_release_notes: true
 
-  # The installer job creates the release; this adds the APK to it, so two
-  # jobs never race to create it.
+  # Only this job publishes the release, once every build and test passed,
+  # so a platform that failed never ships half a release marked latest.
   release-assets:
     if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
-    needs: [build, installer, android]
+    needs: [backend, test, build, installer, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: Albatross-android-${{ needs.build.outputs.version }}
           path: dist
-      # One download per platform: the Windows installer (added by the
-      # installer job) and one Android APK for 64-bit ARM phones. The x86_64
-      # APK is only for the emulator test.
+      - uses: actions/download-artifact@v4
+        with:
+          name: Albatross-Setup-${{ needs.build.outputs.version }}
+          path: dist
+      # One download per platform: the Windows installer and one Android
+      # APK for every phone.
       - name: Name the APK
-        run: mv dist/*-android-arm64-v8a.apk "Albatross-${{ needs.build.outputs.version }}-android.apk"
+        run: mv dist/*-android.apk "Albatross-${{ needs.build.outputs.version }}-android.apk"
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.build.outputs.version }}
+          target_commitish: ${{ github.sha }}
           # 0.3.1 and earlier were signed with a throwaway key; Android
           # installs the first build signed with the release key only after
           # the old app is removed.
           body: |
-            Android: if you have 0.3.1 or older, uninstall it before installing this version (one time only). Later updates install over it.
-          files: Albatross-*-android.apk
+            Android: one APK for every phone, Android 6 and newer, 64 and 32-bit. If you have 0.3.1 or older, uninstall it before installing this version (one time only). Later updates install over it.
+          fail_on_unmatched_files: true
+          files: |
+            Albatross-*-android.apk
+            dist/Albatross-Setup-*.exe
       - uses: actions/checkout@v4
         with:
           ref: main
@@ -388,15 +468,18 @@ jobs:
         run: |
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" > rel.json
           python3 - <<'PY'
-          import json, os
+          import json, os, re, sys
           v = os.environ["VERSION"]
           rel = json.load(open("rel.json"))
-          keys = {"-android.apk": "android-arm64-v8a", "Setup-": "windows"}
+          # The one APK serves every ABI; 0.3.3 and earlier read only the
+          # arm64-v8a entry.
+          keys = {"-android.apk": ["android-arm64-v8a", "android-armeabi-v7a"], "Setup-": ["windows"]}
           files = {}
           for a in rel["assets"]:
-              for part, key in keys.items():
+              for part, names in keys.items():
                   if part in a["name"] and (a.get("digest") or "").startswith("sha256:"):
-                      files[key] = {"urls": [a["browser_download_url"]], "sha256": a["digest"][7:]}
+                      for key in names:
+                          files[key] = {"urls": [a["browser_download_url"]], "sha256": a["digest"][7:]}
           path = "repo/update.json"
           m = json.load(open(path))
           m["latest_version"] = v
@@ -407,21 +490,43 @@ jobs:
           # text), how to reinstall.
           apk = files.get("android-arm64-v8a", {}).get("urls", [""])[0]
           page = "https://github.com/" + os.environ["GITHUB_REPOSITORY"] + "/releases/latest"
+          # Every platform opens download_url when it cannot update itself
+          # (0.3.0 and 0.3.1 always, Windows without files.windows), so it
+          # is the releases page, never one platform's file.
+          m["download_url"] = page
           if os.environ["FORCE"] == "true":
+              # A forced update with a platform's file missing would cut
+              # those users off with nothing to update to.
+              bad = [k for k in ("android-arm64-v8a", "android-armeabi-v7a", "windows")
+                     if not re.fullmatch(r"[0-9a-fA-F]{64}", files.get(k, {}).get("sha256", ""))
+                     or not files[k]["urls"][0].startswith("https://")]
+              if bad:
+                  print("::error::Not forcing the update: no file or SHA-256 for " + ", ".join(bad))
+                  sys.exit(1)
               m["require"] = v
               m["min_version"] = v
-              if apk:
-                  m["download_url"] = apk
+          steps = ("1) Uninstall Albatross. "
+                   f"2) Download the new version with Get the update, or open {apk or page} in your browser "
+                   f"(Windows: Albatross-Setup-{v}.exe from {page}). "
+                   "3) Install it and sign in with the username and password you were given. "
+                   "Later updates install from inside the app.")
+          # The newest version still required, by this release or an earlier
+          # forced one: copies older than it no longer connect.
+          ver = lambda s: tuple(map(int, s.split("."))) if re.fullmatch(r"\d+\.\d+\.\d+", s or "") else (0, 0, 0)
+          need = max(m.get("min_version"), m.get("require"), key=ver)
           if os.environ.get("MESSAGE"):
               m["message"] = os.environ["MESSAGE"]
           elif os.environ["FORCE"] == "true":
-              m["message"] = (
-                  f"Albatross {v} is required and this version no longer connects. "
-                  "If the app does not update by itself: 1) Uninstall Albatross. "
-                  f"2) Download the new version with Get the update, or open {apk or page} in your browser "
-                  f"(Windows: Albatross-Setup-{v}.exe from {page}). "
-                  "3) Install it and sign in with the username and password you were given. "
-                  "Later updates install from inside the app.")
+              m["message"] = (f"Albatross {v} is required and this version no longer connects. "
+                              "If the app does not update by itself: " + steps)
+          elif ver(need) > (0, 0, 0):
+              # The copies an earlier release cut off still need the steps;
+              # the others see this with an offer they may skip.
+              m["message"] = (f"Albatross {v} is out. Versions older than {need} no longer connect; "
+                              "if yours is one of them and does not update by itself: " + steps)
+          else:
+              # The last release's words would describe the wrong version.
+              m.pop("message", None)
           m["files"] = files
           with open(path, "w") as f:
               json.dump(m, f, indent=2)

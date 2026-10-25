@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package core
 
@@ -8,9 +8,7 @@ import (
 	"syscall"
 )
 
-func hideWindow(cmd *exec.Cmd) {
-	setPdeathsig(cmd)
-}
+func hideWindow(*exec.Cmd) {}
 
 func attachToJob(*os.Process) {}
 
