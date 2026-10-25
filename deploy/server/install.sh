@@ -15,8 +15,8 @@
 # with them.
 set -euo pipefail
 
-SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.3}"
-XRAY_VERSION="${XRAY_VERSION:-26.9.30}"
+SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
+XRAY_VERSION="${XRAY_VERSION:-26.10.21}"
 DRY_RUN="${DRY_RUN:-0}"
 OUT="${OUT:-/etc/albatross}"
 REALITY_DEST="${REALITY_DEST:-www.microsoft.com}"
