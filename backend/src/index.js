@@ -46,6 +46,10 @@ function randomUsernameSuffix() {
 }
 
 export default {
+  // Hourly: users' reports about servers, summed for the collector.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(publishCrowdServers(env));
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/list/")) return mirror(request, url, env);
@@ -86,6 +90,7 @@ async function route(request, env, url) {
     case "PUT admin/settings": return adminSaveSettings(request, env);
     case "POST admin/files": return adminPullFile(request, env);
     case "POST stats": return crowdReport(request, env);
+    case "POST admin/crowd/publish": return adminPublishCrowd(request, env);
     case "GET stats": return crowdSummary(request, env, url);
   }
   const list = path.match(/^admin\/list\/(.+)$/);
@@ -628,6 +633,37 @@ async function adminSaveSettings(request, env) {
 // address is stored: the rate limit keeps only a keyed hash of it, for a day.
 
 const CROWD_KINDS = { proto: 16, style: 32, hello: 16, port: 8 };
+// Per-server reports: at most this many servers per report, kept this
+// many days, and summed over the last few for the collector.
+const CROWD_SERVERS = 300;
+const CROWD_SERVER_DAYS = 7;
+const CROWD_SERVER_WINDOW = 3;
+
+/** Sums users' reports about servers over the last days into crowd.json for the collector (cmd/collect -crowd). */
+export function crowdServersSummary(rows, today) {
+  const servers = {};
+  for (const r of rows) servers[r.key] = [r.ok, r.n];
+  return { updated: new Date(today * DAY * 1000).toISOString(), days: CROWD_SERVER_WINDOW, servers };
+}
+
+async function publishCrowdServers(env) {
+  if (!env.FILES) return null;
+  const today = Math.floor(now() / DAY);
+  const { results } = await env.DB.prepare(
+    "SELECT key, SUM(ok) AS ok, SUM(n) AS n FROM crowd_servers WHERE day >= ?1 GROUP BY key HAVING SUM(n) >= 2",
+  ).bind(today - CROWD_SERVER_WINDOW).all();
+  const summary = crowdServersSummary(results, today);
+  await putList(env.FILES, "servers/crowd.json", new TextEncoder().encode(JSON.stringify(summary)).buffer);
+  return summary;
+}
+
+/** The administrator (or a test) publishes the summary now instead of at the hour. */
+async function adminPublishCrowd(request, env) {
+  await authAdmin(request, env);
+  const summary = await publishCrowdServers(env);
+  if (!summary) throw new HttpError(503, "No file storage is bound.");
+  return json({ servers: Object.keys(summary.servers).length });
+}
 const CROWD_DAYS = 14;
 // An operator's numbers are published only once this many reports came in,
 // so no one report can be told apart.
@@ -650,6 +686,18 @@ async function crowdReport(request, env) {
       rows.push([kind, code, Math.round(ok * scale), Math.round(n * scale)]);
     }
   }
+  // Per server: [key, ok, n], the key a 64-bit hash in hex (no address).
+  const servers = b.servers ?? [];
+  if (!Array.isArray(servers) || servers.length > CROWD_SERVERS) throw new HttpError(400, "Bad request.");
+  const srows = [];
+  for (const r of servers) {
+    if (!Array.isArray(r) || r.length !== 3 || typeof r[0] !== "string" || !/^[0-9a-f]{1,16}$/.test(r[0])) throw new HttpError(400, "Bad request.");
+    const [key, ok, n] = r;
+    if (!Number.isInteger(ok) || !Number.isInteger(n) || n < 1 || ok < 0 || ok > n) throw new HttpError(400, "Bad request.");
+    // One report counts for at most 20 tests of a server.
+    const scale = Math.min(1, 20 / n);
+    srows.push([key, Math.round(ok * scale), Math.round(n * scale)]);
+  }
   const limit = "stats:" + (await clientTag(request, env));
   if (await blocked(env, limit, 6, DAY)) throw new HttpError(429, "Too many reports.");
   await count(env, limit, DAY);
@@ -659,6 +707,13 @@ async function crowdReport(request, env) {
       `INSERT INTO crowd (asn, kind, code, day, ok, n) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
        ON CONFLICT (asn, kind, code, day) DO UPDATE SET ok = ok + ?5, n = n + ?6`,
     ).bind(asn, kind, code, day, ok, n));
+  for (const [key, ok, n] of srows) {
+    stmts.push(env.DB.prepare(
+      `INSERT INTO crowd_servers (key, day, ok, n) VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT (key, day) DO UPDATE SET ok = ok + ?3, n = n + ?4`,
+    ).bind(key, day, ok, n));
+  }
+  stmts.push(env.DB.prepare("DELETE FROM crowd_servers WHERE day < ?1").bind(day - CROWD_SERVER_DAYS));
   stmts.push(
     env.DB.prepare(
       `INSERT INTO crowd_reports (asn, day, reports) VALUES (?1, ?2, 1)

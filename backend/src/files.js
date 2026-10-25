@@ -36,7 +36,7 @@ export function parseRange(h, size) {
  * offered from the same place).
  * They live under list/ in the bucket and are served at /list/<path>.
  */
-export const LIST_PATH = /^(servers\/(hot\.txt|new\.txt|fresh\.txt|all-[1-8]\.txt|tor\.json|meta\.json)|main\/update\.json|rules\/(ads\.srs|ads\.json|README\.md|LICENSE-GPL-3\.0\.txt|LICENSE-AGPL-3\.0\.txt))$/;
+export const LIST_PATH = /^(servers\/(hot\.txt|new\.txt|fresh\.txt|all-[1-8]\.txt|tor\.json|meta\.json|crowd\.json)|main\/update\.json|rules\/(ads\.srs|ads\.json|README\.md|LICENSE-GPL-3\.0\.txt|LICENSE-AGPL-3\.0\.txt))$/;
 
 /** The most a published list may weigh (the largest is about 6 MB). */
 export const MAX_LIST = 32 * 1024 * 1024;

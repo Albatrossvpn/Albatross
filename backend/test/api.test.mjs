@@ -280,6 +280,24 @@ test("crowd stats: operators appear after three reports; bad reports are refused
   if (mine.asn !== 58224) assert.equal(mine.asns["58224"], undefined, "asn=self gives only the asker's network");
 });
 
+test("users' reports about servers are summed for the collector", async () => {
+  const body = { asn: 44244, proto: [[2, 3, 4]], servers: [["1a2b", 3, 3], ["ffff", 0, 6]] };
+  assert.equal((await call("POST", "stats", { body, ip: "5.5.5.1" })).status, 200);
+  assert.equal((await call("POST", "stats", { body: { asn: 1, servers: [["zz", 1, 1]] }, ip: "5.5.5.2" })).status, 400, "a key is hex");
+  assert.equal((await call("POST", "stats", { body: { asn: 1, servers: [["1a2b", 2, 1]] }, ip: "5.5.5.3" })).status, 400, "passes within tests");
+  assert.equal((await call("POST", "stats", { body: { asn: 44244, servers: [["1a2b", 1, 2]] }, ip: "5.5.5.4" })).status, 200);
+  assert.equal((await call("POST", "admin/crowd/publish")).status, 401);
+  const pub = await call("POST", "admin/crowd/publish", { token: admin });
+  assert.equal(pub.status, 200);
+  assert.equal(pub.body.servers, 2);
+  const f = await fetch(BASE + "/list/servers/crowd.json");
+  assert.equal(f.status, 200);
+  const j = await f.json();
+  assert.deepEqual(j.servers["1a2b"], [4, 5]);
+  assert.deepEqual(j.servers.ffff, [0, 6]);
+  assert.equal(j.days, 3);
+});
+
 test("pages are served; unknown API paths are 404", async () => {
   const home = await fetch(BASE + "/");
   assert.equal(home.status, 200);
