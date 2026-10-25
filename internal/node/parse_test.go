@@ -387,3 +387,18 @@ func TestVMessDNSTunnel(t *testing.T) {
 		t.Fatalf("engine %v", n.Engine())
 	}
 }
+
+func TestDirectMethod(t *testing.T) {
+	n := Direct()
+	if n.Engine() != EngineSingBox {
+		t.Fatalf("direct runs on sing-box, got %v", n.Engine())
+	}
+	out, ep := n.SingBox("d", SingBoxOptions{})
+	if ep || out["type"] != "direct" || out["tls_fragment"] != true || out["tls_record_fragment"] != true {
+		t.Fatalf("bad outbound: %v", out)
+	}
+	back, err := ParseLink(n.Link())
+	if err != nil || back.Proto != "direct" || back.Key() != n.Key() {
+		t.Fatalf("round trip: %v %+v", err, back)
+	}
+}

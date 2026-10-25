@@ -33,7 +33,7 @@ func helloIndex(fp string) int {
 
 // helloable reports whether the app may pick n's ClientHello.
 func helloable(n *node.Node) bool {
-	return n.Fingerprint == "" && (n.Security == "tls" || n.Security == "reality") && !n.UDPBased() && n.Proto != "warpplus"
+	return n.Fingerprint == "" && (n.Security == "tls" || n.Security == "reality") && !n.UDPBased() && !n.NoEndpoint()
 }
 
 // pickHello returns the hello to test with: usually the best on this
