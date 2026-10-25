@@ -193,7 +193,7 @@ printf "The engine's root certificates are Mozilla's (https://wiki.mozilla.org/C
 go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target=android/arm64,android/arm,android/amd64 -androidapi "$api" \
   -javapkg app.albatross -trimpath \
-  -ldflags "-s -w -X github.com/cezomagoanlace29861-jpg/vp/mobile.Version=$VERSION -X github.com/cezomagoanlace29861-jpg/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/cezomagoanlace29861-jpg/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/cezomagoanlace29861-jpg/vp/internal/sources.WorkerMirror=${ACCOUNT_URL:-}" \
+  -ldflags "-s -w -X github.com/Albatrossvpn/vp/mobile.Version=$VERSION -X github.com/Albatrossvpn/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/Albatrossvpn/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.WorkerMirror=${ACCOUNT_URL:-}" \
   -o "$app/libs/albatross.aar" ./mobile
 
 cd "$root/android"

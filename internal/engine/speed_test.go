@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/core"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // TestSpeedRoundMovesOffSlowServer runs a real core in front of three local

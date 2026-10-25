@@ -1,4 +1,4 @@
-module github.com/cezomagoanlace29861-jpg/vp/tools/snowflake
+module github.com/Albatrossvpn/vp/tools/snowflake
 
 go 1.26.10
 

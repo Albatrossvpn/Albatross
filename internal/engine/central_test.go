@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // While the collector's list downloads, the other built-in sources are left

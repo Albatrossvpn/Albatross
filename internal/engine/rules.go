@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // Rule sets shipped with the app so routing works offline from the first
@@ -30,7 +30,7 @@ var ruleSets = map[string]string{
 	// Built every day from the big free lists (.github/workflows/adblock.yml).
 	// The copy shipped with the app is a smaller one (Chocolate4U's, with the
 	// same allowlist), used until the first download.
-	"ads.srs": "https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/rules/ads.srs",
+	"ads.srs": "https://raw.githubusercontent.com/Albatrossvpn/Albatross/rules/ads.srs",
 }
 
 // installRules writes the bundled rule sets unless a newer copy exists.

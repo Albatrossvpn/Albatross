@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/engine"
+	"github.com/Albatrossvpn/vp/internal/engine"
 )
 
 //go:embed web

@@ -22,9 +22,9 @@ import (
 
 	"golang.org/x/net/dns/dnsmessage"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/core"
+	"github.com/Albatrossvpn/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // The local proxy gets a login wherever only the app itself uses it, and

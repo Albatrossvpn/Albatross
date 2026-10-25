@@ -6,7 +6,7 @@ Only the latest release is supported. Installed copies read `update.json`
 from the `main` branch; when a release fixes a security problem it is
 published as a forced update, so older versions stop connecting and tell
 their users to update. Please check that a problem is still present in the
-[latest release](https://github.com/cezomagoanlace29861-jpg/Albatross/releases/latest)
+[latest release](https://github.com/Albatrossvpn/Albatross/releases/latest)
 before reporting it.
 
 ## Reporting a vulnerability
@@ -15,7 +15,7 @@ Please report security problems privately, not in a public issue, so that a
 fix can reach users before the problem is known:
 
 - Open a private report on GitHub: **Security → Report a vulnerability**
-  ([direct link](https://github.com/cezomagoanlace29861-jpg/Albatross/security/advisories/new)).
+  ([direct link](https://github.com/Albatrossvpn/Albatross/security/advisories/new)).
 - Say which version and platform (Windows or Android) you used, how to
   reproduce the problem, and what an attacker could do with it.
 - Reports about the account service and website (`backend/`) are welcome
