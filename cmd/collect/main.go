@@ -190,11 +190,13 @@ func main() {
 	report := flag.String("report", "", "with -hot-from: write this run's results in the report form to this file (for a tester inside the country, deploy/tester)")
 	tester := flag.String("tester", "", "the tester's name in -report (for example iran)")
 	discover := flag.String("discover", "", "find more sources (GitHub search with GITHUB_TOKEN, mentions in known lists and channels) and write sources.txt, channels.txt and discover.json to this directory; nothing else is done")
+	discoverPrev := flag.String("discover-prev", "", "with -discover: the directory holding the previous run's sources.txt, channels.txt and discover.json, checked again and kept while they answer")
+	discoverMinutes := flag.Int("discover-minutes", 40, "with -discover: stop looking after this many minutes and write what was found")
 	extraSubs := flag.String("sources", "", "a discovered sources.txt to read beside the shipped lists")
 	extraTG := flag.String("channels", "", "a discovered channels.txt to read beside the shipped lists")
 	flag.Parse()
 	if *discover != "" {
-		runDiscover(context.Background(), *discover, os.Getenv("GITHUB_TOKEN"))
+		runDiscover(context.Background(), *discover, *discoverPrev, os.Getenv("GITHUB_TOKEN"), *discoverMinutes)
 		return
 	}
 	crowd := loadCrowd(*crowdPath)

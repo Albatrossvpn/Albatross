@@ -1,15 +1,17 @@
 name: Discover sources
 
 # Finds more sources for the collector (cmd/collect -discover): GitHub code
-# search for every link scheme, repository search, and the lists and
-# channels mentioned inside the known ones; keeps those that hold servers
-# and publishes sources.txt and channels.txt into the project's own
-# storage, where the collector reads them. Weekly, within a private
-# repository's free minutes; run it by hand to refresh sooner.
+# search for every link scheme, repository search, the web at large
+# (search engines, Reddit, GitLab, Codeberg, a slice of the queries each
+# hour) and the lists and channels mentioned inside the known ones; keeps
+# those that hold servers and publishes sources.txt and channels.txt into
+# the project's own storage, where the collector reads them. Hourly, each
+# run checking the last run's finds again (a source is dropped after a
+# day without servers) and looking for about 40 minutes.
 on:
   workflow_dispatch:
   schedule:
-    - cron: "41 2 * * 0"
+    - cron: "17 * * * *"
 
 permissions:
   contents: read
@@ -21,19 +23,12 @@ concurrency:
 jobs:
   discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 58
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Discover
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          go run ./cmd/collect -discover "$RUNNER_TEMP/discovered"
-          cat "$RUNNER_TEMP/discovered/discover.json"
-          wc -l "$RUNNER_TEMP"/discovered/*.txt
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -41,6 +36,25 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
         working-directory: backend
+      - name: The previous run's finds
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: backend
+        run: |
+          mkdir -p "$RUNNER_TEMP/prev"
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            for f in sources.txt channels.txt discover.json; do
+              npx wrangler r2 object get "albatross-files/list/servers/$f" --file "$RUNNER_TEMP/prev/$f" --remote || echo "::notice::no previous $f"
+            done
+          fi
+      - name: Discover
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          go run ./cmd/collect -discover "$RUNNER_TEMP/discovered" -discover-prev "$RUNNER_TEMP/prev" -discover-minutes 40
+          cat "$RUNNER_TEMP/discovered/discover.json"
+          wc -l "$RUNNER_TEMP"/discovered/*.txt
       - name: Publish to the project's own storage
         env:
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
