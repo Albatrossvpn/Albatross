@@ -47,6 +47,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/list/")) return mirror(url);
+    if (url.pathname.startsWith("/dl/")) return download(request, url);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
     try {
       if (!env.TOKEN_SECRET || env.TOKEN_SECRET.length < 24) throw new HttpError(503, "The service is not configured yet.");
@@ -584,6 +585,36 @@ async function crowdSummary(request, env, url) {
     (a[r.kind] ??= []).push([r.code, r.ok, r.n]);
   }
   return json({ asn: self, asns: out });
+}
+
+// download serves the release files (the APK and the Windows installer)
+// from GitHub's releases through Cloudflare, for networks where GitHub's
+// downloads break off or are filtered: /dl/v0.4.1/Albatross-0.4.1-android.apk.
+// Only those files; ranges pass through so interrupted downloads resume,
+// and the edge keeps a copy for a day.
+const DOWNLOADS = /^\/dl\/(v\d+\.\d+\.\d+)\/(Albatross-\d+\.\d+\.\d+-android\.apk|Albatross-Setup-\d+\.\d+\.\d+\.exe)$/;
+async function download(request, url) {
+  const m = DOWNLOADS.exec(url.pathname);
+  if (!m) return new Response("Not found", { status: 404 });
+  const headers = {};
+  const range = request.headers.get("Range");
+  if (range) headers.Range = range;
+  const up = await fetch(`https://github.com/Albatrossvpn/Albatross/releases/download/${m[1]}/${m[2]}`, {
+    headers,
+    redirect: "follow",
+    cf: { cacheTtl: 86400, cacheEverything: true },
+  });
+  if (!up.ok && up.status !== 206) return new Response("Not found", { status: 404 });
+  const out = new Headers();
+  for (const h of ["Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"]) {
+    const v = up.headers.get(h);
+    if (v) out.set(h, v);
+  }
+  out.set("Content-Type", m[2].endsWith(".apk") ? "application/vnd.android.package-archive" : "application/octet-stream");
+  out.set("Content-Disposition", `attachment; filename="${m[2]}"`);
+  out.set("Cache-Control", "public, max-age=86400");
+  out.set("X-Content-Type-Options", "nosniff");
+  return new Response(up.body, { status: up.status, headers: out });
 }
 
 // mirror serves the app's own server lists and update file from GitHub, one

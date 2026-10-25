@@ -469,19 +469,26 @@ jobs:
           MESSAGE: ${{ inputs.update_message }}
         run: |
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" > rel.json
+          # The account service also serves the files (/dl/, backend/src/index.js):
+          # GitHub's downloads break off or are filtered on many networks.
+          ACCOUNT_URL="$(bash repo/build/account-url.sh)"
+          export ACCOUNT_URL
           python3 - <<'PY'
           import json, os, re, sys
           v = os.environ["VERSION"]
           rel = json.load(open("rel.json"))
+          mirrors = [m.strip().rstrip("/") for m in os.environ.get("ACCOUNT_URL", "").split(",") if m.strip()]
           # The one APK serves every ABI; 0.3.3 and earlier read only the
-          # arm64-v8a entry.
+          # arm64-v8a entry. The mirror comes first: it is reachable where
+          # GitHub is not, and the SHA-256 guards the file either way.
           keys = {"-android.apk": ["android-arm64-v8a", "android-armeabi-v7a"], "Setup-": ["windows"]}
           files = {}
           for a in rel["assets"]:
               for part, names in keys.items():
                   if part in a["name"] and (a.get("digest") or "").startswith("sha256:"):
+                      urls = [f"{m}/dl/v{v}/{a['name']}" for m in mirrors] + [a["browser_download_url"]]
                       for key in names:
-                          files[key] = {"urls": [a["browser_download_url"]], "sha256": a["digest"][7:]}
+                          files[key] = {"urls": urls, "sha256": a["digest"][7:]}
           path = "repo/update.json"
           m = json.load(open(path))
           m["latest_version"] = v
