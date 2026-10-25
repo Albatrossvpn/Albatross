@@ -35,6 +35,11 @@ import (
 // for a connection to the service before it connects again.
 const Grace = 72 * time.Hour
 
+// GraceCut is the grace while the network cuts foreign addresses (a
+// shutdown): the service cannot be reached by anyone, and a paying user
+// must not be cut off exactly when the relay path works.
+const GraceCut = 14 * 24 * time.Hour
+
 // Reasons an account may not connect.
 const (
 	ReasonDisabled = "disabled"
@@ -122,6 +127,9 @@ type Client struct {
 	URLs []string
 	// syncMu lets one usage report run at a time.
 	syncMu sync.Mutex
+	// grace is how long the account stays usable unreached (Grace, or
+	// GraceCut during a shutdown); under mu.
+	grace time.Duration
 	// HTTP returns the client to use now (through the VPN when it is up).
 	HTTP func() *http.Client
 	// Path is where the session is saved.
@@ -183,8 +191,20 @@ func (c *Client) View() View {
 	i := c.st.Info
 	i.UsedBytes += c.st.PendingBytes
 	i.UsedSeconds += c.st.PendingSeconds
-	stale := c.Now().Sub(time.Unix(c.st.SyncedAt, 0)) > Grace
+	grace := c.grace
+	if grace == 0 {
+		grace = Grace
+	}
+	stale := c.Now().Sub(time.Unix(c.st.SyncedAt, 0)) > grace
 	return View{SignedIn: true, Info: i, Stale: stale, SyncedAt: time.Unix(c.st.SyncedAt, 0)}
+}
+
+// SetGrace changes how long the account stays usable while the service
+// cannot be reached.
+func (c *Client) SetGrace(d time.Duration) {
+	c.mu.Lock()
+	c.grace = d
+	c.mu.Unlock()
 }
 
 // Login signs in and saves the session.

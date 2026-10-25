@@ -9,17 +9,21 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Albatrossvpn/vp/internal/account"
 	"github.com/Albatrossvpn/vp/internal/antiblock"
 	"github.com/Albatrossvpn/vp/internal/core"
 	"github.com/Albatrossvpn/vp/internal/geo"
+	"github.com/Albatrossvpn/vp/internal/node"
 	"github.com/Albatrossvpn/vp/internal/pool"
 	"github.com/Albatrossvpn/vp/internal/sources"
 	"github.com/Albatrossvpn/vp/internal/tester"
@@ -122,6 +126,9 @@ type Engine struct {
 	localDNS    string
 	reg         regimeState   // the network's filtering regime (regime.go)
 	regNet      string        // the network reg was probed on
+	regAsked    time.Time     // when a regime probe was last asked for on demand
+	regProbing  atomic.Bool   // a regime probe is running
+	irRanges    []ipRange     // the country's address ranges (geoip-ir.srs), for domesticEndpoint
 	notice      string        // a message for the user that outlives status changes
 	install     uint32        // this installation's random number (installNumber)
 	helper      *core.Process // the "Help others" Snowflake proxy (help.go)
@@ -202,12 +209,15 @@ func New(opt Options) (*Engine, error) {
 		e.crowdURLs = urls
 	}
 	e.tester = &tester.Tester{Runtime: e.rt}
-	e.resolver = &antiblock.Resolver{Client: e.anyClient}
+	e.resolver = &antiblock.Resolver{Client: e.anyClient, DoH: func() bool { return e.fetchMode() == sources.ModeNormal || e.proxyClient() != nil }}
 	e.cf = &antiblock.Scanner{}
 	e.applyIntensity()
 	if err := installRules(filepath.Join(e.dir, "rules")); err != nil {
 		e.logf("warn", "Could not install the local-site lists: %v", err)
 	}
+	e.irRanges, _ = readIPRuleSet(filepath.Join(e.dir, "rules", "geoip-ir.srs"))
+	e.fetcher.Mode = e.fetchMode
+	sources.ExtraMirrors = e.domesticMirrors
 	e.loadServers()
 	e.net.load(e.dir)
 	e.loadRegime()
@@ -306,7 +316,8 @@ func (e *Engine) SetLocalDNS(addr string) {
 	// Another network filters differently.
 	e.net.use(addr)
 	if moved {
-		// Probe the new network's regime (the refresh loop sees it due).
+		// Probe the new network's regime now.
+		e.reprobeRegime("the network changed")
 		e.triggerRefill()
 	}
 	if moved && c != nil {
@@ -631,4 +642,35 @@ func (e *Engine) Servers(country string, limit int) []ServerInfo {
 	}
 	e.mu.Unlock()
 	return out
+}
+
+// domesticEndpoint reports whether a server's address is inside the
+// country: in the country's address ranges, or named as a relay.
+func (e *Engine) domesticEndpoint(n *node.Node) bool {
+	if n == nil {
+		return false
+	}
+	if a, err := netip.ParseAddr(n.Server); err == nil && ipIn(e.irRanges, a) {
+		return true
+	}
+	return strings.HasSuffix(n.Name, "-relay") || n.Name == "relay"
+}
+
+// fetchMode is how sources are reached now: as a network where only
+// domestic addresses answer allows, when that is what the regime found.
+func (e *Engine) fetchMode() sources.Mode {
+	e.mu.Lock()
+	r := e.reg.Regime
+	e.mu.Unlock()
+	if r.severity() >= regimeAllowlist.severity() {
+		return sources.ModeDomestic
+	}
+	return sources.ModeNormal
+}
+
+// domesticMirrors returns the mirror bases learned from share codes.
+func (e *Engine) domesticMirrors() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]string(nil), e.settings.DomesticMirrors...)
 }

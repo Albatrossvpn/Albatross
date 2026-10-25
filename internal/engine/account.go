@@ -351,3 +351,17 @@ func (e *Engine) stopForAccount(message string) {
 		e.setStatus(StatusIdle, message)
 	}()
 }
+
+// applyGrace lengthens the account's grace while the network cuts foreign
+// addresses: the service cannot be reached by anyone then.
+func (e *Engine) applyGrace(shut bool) {
+	if e.acct == nil {
+		return
+	}
+	if shut {
+		e.acct.SetGrace(account.GraceCut)
+		e.logf("info", "The account service cannot be reached from this network; the account stays usable for 14 days.")
+	} else {
+		e.acct.SetGrace(account.Grace)
+	}
+}

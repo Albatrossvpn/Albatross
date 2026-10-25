@@ -19,6 +19,9 @@ import (
 
 	"github.com/Albatrossvpn/vp/internal/node"
 	"github.com/Albatrossvpn/vp/internal/pool"
+	"golang.org/x/net/dns/dnsmessage"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
 // The network's regime: how hard this network filters right now, found
@@ -65,6 +68,16 @@ type regimeProbe struct {
 	Blocked   bool `json:"blocked"`    // a blocked site opens directly
 	Poisoned  bool `json:"poisoned"`   // the local resolver fakes answers for blocked names
 	UDP       bool `json:"udp"`        // UDP gets out on a port other than 53
+	// The side channels a shutdown may leave open, measured rather than
+	// assumed: a DNS datagram to a foreign resolver is answered (UDP 53);
+	// the network's own resolver still resolves foreign names (so the DNS
+	// tunnel has a path); ping reaches a foreign address ("yes", "no", ""
+	// when it could not be tried); a known relay inside the country
+	// accepts connections.
+	UDP53     bool   `json:"udp53"`
+	Recursion bool   `json:"recursion"`
+	ICMP      string `json:"icmp,omitempty"`
+	Relay     bool   `json:"relay"`
 	// Country is where this network's direct traffic leaves from, as
 	// Cloudflare sees it.
 	Country string `json:"country,omitempty"`
@@ -98,13 +111,19 @@ var (
 	regimeBlocked2 = "https://www.instagram.com/"
 	regimeEdge     = "104.16.132.229:443" // a Cloudflare edge
 	regimeSTUN     = "stun.l.google.com:19302"
+	regimeUDP53    = []string{"8.8.8.8:53", "1.1.1.1:53"}
+	regimeICMP     = []string{"1.1.1.1", "8.8.8.8"}
 	regimeName     = "www.youtube.com"
 	regimeTrace    = "https://www.cloudflare.com/cdn-cgi/trace"
 )
 
 // regimeEvery is how often the regime is probed; a change of network
-// probes at once.
-const regimeEvery = 3 * time.Hour
+// probes at once, and a network that cuts foreign addresses is probed
+// every regimeShut so the app notices the moment they come back.
+const regimeEvery, regimeShut = 3 * time.Hour, 10 * time.Minute
+
+// regimeMinGap is the least time between probes asked for on demand.
+var regimeMinGap = 2 * time.Minute
 
 // regimeRecheck is how long to wait before confirming a changed regime.
 var regimeRecheck = 15 * time.Second
@@ -180,6 +199,17 @@ func (e *Engine) probeRegime(ctx context.Context) (regime, regimeProbe) {
 	set(&p.RandomSNI, func() bool { return randomSNIReaches(ctx, regimeEdge) })
 	set(&p.Poisoned, func() bool { return e.poisoned(ctx) })
 	set(&p.UDP, func() bool { return stunAnswers(ctx, regimeSTUN) })
+	set(&p.UDP53, func() bool { return udp53Answers(ctx, regimeUDP53) })
+	set(&p.Recursion, func() bool { return e.recursionWorks(ctx) })
+	set(&p.Relay, func() bool { return e.relayAnswers(ctx) })
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		r := icmpReaches(regimeICMP)
+		mu.Lock()
+		p.ICMP = r
+		mu.Unlock()
+	}()
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -292,6 +322,8 @@ type regimeState struct {
 	Regime regime      `json:"regime"`
 	Probe  regimeProbe `json:"probe"`
 	At     time.Time   `json:"at"`
+	// Since is when the regime last changed.
+	Since time.Time `json:"since"`
 	// History is the recent regimes, newest last.
 	History []regimeSeen `json:"history"`
 }
@@ -329,12 +361,37 @@ func (e *Engine) saveRegime(s regimeState) {
 func (e *Engine) regimeDue() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.regNet != e.localDNS || time.Since(e.reg.At) >= regimeEvery
+	every := regimeEvery
+	if e.reg.Regime.severity() >= regimeAllowlist.severity() {
+		every = regimeShut
+	}
+	return e.regNet != e.localDNS || time.Since(e.reg.At) >= every
+}
+
+// reprobeRegime probes the regime now, when the network's behaviour
+// suggests it changed (every server dead while domestic sites answer), at
+// most once every regimeMinGap and never two at once.
+func (e *Engine) reprobeRegime(reason string) {
+	e.mu.Lock()
+	soon := time.Since(e.regAsked) < regimeMinGap
+	if !soon {
+		e.regAsked = time.Now()
+	}
+	e.mu.Unlock()
+	if soon || e.regProbing.Load() {
+		return
+	}
+	e.logf("info", "Network check (%s)…", reason)
+	go e.updateRegime()
 }
 
 // updateRegime probes the regime and acts on a change. Everything it
 // learns stays on this device.
 func (e *Engine) updateRegime() {
+	if !e.regProbing.CompareAndSwap(false, true) {
+		return
+	}
+	defer e.regProbing.Store(false)
 	e.mu.Lock()
 	netKey := e.localDNS
 	e.mu.Unlock()
@@ -365,13 +422,17 @@ func (e *Engine) updateRegime() {
 		r, p = r2, p2
 	}
 	e.mu.Lock()
-	s := regimeState{Regime: r, Probe: p, At: time.Now(), History: append(prev.History, regimeSeen{r, time.Now()})}
+	s := regimeState{Regime: r, Probe: p, At: time.Now(), Since: prev.Since, History: append(prev.History, regimeSeen{r, time.Now()})}
+	if r != prev.Regime || s.Since.IsZero() {
+		s.Since = time.Now()
+	}
 	if len(s.History) > 48 {
 		s.History = s.History[len(s.History)-48:]
 	}
 	e.reg, e.regNet = s, netKey
 	e.mu.Unlock()
 	e.saveRegime(s)
+	e.regimeChanged(prev, s, sameNet)
 	if r != regimeOffline {
 		e.crowdLookup(e.ctx)
 	}
@@ -381,8 +442,12 @@ func (e *Engine) updateRegime() {
 	// Filtering tightens for days before a large shutdown. When it gets
 	// harder, fetch everything a shutdown would cut off while it still can.
 	// Another network reads differently without anything having changed,
-	// so only a reading from the same network counts as tightening.
-	if sameNet && prev.Regime.severity() >= 0 && prev.Regime.severity() <= regimeFiltered.severity() && r.severity() > prev.Regime.severity() && r != regimeOffline {
+	// so only a reading from the same network counts as tightening; a
+	// first reading that is already hard counts too, since nothing was
+	// fetched ahead for this install yet.
+	tightened := sameNet && prev.Regime.severity() >= 0 && r.severity() > prev.Regime.severity()
+	first := prev.Regime == regimeUnknown && r.severity() >= regimeHard.severity()
+	if (tightened || first) && r.severity() >= regimeHard.severity() && r != regimeOffline {
 		go e.prepareForShutdown()
 	} else if !sameNet || r.severity() <= regimeFiltered.severity() {
 		e.mu.Lock()
@@ -393,12 +458,45 @@ func (e *Engine) updateRegime() {
 	}
 }
 
+// shutdownNotice is shown while only domestic addresses answer.
+const shutdownNotice = "Only domestic sites answer on this network (a national-internet shutdown). Albatross is trying its in-country relays, the DNS tunnel and the ping carrier. If a friend's Albatross is connected, ask them for a share code."
+
+// regimeChanged acts on a regime change: entering a shutdown shows what
+// the app is doing and lengthens the account's grace; leaving one gives
+// every candidate and server the shutdown failed its chances back, since
+// those failures said nothing about them.
+func (e *Engine) regimeChanged(prev, cur regimeState, sameNet bool) {
+	shut := cur.Regime.severity() >= regimeAllowlist.severity() && cur.Regime != regimeOffline
+	wasShut := prev.Regime.severity() >= regimeAllowlist.severity() && prev.Regime != regimeOffline
+	e.applyGrace(shut)
+	e.mu.Lock()
+	switch {
+	case shut && cur.Regime == regimeNational:
+		e.notice = shutdownNotice
+	case !shut && e.notice == shutdownNotice:
+		e.notice = ""
+	}
+	e.mu.Unlock()
+	if wasShut && !shut && sameNet && !prev.Since.IsZero() {
+		n := e.pool.ResetDeadSince(pool.Minutes(prev.Since))
+		e.mu.Lock()
+		for _, s := range e.good {
+			if s.Fails > 0 && s.TestedAt.After(prev.Since) && !s.Domestic {
+				s.Fails = 0
+			}
+		}
+		e.mu.Unlock()
+		e.logf("info", "Foreign addresses answer again; %d candidates the shutdown failed get their chances back.", n)
+		e.poke()
+	}
+}
+
 var regimeText = map[regime]string{
 	regimeFree:      "blocked sites open without a VPN here, so the lightest settings are used",
 	regimeFiltered:  "ordinary filtering",
 	regimeHard:      "heavy filtering; flows to foreign servers are being cut",
 	regimeAllowlist: "only approved sites get out; CDN-fronted servers, Tor and Psiphon are tried first",
-	regimeNational:  "only domestic sites answer; Tor, Psiphon and CDN-fronted servers are tried first",
+	regimeNational:  "only domestic sites answer; in-country relays, the DNS tunnel and the ping carrier are tried first",
 	regimeOffline:   "this network reaches nothing",
 }
 
@@ -432,24 +530,186 @@ func (r regime) bonus(p regimeProbe, en *pool.Entry) float64 {
 		tr := (wire - 1) % 8
 		cdn := (tr == 1 || tr == 2 || tr == 4 || tr == 5) && (port >= 1 && port <= 3)
 		switch {
+		case en.Flags&pool.FlagDomestic != 0:
+			// A relay inside the country: the one address that answers
+			// when every foreign one is cut.
+			b += 150
 		case node.StyleDNSTunnel(en.Style):
 			// Queries go through the network's own resolver, which keeps
-			// answering when every foreign address is cut.
-			b += 110
+			// answering when every foreign address is cut; measured.
+			if p.Recursion {
+				b += 110
+			} else {
+				b += 30
+			}
 		case node.StyleICMP(en.Style):
-			// Ping stayed open when TCP and UDP to foreign addresses were cut.
-			b += 100
+			// Ping stayed open when TCP and UDP to foreign addresses were
+			// cut; measured when it could be.
+			switch p.ICMP {
+			case "yes":
+				b += 100
+			case "":
+				b += 40
+			default:
+				b -= 40
+			}
 		case node.StyleDNSPort(en.Style):
-			// UDP 53 was the one UDP port left open in the June 2025 shutdown.
-			b += 60
+			// UDP 53 was the one UDP port left open in the June 2025
+			// shutdown; it counts when it is open now.
+			if p.UDP53 {
+				b += 60
+			}
 		case cdn:
 			b += 80
 		case r != regimeHard:
 			b -= 80
 		}
+		if en.Flags&pool.FlagOwn != 0 {
+			b += 40
+		}
 	}
-	if r.severity() >= regimeFiltered.severity() && !p.UDP && en.Flags&pool.FlagUDP != 0 && !node.StyleICMP(en.Style) && !node.StyleDNSTunnel(en.Style) && !node.StyleDNSPort(en.Style) {
+	udpOK := p.UDP || (node.StyleDNSPort(en.Style) && p.UDP53) || en.Flags&pool.FlagDomestic != 0
+	if r.severity() >= regimeFiltered.severity() && !udpOK && en.Flags&pool.FlagUDP != 0 && !node.StyleICMP(en.Style) && !node.StyleDNSTunnel(en.Style) {
 		b -= 60
 	}
 	return b
+}
+
+// udp53Answers sends a DNS query for a made-up name to foreign resolvers
+// on UDP 53 and reports whether any datagram with the query's id comes
+// back: the one UDP port a shutdown has left open.
+func udp53Answers(ctx context.Context, servers []string) bool {
+	var b [6]byte
+	rand.Read(b[:])
+	name, err := dnsmessage.NewName("x" + hex.EncodeToString(b[:]) + ".com.")
+	if err != nil {
+		return false
+	}
+	var idb [2]byte
+	rand.Read(idb[:])
+	id := binary.BigEndian.Uint16(idb[:])
+	q := dnsmessage.Message{Header: dnsmessage.Header{ID: id, RecursionDesired: true},
+		Questions: []dnsmessage.Question{{Name: name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}}}
+	pkt, err := q.Pack()
+	if err != nil {
+		return false
+	}
+	var d net.Dialer
+	for _, srv := range servers {
+		c, err := d.DialContext(ctx, "udp", srv)
+		if err != nil {
+			continue
+		}
+		buf := make([]byte, 512)
+		for range 2 {
+			c.Write(pkt)
+			c.SetReadDeadline(time.Now().Add(1500 * time.Millisecond))
+			if n, err := c.Read(buf); err == nil && n >= 12 && binary.BigEndian.Uint16(buf[:2]) == id {
+				c.Close()
+				return true
+			}
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		c.Close()
+	}
+	return false
+}
+
+// recursionWorks reports whether the network's resolver still resolves
+// foreign names: a made-up name under google.com must come back as "no
+// such name" from Google's own servers. A resolver that answers everything
+// (a sinkhole) or nothing has no path abroad, and the DNS tunnel none.
+func (e *Engine) recursionWorks(ctx context.Context) bool {
+	r := net.DefaultResolver
+	if dns := e.dns(); dns != "" {
+		r = &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var d net.Dialer
+			return d.DialContext(ctx, "udp", net.JoinHostPort(dns, "53"))
+		}}
+	}
+	var b [6]byte
+	rand.Read(b[:])
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	_, err := r.LookupHost(ctx, "x"+hex.EncodeToString(b[:])+".google.com")
+	var de *net.DNSError
+	return errors.As(err, &de) && de.IsNotFound
+}
+
+// relayAnswers reports whether a known relay inside the country accepts
+// connections: up to five of the servers whose address is domestic.
+func (e *Engine) relayAnswers(ctx context.Context) bool {
+	var eps []string
+	e.mu.Lock()
+	for _, s := range e.good {
+		if s.Domestic {
+			if n := s.Node(); n != nil && !n.NoEndpoint() && !n.UDPBased() {
+				eps = append(eps, n.Endpoint())
+			}
+		}
+		if len(eps) >= 5 {
+			break
+		}
+	}
+	e.mu.Unlock()
+	if len(eps) == 0 {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	got := make(chan bool, len(eps))
+	for _, ep := range eps {
+		go func(ep string) { got <- tcpAnswers(ctx, ep) }(ep)
+	}
+	for range eps {
+		if <-got {
+			return true
+		}
+	}
+	return false
+}
+
+// icmpReaches sends an echo to foreign addresses and reports "yes" when a
+// reply comes, "no" when none does, and "" when this process may not send
+// echoes (Windows without administrator rights, some Linux builds).
+func icmpReaches(targets []string) string {
+	c, err := icmp.ListenPacket("udp4", "0.0.0.0")
+	raw := false
+	if err != nil {
+		if c, err = icmp.ListenPacket("ip4:icmp", "0.0.0.0"); err != nil {
+			return ""
+		}
+		raw = true
+	}
+	defer c.Close()
+	id := os.Getpid() & 0xffff
+	for i, t := range targets {
+		ip := net.ParseIP(t)
+		if ip == nil {
+			continue
+		}
+		msg := icmp.Message{Type: ipv4.ICMPTypeEcho, Code: 0, Body: &icmp.Echo{ID: id, Seq: i + 1, Data: []byte("albatross")}}
+		pkt, err := msg.Marshal(nil)
+		if err != nil {
+			continue
+		}
+		var dst net.Addr = &net.UDPAddr{IP: ip}
+		if raw {
+			dst = &net.IPAddr{IP: ip}
+		}
+		c.WriteTo(pkt, dst)
+	}
+	c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 1500)
+	for {
+		n, _, err := c.ReadFrom(buf)
+		if err != nil {
+			return "no"
+		}
+		if m, err := icmp.ParseMessage(1, buf[:n]); err == nil && m.Type == ipv4.ICMPTypeEchoReply {
+			return "yes"
+		}
+	}
 }

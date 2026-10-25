@@ -255,14 +255,26 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 				// pause. Servers that keep failing drop out on their own.
 				exclude = map[string]bool{}
 			}
-			e.setStatus(StatusSearching, fmt.Sprintf("Looking for a server in %s…", name))
-			if time.Now().After(deadline) {
+			e.mu.Lock()
+			shut := e.reg.Regime.severity() >= regimeAllowlist.severity()
+			e.mu.Unlock()
+			wait := 2 * time.Second
+			switch {
+			case shut:
+				e.setStatus(StatusSearching, "Only domestic sites answer on this network. Trying the in-country relays, the DNS tunnel and the ping carrier…")
+				wait = 10 * time.Second
+			case time.Now().After(deadline):
 				e.setStatus(StatusSearching, fmt.Sprintf("No server in %s yet. Still looking; you will be connected as soon as one is found.", name))
+			default:
+				e.setStatus(StatusSearching, fmt.Sprintf("Looking for a server in %s…", name))
+			}
+			if triedRecent && attempt%5 == 1 {
+				e.reprobeRegime("no server to connect to")
 			}
 			select {
 			case <-e.ctx.Done():
 				return e.ctx.Err()
-			case <-time.After(2 * time.Second):
+			case <-time.After(wait):
 			}
 			continue
 		}
@@ -456,8 +468,23 @@ func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Se
 		return out
 	}
 	if alive == 0 {
-		// Nothing answered: more likely this device's network than every
-		// server at once. Leave the list as it was.
+		// Nothing answered. Either this device has no network, or only
+		// domestic addresses answer: when a domestic site does, the
+		// regime is probed and only the servers that can still get out
+		// are kept.
+		if len(list) >= 3 && e.domesticAnswers() {
+			e.reprobeRegime("no server answered while domestic sites do")
+			e.mu.Lock()
+			p := e.reg.Probe
+			e.mu.Unlock()
+			var out []*Server
+			for _, s := range list {
+				if s.nationalCapable(p) && len(out) < n {
+					out = append(out, s)
+				}
+			}
+			return out
+		}
 		return list[:min(n, len(list))]
 	}
 	dead := map[string]bool{}
@@ -500,11 +527,24 @@ func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, o
 	now := time.Now()
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	reg, p := e.reg.Regime, e.reg.Probe
+	shut := reg.severity() >= regimeAllowlist.severity()
 	var list []*Server
 	for _, s := range e.good {
 		// The serverless method is no server: it only ever comes from
 		// lastResort, whatever country its exit shows.
-		if exclude[s.Key] || !ok(s, now) || s.Country == "IR" || s.Proto == "direct" || !s.matches(e.settings.Protocol) {
+		if exclude[s.Key] || s.Country == "IR" || s.Proto == "direct" || !s.matches(e.settings.Protocol) {
+			continue
+		}
+		if shut && s.nationalCapable(p) {
+			// The only candidates there are: the usual six-hour window
+			// does not apply, the scanner rechecks them anyway.
+			if s.Fails >= 6 || now.Sub(s.LastOK) > 7*24*time.Hour {
+				continue
+			}
+		} else if !ok(s, now) || reg == regimeNational {
+			// Where only domestic addresses answer, a foreign server
+			// cannot work, however good it was.
 			continue
 		}
 		if country != "" && s.Country != country {
@@ -515,7 +555,7 @@ func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, o
 		}
 		list = append(list, s)
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].rank(now) < list[j].rank(now) })
+	sort.Slice(list, func(i, j int) bool { return list[i].rankIn(now, reg, p) < list[j].rankIn(now, reg, p) })
 	// WireGuard peers sharing a private key fight over one session, and each
 	// warp-plus method is a whole process; keep the group light.
 	//
@@ -749,7 +789,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		c.keep(actx, m)
 		cur = m
 		// Prove the whole path works before telling anyone it does.
-		r = tester.Probe(actx, proxy, 12*time.Second)
+		r = tester.Probe(actx, proxy, probeTime(c.activeMember()))
 		if !r.OK {
 			e.noteResult(c, m, 0, false)
 		}
@@ -1284,10 +1324,42 @@ func (e *Engine) lastResort(exclude map[string]bool) []*Server {
 	now := time.Now()
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.reg.Regime == regimeNational {
+		return nil // the device's own line reaches nothing foreign
+	}
 	for _, s := range e.good {
 		if s.Proto == "direct" && !exclude[s.Key] && s.usable(now) && s.matches(e.settings.Protocol) {
 			return []*Server{s}
 		}
 	}
 	return nil
+}
+
+// probeTime is how long the connect-time probe may take: the DNS tunnel
+// and the ping carrier move a few bytes at a time.
+func probeTime(m *member) time.Duration {
+	if m != nil && m.server != nil {
+		if n := m.server.Node(); n != nil && (n.DNSTunnel() || n.ICMP()) {
+			return 30 * time.Second
+		}
+	}
+	return 12 * time.Second
+}
+
+// domesticAnswers reports whether a domestic site accepts a connection
+// now: the sign that the device has a network, even if nothing foreign
+// answers.
+func (e *Engine) domesticAnswers() bool {
+	ctx, cancel := context.WithTimeout(e.ctx, 2*time.Second)
+	defer cancel()
+	got := make(chan bool, len(regimeDomestic))
+	for _, a := range regimeDomestic {
+		go func(a string) { got <- tcpAnswers(ctx, a) }(a)
+	}
+	for range regimeDomestic {
+		if <-got {
+			return true
+		}
+	}
+	return false
 }

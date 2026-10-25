@@ -81,6 +81,8 @@ jobs:
           SING_BOX: /tmp/cores/sing-box
           XRAY: /tmp/cores/xray
           OWN_SERVERS: ${{ secrets.OWN_SERVERS }}
+          # The relays inside the country (deploy/server relay mode), one link per line.
+          OWN_RELAYS: ${{ secrets.OWN_RELAYS }}
           OWN_KEY: ${{ secrets.OWN_KEY }}
           # Raises globalping's quota for the check from inside Iran.
           GLOBALPING_TOKEN: ${{ secrets.GLOBALPING_TOKEN }}
@@ -121,7 +123,7 @@ jobs:
         run: |
           account="$(bash build/account-url.sh | cut -d, -f1)"
           files=()
-          for f in hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt tor.json meta.json; do
+          for f in hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt tor.json meta.json own-0.bin own-1.bin own-2.bin own-3.bin own-4.bin; do
             [ -f "$RUNNER_TEMP/servers/$f" ] && files+=("$RUNNER_TEMP/servers/$f")
           done
           bash deploy/files/publish-lists.sh "$account" servers "${files[@]}"
