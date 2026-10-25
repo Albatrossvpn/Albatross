@@ -66,6 +66,8 @@ jobs:
           SING_BOX: /tmp/cores/sing-box
           XRAY: /tmp/cores/xray
           GLOBALPING_TOKEN: ${{ secrets.GLOBALPING_TOKEN }}
+          # Tags of the project's own probes inside the country (dashboard), comma separated.
+          GLOBALPING_TAGS: ${{ vars.GLOBALPING_TAGS }}
         run: |
           cat published/hot.txt published/fresh.txt 2>/dev/null | head -n 4000 > "$RUNNER_TEMP/try.txt"
           go run ./cmd/collect -hot-from "$RUNNER_TEMP/try.txt" -real 1500 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" -out published

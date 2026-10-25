@@ -215,7 +215,7 @@ func checkIran(hot []*entry) (checked, open int) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	seen := iranReach(ctx, eps, 2)
+	seen := iranReach(ctx, eps, gpProbes())
 	for _, ok := range seen {
 		if ok {
 			open++
@@ -230,6 +230,10 @@ func checkIran(hot []*entry) (checked, open int) {
 // hourly quota (two probes each): the anonymous one, or the larger one a
 // GLOBALPING_TOKEN gives.
 func iranChecks() int {
+	if os.Getenv("GLOBALPING_TAGS") != "" {
+		// Own probes: one test per address, paid for by the credits they earn.
+		return 300
+	}
 	if os.Getenv("GLOBALPING_TOKEN") != "" {
 		return 500
 	}
