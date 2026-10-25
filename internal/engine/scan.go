@@ -52,7 +52,7 @@ func refreshEvery(s sources.Source, mobile bool) time.Duration {
 		return time.Hour
 	case s.Kind == sources.KindTelegram:
 		return 20 * time.Minute
-	case s.Kind == sources.KindVPNGate:
+	case s.Kind == sources.KindVPNGate, s.Kind == sources.KindLEAP:
 		return time.Hour
 	case s.Tier == sources.TierDeep:
 		// The deep lists are large; their new servers mostly reach the
@@ -375,6 +375,10 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 	switch s.Kind {
 	case sources.KindVPNGate:
 		for _, v := range node.ParseVPNGate(text) {
+			add(v.Node, v.Country)
+		}
+	case sources.KindLEAP:
+		for _, v := range node.ParseLEAP(text) {
 			add(v.Node, v.Country)
 		}
 	default:
