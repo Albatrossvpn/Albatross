@@ -131,12 +131,12 @@ func countIn(es []*entry, m map[*entry]time.Duration) int {
 
 // hotList is the fastest servers that passed, one per address, for the
 // app to try before anything else.
-func hotList(ordered []*entry, passed map[*entry]time.Duration, max int) []*entry {
-	var out []*entry
+func hotList(ordered []*entry, passed map[*entry]time.Duration, max int, crowd crowdStats) []*entry {
+	var cands []*entry
 	seen := map[string]bool{}
 	for _, e := range ordered {
-		if _, ok := passed[e]; !ok || len(out) >= max {
-			break
+		if _, ok := passed[e]; !ok || !crowd.keep(e.key) {
+			continue
 		}
 		if e.endpoint != "" {
 			if seen[e.endpoint] {
@@ -144,8 +144,63 @@ func hotList(ordered []*entry, passed map[*entry]time.Duration, max int) []*entr
 			}
 			seen[e.endpoint] = true
 		}
-		out = append(out, e)
+		cands = append(cands, e)
 	}
+	// Half the list is the best servers in order; the other half gives
+	// every protocol its share, so a user who picks any protocol finds
+	// servers of it, and a protocol the filtering spares is on hand.
+	out := append([]*entry(nil), cands[:min(len(cands), max/2)]...)
+	queues := map[string][]*entry{}
+	var protos []string
+	for _, e := range cands[len(out):] {
+		if queues[e.proto] == nil {
+			protos = append(protos, e.proto)
+		}
+		queues[e.proto] = append(queues[e.proto], e)
+	}
+	for len(out) < max && len(protos) > 0 {
+		var left []string
+		for _, p := range protos {
+			if len(out) >= max {
+				break
+			}
+			q := queues[p]
+			out = append(out, q[0])
+			if q = q[1:]; len(q) > 0 {
+				queues[p] = q
+				left = append(left, p)
+			}
+		}
+		protos = left
+	}
+	return out
+}
+
+// confirm tests the servers that passed once more and keeps those that
+// pass twice, with the mean of both delays: one lucky connection does not
+// make a hot server.
+func confirm(passed map[*entry]time.Duration) map[*entry]time.Duration {
+	if len(passed) == 0 {
+		return passed
+	}
+	again := make([]*entry, 0, len(passed))
+	for e := range passed {
+		again = append(again, e)
+	}
+	sort.Slice(again, func(i, j int) bool { return again[i].link < again[j].link })
+	second, tested := realTest(again, len(again))
+	if second == nil {
+		return passed
+	}
+	out := map[*entry]time.Duration{}
+	for e, d := range passed {
+		if d2, ok := second[e]; ok {
+			out[e] = (d + d2) / 2
+		} else if !tested[e] {
+			out[e] = d
+		}
+	}
+	log.Printf("confirmation: %d of %d servers passed a second time", len(out), len(passed))
 	return out
 }
 
@@ -154,13 +209,13 @@ func hotList(ordered []*entry, passed map[*entry]time.Duration, max int) []*entr
 func checkIran(hot []*entry) (checked, open int) {
 	var eps []string
 	for _, e := range hot {
-		if e.endpoint != "" && len(eps) < iranChecks {
+		if e.endpoint != "" && len(eps) < iranChecks() {
 			eps = append(eps, e.endpoint)
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	seen := iranReach(ctx, eps, 2)
+	seen := iranReach(ctx, eps, gpProbes())
 	for _, ok := range seen {
 		if ok {
 			open++
@@ -172,12 +227,22 @@ func checkIran(hot []*entry) (checked, open int) {
 }
 
 // iranChecks bounds the addresses checked from Iran per run, within the
-// anonymous hourly quota (two probes each).
-const iranChecks = 100
+// hourly quota (two probes each): the anonymous one, or the larger one a
+// GLOBALPING_TOKEN gives.
+func iranChecks() int {
+	if os.Getenv("GLOBALPING_TAGS") != "" {
+		// Own probes: one test per address, paid for by the credits they earn.
+		return 300
+	}
+	if os.Getenv("GLOBALPING_TOKEN") != "" {
+		return 500
+	}
+	return 100
+}
 
 // orderFresh puts the servers that passed first, fastest first, keeps the
 // untested ones after them, and moves those that failed to rest.
-func orderFresh(fresh []*entry, passed map[*entry]time.Duration, tested map[*entry]bool) (keep, failed []*entry) {
+func orderFresh(fresh []*entry, passed map[*entry]time.Duration, tested map[*entry]bool, crowd crowdStats) (keep, failed []*entry) {
 	var ok, untested []*entry
 	for _, e := range fresh {
 		_, good := passed[e]
@@ -190,6 +255,6 @@ func orderFresh(fresh []*entry, passed map[*entry]time.Duration, tested map[*ent
 			untested = append(untested, e)
 		}
 	}
-	sort.SliceStable(ok, func(i, j int) bool { return passed[ok[i]] < passed[ok[j]] })
+	crowdOrder(ok, passed, crowd)
 	return append(ok, untested...), failed
 }

@@ -284,3 +284,21 @@ func (v *vpnProxy) target() string {
 // LanNets lists the local network's address ranges, comma separated, for
 // the app to leave outside the tunnel.
 func LanNets() string { return strings.Join(engine.LANNets, ",") }
+
+// BypassApps lists the package-name prefixes of the apps the tunnel leaves
+// outside, comma separated: the bypass region's own apps, which refuse a
+// foreign address or stop when a VPN is on (Settings.BypassApps). Empty
+// when the setting is off.
+func BypassApps() string {
+	mu.Lock()
+	e := eng
+	mu.Unlock()
+	if e == nil {
+		return ""
+	}
+	s := e.Settings()
+	if !s.BypassApps {
+		return ""
+	}
+	return strings.Join(engine.DomesticApps(s.Bypass), ",")
+}

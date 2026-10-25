@@ -43,10 +43,12 @@ type Entry struct {
 
 // Entry flags.
 const (
-	FlagUDP   uint8 = 1 << iota // a TCP probe says nothing about it
-	FlagFresh                   // listed by a tested or Telegram source
-	FlagPlain                   // no transport encryption
-	FlagHot                     // listed in the collector's hot.txt
+	FlagUDP      uint8 = 1 << iota // a TCP probe says nothing about it
+	FlagFresh                      // listed by a tested or Telegram source
+	FlagPlain                      // no transport encryption
+	FlagHot                        // listed in the collector's hot.txt
+	FlagDomestic                   // its address is inside the country (a relay)
+	FlagOwn                        // from the project's own sealed lists
 )
 
 // HintCode returns the country hint as a string.
@@ -67,7 +69,20 @@ type Pool struct {
 	entries []Entry
 	index   map[uint64]int32
 	cycle   uint32
+	// dropped remembers the test history of candidates Compact removed,
+	// so one a list brings back is not retested as if it were new.
+	dropped map[uint64]history
 }
+
+// history is what is kept of a dropped candidate.
+type history struct {
+	LastTest uint32
+	State    uint8
+	Fails    uint8
+}
+
+// maxDropped bounds the memory the histories take.
+const maxDropped = 50000
 
 // Open creates a fresh pool file at path, replacing any old one.
 func Open(path string) (*Pool, error) {
@@ -119,11 +134,15 @@ func (p *Pool) Add(e Entry, link string, sourceScore func(uint16) float64) bool 
 		if sourceScore != nil && sourceScore(e.Source) > sourceScore(cur.Source) {
 			cur.Source = e.Source
 		}
-		cur.Flags |= e.Flags & (FlagFresh | FlagHot)
+		cur.Flags |= e.Flags & (FlagFresh | FlagHot | FlagDomestic | FlagOwn)
 		if cur.Hint[0] == 0 {
 			cur.Hint = e.Hint
 		}
 		return false
+	}
+	if h, ok := p.dropped[e.Key]; ok {
+		e.LastTest, e.State, e.Fails = h.LastTest, h.State, h.Fails
+		delete(p.dropped, e.Key)
 	}
 	n, err := p.w.WriteString(link)
 	if err != nil {
@@ -151,14 +170,15 @@ func (p *Pool) Len() int {
 // Link reads a candidate's link from disk.
 func (p *Pool) Link(key uint64) (string, bool) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	i, ok := p.index[key]
 	if !ok {
-		p.mu.Unlock()
 		return "", false
 	}
 	e := p.entries[i]
 	p.w.Flush()
-	p.mu.Unlock()
+	// Read under the lock: a Compact meanwhile would swap the file and
+	// move every offset.
 	buf := make([]byte, e.size)
 	if _, err := p.f.ReadAt(buf, e.off); err != nil && err != io.EOF {
 		return "", false
@@ -226,20 +246,22 @@ func (p *Pool) Compact(keep time.Duration, limit int) error {
 	drop := map[int]bool{}
 	for i := range p.entries {
 		e := &p.entries[i]
-		if e.State != StateOK && e.SeenAt < cutoff {
+		// A rejected server (a forged certificate, a config the core
+		// refuses) is kept so that a list cannot bring it back as new.
+		if e.State != StateOK && e.State != StateRejected && e.SeenAt < cutoff {
 			drop[i] = true
 		}
 	}
 	if over := len(p.entries) - len(drop) - limit; limit > 0 && over > 0 {
 		var cand []int
 		for i := range p.entries {
-			if e := &p.entries[i]; !drop[i] && e.State != StateOK && e.Flags&FlagHot == 0 {
+			if e := &p.entries[i]; !drop[i] && e.State != StateOK && e.State != StateRejected && e.Flags&FlagHot == 0 {
 				cand = append(cand, i)
 			}
 		}
 		rank := func(e *Entry) (int, uint8, uint32) {
 			tier := 2 // from a tested or Telegram list
-			if e.State == StateDead || e.State == StateRejected {
+			if e.State == StateDead {
 				tier = 0
 			} else if e.Flags&FlagFresh == 0 {
 				tier = 1
@@ -294,20 +316,67 @@ func (p *Pool) Compact(keep time.Duration, limit int) error {
 	}
 	if err := w.Flush(); err != nil {
 		tmp.Close()
+		os.Remove(tmpPath)
 		return err
 	}
-	p.f.Close()
 	tmp.Close()
-	if err := os.Rename(tmpPath, p.path); err != nil {
+	old := p.f
+	old.Close()
+	f, err := os.OpenFile(tmpPath, os.O_RDWR, 0o644)
+	if err == nil {
+		err = os.Rename(tmpPath, p.path)
+		if err != nil {
+			f.Close()
+		}
+	}
+	if err != nil {
+		// The old file is intact where it was: keep it, the entries and
+		// the index as they were, so the pool goes on working.
+		os.Remove(tmpPath)
+		if of, oerr := os.OpenFile(p.path, os.O_RDWR, 0o644); oerr == nil {
+			of.Seek(0, io.SeekEnd)
+			p.f, p.w = of, bufio.NewWriterSize(of, 1<<16)
+		}
 		return err
 	}
-	f, err := os.OpenFile(p.path, os.O_RDWR, 0o644)
-	if err != nil {
-		return err
+	// The history of what was dropped (tested entries only) outlives the
+	// drop, so a list bringing one back does not make it new again.
+	if p.dropped == nil {
+		p.dropped = map[uint64]history{}
+	}
+	for i := range p.entries {
+		if e := &p.entries[i]; drop[i] && e.State != StateNew && len(p.dropped) < maxDropped {
+			p.dropped[e.Key] = history{LastTest: e.LastTest, State: e.State, Fails: e.Fails}
+		}
 	}
 	f.Seek(0, io.SeekEnd)
 	p.f, p.w, p.size, p.entries, p.index = f, bufio.NewWriterSize(f, 1<<16), size, kept, index
 	return nil
+}
+
+// ResetDeadSince clears the backoff of candidates that failed at or after
+// min: when a shutdown lifts, their failures said nothing about them.
+func (p *Pool) ResetDeadSince(min uint32) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := 0
+	for i := range p.entries {
+		if e := &p.entries[i]; e.State == StateDead && e.LastTest >= min {
+			e.Fails, e.LastTest = 0, 0
+			n++
+		}
+	}
+	return n
+}
+
+// ClearFlag drops a flag from every candidate (a list about to be read
+// again sets it on its current members).
+func (p *Pool) ClearFlag(f uint8) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := range p.entries {
+		p.entries[i].Flags &^= f
+	}
 }
 
 // Minutes converts a time to the pool's compact timestamp.

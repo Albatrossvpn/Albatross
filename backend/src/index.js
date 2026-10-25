@@ -4,6 +4,7 @@ import {
   DAY, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, verify, verifyPassword,
 } from "./lib.js";
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
+import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, hotList, parseList, readSubToken, subToken } from "./sub.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -45,10 +46,15 @@ function randomUsernameSuffix() {
 }
 
 export default {
+  // Hourly: users' reports about servers, summed for the collector.
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(publishCrowdServers(env));
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/list/")) return mirror(request, url, env);
     if (url.pathname.startsWith("/dl/")) return download(request, url, env);
+    if (url.pathname.startsWith("/sub/")) return subscription(request, url, env);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
     try {
       if (!env.TOKEN_SECRET || env.TOKEN_SECRET.length < 24) throw new HttpError(503, "The service is not configured yet.");
@@ -72,6 +78,7 @@ async function route(request, env, url) {
     case "POST signup": return signup(request, env);
     case "GET me": return me(request, env);
     case "GET edge": return edge(request, env);
+    case "GET sub": return subInfo(request, env, url);
     case "POST usage": return usage(request, env);
     case "POST password": return changePassword(request, env);
     case "POST admin/login": return adminLogin(request, env);
@@ -83,6 +90,7 @@ async function route(request, env, url) {
     case "PUT admin/settings": return adminSaveSettings(request, env);
     case "POST admin/files": return adminPullFile(request, env);
     case "POST stats": return crowdReport(request, env);
+    case "POST admin/crowd/publish": return adminPublishCrowd(request, env);
     case "GET stats": return crowdSummary(request, env, url);
   }
   const list = path.match(/^admin\/list\/(.+)$/);
@@ -295,6 +303,41 @@ async function edge(request, env) {
   return json({ links: a.allowed ? edgeLinks(env.EDGE_HOST, env.EDGE_UUID) : [], reason: a.reason });
 }
 
+/**
+ * What the account page needs for other devices (iPhone, iPad, Mac):
+ * the subscription address and the countries on offer.
+ */
+async function subInfo(request, env, url) {
+  const { user } = await authUser(request, env);
+  const t = now();
+  const a = accountOf(user, t);
+  const entries = parseList(await hotList(env));
+  return json({
+    url: `${url.origin}/sub/${await subToken(env, user, t)}`,
+    countries: countriesOf(entries),
+    servers: entries.filter((e) => e.country !== "IR").length,
+    edge: edgeFor(env, a).length,
+    brand: env.SITE_NAME || "Albatross",
+  });
+}
+
+/** GET /sub/<token>?c=<country|edge|empty>: the subscription a client app downloads. */
+async function subscription(request, url, env) {
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
+  const t = now();
+  const p = await readSubToken(env, url.pathname.slice("/sub/".length), t);
+  const user = p && (await userById(env, p.u));
+  if (!user || user.token_version !== p.v) return new Response("This subscription address is no longer valid. Sign in to your account for a new one.", { status: 401 });
+  const a = accountOf(user, t);
+  if (!a.allowed) return new Response("This account cannot connect right now (" + a.reason + ").", { status: 403 });
+  const choice = String(url.searchParams.get("c") || "").toUpperCase().replace("EDGE", "edge");
+  if (choice && choice !== "edge" && !/^[A-Z]{2}$/.test(choice)) return new Response("Not found", { status: 404 });
+  const entries = parseList(await hotList(env));
+  const sub = buildSub(entries, choice, env.SITE_NAME || "Albatross", edgeFor(env, a));
+  const h = subHeaders(sub.title, a);
+  return new Response(request.method === "HEAD" ? null : sub.body, { status: 200, headers: h });
+}
+
 const MAX_BYTES_PER_REPORT = 100 * 1024 ** 3;
 const MAX_SECONDS_PER_REPORT = 7 * DAY;
 
@@ -316,10 +359,22 @@ async function usage(request, env) {
     await env.DB.prepare("UPDATE users SET period_start = ?1, used_bytes = 0, used_seconds = 0 WHERE id = ?2 AND period_start = ?3")
       .bind(p.period_start, user.id, user.period_start).run();
   }
-  await env.DB.prepare(
-    `UPDATE users SET used_bytes = used_bytes + ?1, used_seconds = used_seconds + ?2,
-       total_bytes = total_bytes + ?1, total_seconds = total_seconds + ?2, last_seen = ?3 WHERE id = ?4`,
-  ).bind(bytes, seconds, t, user.id).run();
+  // A report the app sends again (its answer was lost on the way) is
+  // counted once: its id, when it carries one, is remembered for a few days.
+  let apply = true;
+  const id = typeof b.id === "string" && /^[0-9a-f]{8,64}$/.test(b.id) ? user.id + ":" + b.id : "";
+  if (id) {
+    const day = Math.floor(t / DAY);
+    const r = await env.DB.prepare("INSERT OR IGNORE INTO usage_ids (id, day) VALUES (?1, ?2)").bind(id, day).run();
+    apply = r.meta.changes > 0;
+    if (apply && Math.random() < 0.01) await env.DB.prepare("DELETE FROM usage_ids WHERE day < ?1").bind(day - 7).run();
+  }
+  if (apply) {
+    await env.DB.prepare(
+      `UPDATE users SET used_bytes = used_bytes + ?1, used_seconds = used_seconds + ?2,
+         total_bytes = total_bytes + ?1, total_seconds = total_seconds + ?2, last_seen = ?3 WHERE id = ?4`,
+    ).bind(bytes, seconds, t, user.id).run();
+  }
   const fresh = await userById(env, user.id);
   // Sessions are renewed while they are in use.
   const renewed = payload.exp - t < SESSION / 2 ? await session(env, fresh) : token;
@@ -590,6 +645,37 @@ async function adminSaveSettings(request, env) {
 // address is stored: the rate limit keeps only a keyed hash of it, for a day.
 
 const CROWD_KINDS = { proto: 16, style: 32, hello: 16, port: 8 };
+// Per-server reports: at most this many servers per report, kept this
+// many days, and summed over the last few for the collector.
+const CROWD_SERVERS = 300;
+const CROWD_SERVER_DAYS = 7;
+const CROWD_SERVER_WINDOW = 3;
+
+/** Sums users' reports about servers over the last days into crowd.json for the collector (cmd/collect -crowd). */
+export function crowdServersSummary(rows, today) {
+  const servers = {};
+  for (const r of rows) servers[r.key] = [r.ok, r.n];
+  return { updated: new Date(today * DAY * 1000).toISOString(), days: CROWD_SERVER_WINDOW, servers };
+}
+
+async function publishCrowdServers(env) {
+  if (!env.FILES) return null;
+  const today = Math.floor(now() / DAY);
+  const { results } = await env.DB.prepare(
+    "SELECT key, SUM(ok) AS ok, SUM(n) AS n FROM crowd_servers WHERE day >= ?1 GROUP BY key HAVING SUM(n) >= 2",
+  ).bind(today - CROWD_SERVER_WINDOW).all();
+  const summary = crowdServersSummary(results, today);
+  await putList(env.FILES, "servers/crowd.json", new TextEncoder().encode(JSON.stringify(summary)).buffer);
+  return summary;
+}
+
+/** The administrator (or a test) publishes the summary now instead of at the hour. */
+async function adminPublishCrowd(request, env) {
+  await authAdmin(request, env);
+  const summary = await publishCrowdServers(env);
+  if (!summary) throw new HttpError(503, "No file storage is bound.");
+  return json({ servers: Object.keys(summary.servers).length });
+}
 const CROWD_DAYS = 14;
 // An operator's numbers are published only once this many reports came in,
 // so no one report can be told apart.
@@ -612,6 +698,18 @@ async function crowdReport(request, env) {
       rows.push([kind, code, Math.round(ok * scale), Math.round(n * scale)]);
     }
   }
+  // Per server: [key, ok, n], the key a 64-bit hash in hex (no address).
+  const servers = b.servers ?? [];
+  if (!Array.isArray(servers) || servers.length > CROWD_SERVERS) throw new HttpError(400, "Bad request.");
+  const srows = [];
+  for (const r of servers) {
+    if (!Array.isArray(r) || r.length !== 3 || typeof r[0] !== "string" || !/^[0-9a-f]{1,16}$/.test(r[0])) throw new HttpError(400, "Bad request.");
+    const [key, ok, n] = r;
+    if (!Number.isInteger(ok) || !Number.isInteger(n) || n < 1 || ok < 0 || ok > n) throw new HttpError(400, "Bad request.");
+    // One report counts for at most 20 tests of a server.
+    const scale = Math.min(1, 20 / n);
+    srows.push([key, Math.round(ok * scale), Math.round(n * scale)]);
+  }
   const limit = "stats:" + (await clientTag(request, env));
   if (await blocked(env, limit, 6, DAY)) throw new HttpError(429, "Too many reports.");
   await count(env, limit, DAY);
@@ -621,6 +719,13 @@ async function crowdReport(request, env) {
       `INSERT INTO crowd (asn, kind, code, day, ok, n) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
        ON CONFLICT (asn, kind, code, day) DO UPDATE SET ok = ok + ?5, n = n + ?6`,
     ).bind(asn, kind, code, day, ok, n));
+  for (const [key, ok, n] of srows) {
+    stmts.push(env.DB.prepare(
+      `INSERT INTO crowd_servers (key, day, ok, n) VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT (key, day) DO UPDATE SET ok = ok + ?3, n = n + ?4`,
+    ).bind(key, day, ok, n));
+  }
+  stmts.push(env.DB.prepare("DELETE FROM crowd_servers WHERE day < ?1").bind(day - CROWD_SERVER_DAYS));
   stmts.push(
     env.DB.prepare(
       `INSERT INTO crowd_reports (asn, day, reports) VALUES (?1, ?2, 1)

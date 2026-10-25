@@ -4,8 +4,10 @@ package node
 
 import (
 	"crypto/sha1"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
@@ -244,6 +246,9 @@ func (n *Node) needsXray() bool {
 	case "xhttp", "kcp":
 		return true
 	}
+	if maskNeedsXray(n.FinalMask) {
+		return true
+	}
 	if n.Proto == "vless" && n.Encryption != "" && n.Encryption != "none" {
 		return true
 	}
@@ -312,6 +317,9 @@ func (n *Node) Validate() error {
 		if n.Password == "" {
 			return fmt.Errorf("missing password")
 		}
+		if n.Proto == "hysteria2" && n.Obfs != "" && n.ObfsPassword == "" {
+			return fmt.Errorf("obfs without a password")
+		}
 	case "shadowsocks":
 		if n.Password == "" && n.Method != "none" {
 			return fmt.Errorf("missing password")
@@ -351,12 +359,27 @@ func (n *Node) Validate() error {
 		if n.Username == "" || n.Password == "" {
 			return fmt.Errorf("ssh needs a user and a password")
 		}
+		if n.HostKey != "" {
+			// "<algorithm> <base64>", as sing-box reads it.
+			f := strings.Fields(n.HostKey)
+			if len(f) < 2 || !strings.HasPrefix(f[0], "ssh-") && !strings.HasPrefix(f[0], "ecdsa-") {
+				return fmt.Errorf("bad host key")
+			}
+			if _, err := base64.StdEncoding.DecodeString(f[1]); err != nil {
+				if _, err := base64.RawStdEncoding.DecodeString(f[1]); err != nil {
+					return fmt.Errorf("bad host key")
+				}
+			}
+		}
 	case "openvpn":
 		if n.OVPN == nil || len(n.OVPN.CA) == 0 {
 			return fmt.Errorf("openvpn needs a CA")
 		}
 	default:
 		return fmt.Errorf("unsupported protocol %q", n.Proto)
+	}
+	if n.FinalMask != "" && !validFinalMask(n.FinalMask) {
+		return fmt.Errorf("bad fm")
 	}
 	if n.Security == "reality" {
 		if !validRealityKey(n.PublicKey) {
@@ -554,3 +577,52 @@ func (n *Node) pluginOpt(key string) string {
 // NoEndpoint reports whether the node has no server address to probe: the
 // sidecar methods (warp-plus, usque, Tor) and the serverless method.
 func (n *Node) NoEndpoint() bool { return n.Proto == "warpplus" || n.Proto == "direct" }
+
+// finalMask is the shape of Xray's finalmask: per direction, a list of
+// masks with a type and its own settings.
+type finalMask struct {
+	TCP []maskEntry `json:"tcp"`
+	UDP []maskEntry `json:"udp"`
+}
+
+type maskEntry struct {
+	Type     string          `json:"type"`
+	Settings json.RawMessage `json:"settings"`
+}
+
+// validFinalMask reports whether fm has the shape Xray reads; any other
+// shape makes Xray refuse the whole config, not just the one outbound.
+func validFinalMask(fm string) bool {
+	var m finalMask
+	if err := json.Unmarshal([]byte(fm), &m); err != nil {
+		return false
+	}
+	for _, list := range [][]maskEntry{m.TCP, m.UDP} {
+		for _, e := range list {
+			if e.Type == "" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// maskNeedsXray reports whether fm carries a mask only Xray applies: any
+// but the TLS fragment, which sing-box does on its own.
+func maskNeedsXray(fm string) bool {
+	if fm == "" {
+		return false
+	}
+	var m finalMask
+	if json.Unmarshal([]byte(fm), &m) != nil {
+		return false
+	}
+	for _, list := range [][]maskEntry{m.TCP, m.UDP} {
+		for _, e := range list {
+			if e.Type != "" && e.Type != "fragment" {
+				return true
+			}
+		}
+	}
+	return false
+}

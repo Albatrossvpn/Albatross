@@ -161,6 +161,14 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 		}
 	}
 	if err != nil {
+		if ctx.Err() == nil && (run == nil || run.Set == nil) {
+			// The core failed without naming a node. Left untested, the
+			// same nodes would form the same batch and fail the same way;
+			// as failures they back off and the pool moves on.
+			for _, n := range nodes {
+				onResult(Result{Node: n, Err: "the core could not start"})
+			}
+		}
 		return err
 	}
 	defer run.Stop()
@@ -187,12 +195,18 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 			}
 			proxy := &url.URL{Scheme: "http", User: url.UserPassword(tag, pass), Host: "127.0.0.1:" + strconv.Itoa(port)}
 			limit := timeout
-			if n.Engine() == node.EngineWarpPlus {
+			switch {
+			case n.Engine() == node.EngineWarpPlus, n.DNSTunnel():
+				// warp-plus negotiates first; a DNS tunnel moves
+				// a few hundred bytes per query.
 				limit = 3 * timeout
+			case n.ICMP():
+				limit = 2 * timeout
 			}
 			r := Probe(ctx, proxy, limit)
-			if !run.Alive() {
-				// The core crashed; the result says nothing about the node.
+			if !run.Alive() || ctx.Err() != nil {
+				// The core crashed, or the test was cut off; the result
+				// says nothing about the node.
 				return
 			}
 			r.Node = n
@@ -235,15 +249,28 @@ func (t *Tester) Through(ctx context.Context, name string, nodes []*node.Node, t
 }
 
 // Probe makes one real request through a proxy and returns delay, exit IP
-// and country.
+// and country. The delay is what a page feels once the connection stands:
+// the first request opens the connection (the server's handshake, the TLS
+// handshake with the site) and proves the server works; a second one on the
+// same connection is timed, and the first one's time is used only when the
+// second fails.
 func Probe(ctx context.Context, proxy *url.URL, timeout time.Duration) Result {
 	var lastErr error
 	for _, endpoint := range TestEndpoints {
+		tr := traceTransport(proxy, timeout)
 		start := time.Now()
-		ip, country, err := fetchTrace(ctx, proxy, endpoint, timeout)
+		ip, country, err := fetchTrace(ctx, tr, endpoint, timeout)
 		if err == nil {
-			return Result{OK: true, Delay: time.Since(start), Country: country, ExitIP: ip}
+			delay := time.Since(start)
+			// A warm request cannot take longer than a cold one did.
+			warm := time.Now()
+			if _, _, err := fetchTrace(ctx, tr, endpoint, min(timeout, delay+time.Second)); err == nil {
+				delay = time.Since(warm)
+			}
+			tr.CloseIdleConnections()
+			return Result{OK: true, Delay: max(delay, time.Millisecond), Country: country, ExitIP: ip}
 		}
+		tr.CloseIdleConnections()
 		if forged(err) {
 			return Result{Tampered: true, Err: "intercepts HTTPS"}
 		}
@@ -256,19 +283,24 @@ func Probe(ctx context.Context, proxy *url.URL, timeout time.Duration) Result {
 	return Result{Err: shortErr(lastErr)}
 }
 
-func fetchTrace(ctx context.Context, proxy *url.URL, endpoint string, timeout time.Duration) (ip, country string, err error) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	tr := &http.Transport{
+// traceTransport reaches the test endpoints through proxy, keeping the
+// connection for a second request.
+func traceTransport(proxy *url.URL, timeout time.Duration) *http.Transport {
+	return &http.Transport{
 		Proxy:                 http.ProxyURL(proxy),
-		DisableKeepAlives:     true,
+		MaxIdleConnsPerHost:   1,
+		IdleConnTimeout:       timeout,
 		ForceAttemptHTTP2:     false,
 		TLSHandshakeTimeout:   timeout,
 		ResponseHeaderTimeout: timeout,
 		DialContext:           (&net.Dialer{Timeout: 3 * time.Second}).DialContext,
 		TLSClientConfig:       &tls.Config{RootCAs: RootCAs},
 	}
-	defer tr.CloseIdleConnections()
+}
+
+func fetchTrace(ctx context.Context, tr *http.Transport, endpoint string, timeout time.Duration) (ip, country string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return "", "", err
@@ -434,7 +466,8 @@ func DNSServer(addr string) map[string]any {
 
 func testConfig(s *core.Set, port int, pass, localDNS string, mobile bool) map[string]any {
 	users := make([]any, 0, len(s.Tags))
-	rules := make([]any, 0, len(s.Tags)+1)
+	// The serverless nodes' TLS is fragmented before they are routed.
+	rules := core.FragmentRules(s, func(tag string) map[string]any { return map[string]any{"auth_user": []string{tag}} })
 	for _, tag := range s.Tags {
 		users = append(users, map[string]any{"username": tag, "password": pass})
 		rules = append(rules, map[string]any{"auth_user": []string{tag}, "outbound": tag})

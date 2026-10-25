@@ -11,7 +11,9 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,12 +25,16 @@ var globalpingAPI = "https://api.globalping.io/v1/measurements"
 // iranReach asks probes inside Iran whether each address answers a TCP
 // connection. The collector's own test runs from the US and cannot see
 // Iran's filtering; this can. Addresses missing from the result were not
-// checked (no probe free, quota used up).
+// checked (no probe free, quota used up). The project's own probes (GLOBALPING_TAGS) are asked first;
+// when none of them is online, the volunteers' probes in the country take
+// over, so the check never hangs on one machine being off.
 func iranReach(ctx context.Context, endpoints []string, probes int) map[string]bool {
 	out := map[string]bool{}
 	var mu sync.Mutex
 	stop := make(chan struct{})
-	var once sync.Once
+	var once, fell sync.Once
+	var own atomic.Bool
+	own.Store(gpOwnTags() != nil)
 	sem := make(chan struct{}, 4)
 	var wg sync.WaitGroup
 	for _, ep := range endpoints {
@@ -38,7 +44,13 @@ func iranReach(ctx context.Context, endpoints []string, probes int) map[string]b
 			wg.Add(1)
 			go func(ep string) {
 				defer func() { <-sem; wg.Done() }()
-				open, err := tcpFromIran(ctx, ep, probes)
+				useOwn := own.Load()
+				open, err := tcpFromIran(ctx, ep, probes, useOwn)
+				if err == errNoProbes && useOwn {
+					fell.Do(func() { log.Print("globalping: no own probe online; using the volunteers' probes in Iran") })
+					own.Store(false)
+					open, err = tcpFromIran(ctx, ep, 2, false)
+				}
 				if err != nil {
 					if err == errNoProbes || err == errQuota {
 						once.Do(func() { log.Printf("globalping: %v", err); close(stop) })
@@ -57,12 +69,43 @@ func iranReach(ctx context.Context, endpoints []string, probes int) map[string]b
 	return out
 }
 
+// gpOwnTags returns the tags of the project's own adopted probes inside
+// the country (GLOBALPING_TAGS, comma separated, as the dashboard shows
+// them, like u-albatrossvpn), or nil when there are none.
+func gpOwnTags() []string {
+	var list []string
+	for _, t := range strings.Split(os.Getenv("GLOBALPING_TAGS"), ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			list = append(list, t)
+		}
+	}
+	return list
+}
+
+// gpLocations picks the probes: the project's own when own is set (they
+// earn the credits the checks spend), else any probe in Iran.
+func gpLocations(own bool) []any {
+	if tags := gpOwnTags(); own && tags != nil {
+		return []any{map[string]any{"tags": tags}}
+	}
+	return []any{map[string]any{"country": "IR"}}
+}
+
+// gpProbes is how many probes test each address: one own probe is
+// enough; among volunteers' probes two make up for a flaky one.
+func gpProbes() int {
+	if gpOwnTags() != nil {
+		return 1
+	}
+	return 2
+}
+
 var (
 	errNoProbes = fmt.Errorf("no probes in Iran right now")
 	errQuota    = fmt.Errorf("hourly quota used up")
 )
 
-func tcpFromIran(ctx context.Context, endpoint string, probes int) (bool, error) {
+func tcpFromIran(ctx context.Context, endpoint string, probes int, own bool) (bool, error) {
 	host, portS, err := net.SplitHostPort(endpoint)
 	if err != nil {
 		return false, err
@@ -71,7 +114,7 @@ func tcpFromIran(ctx context.Context, endpoint string, probes int) (bool, error)
 	body, _ := json.Marshal(map[string]any{
 		"type":               "ping",
 		"target":             host,
-		"locations":          []any{map[string]any{"country": "IR"}},
+		"locations":          gpLocations(own),
 		"limit":              probes,
 		"measurementOptions": map[string]any{"packets": 2, "protocol": "TCP", "port": port},
 	})

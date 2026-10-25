@@ -175,7 +175,7 @@ func ParseLink(link string) (*Node, error) {
 	case "wireguard", "wg":
 		n, err = parseWireGuard(link)
 	case "ssh":
-		return parseSSH(link)
+		n, err = parseSSH(link)
 	case "socks", "socks5":
 		n, err = parseSocks(link)
 	case "albatross":
@@ -548,6 +548,24 @@ func parseShadowrocketVMess(dec string, q map[string]string, name string) (*Node
 	return n, nil
 }
 
+// ssCredential says whether a link's userinfo is a Shadowsocks
+// "method:password", plain or base64, with a method Shadowsocks has.
+func ssCredential(userinfo string) bool {
+	cred := unescape(userinfo)
+	if dec, err := decodeB64(cred); err == nil && utf8.Valid(dec) && strings.Contains(string(dec), ":") {
+		cred = string(dec)
+	}
+	method, _, ok := strings.Cut(cred, ":")
+	if !ok {
+		return false
+	}
+	method = strings.ToLower(method)
+	if method == "chacha20-poly1305" {
+		method = "chacha20-ietf-poly1305"
+	}
+	return ssMethods[method]
+}
+
 func parseSS(link string) (*Node, error) {
 	body := link[len("ss://"):]
 	name := ""
@@ -568,7 +586,9 @@ func parseSS(link string) (*Node, error) {
 		}
 	} else if at := strings.LastIndex(body, "@"); query["encryption"] != "" || (isUUID(body[:at]) && (query["type"] != "" || query["security"] != "")) {
 		return parseStandard("vless://"+link[len("ss://"):], "vless")
-	} else if query["type"] != "" || query["security"] != "" {
+	} else if (query["type"] != "" || query["security"] != "") && !ssCredential(body[:strings.LastIndex(body, "@")]) {
+		// Panels such as 3x-ui add type= to genuine Shadowsocks links, so
+		// only a userinfo that is not "method:password" means Trojan.
 		return parseStandard("trojan://"+link[len("ss://"):], "trojan")
 	}
 	var method, password, hostport string

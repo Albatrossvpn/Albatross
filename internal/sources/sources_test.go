@@ -21,17 +21,24 @@ func TestSealedOwnList(t *testing.T) {
 		}
 	}
 	OwnKey = strings.Repeat("ab", 32)
-	if c := Central(7); !c[0].Sealed || !c[1].Sealed || c[0].URL == c[1].URL || !strings.Contains(c[0].URL, "/own-") {
-		t.Fatalf("own lists missing: %+v", c[:2])
+	c := Central(7)
+	if !c[0].Sealed || !c[0].Relay || !strings.HasSuffix(c[0].URL, "/own-0.bin") {
+		t.Fatalf("the relay list must come first for every install: %+v", c[0])
+	}
+	if !c[1].Sealed || !c[2].Sealed || c[1].Relay || c[1].URL == c[2].URL || !strings.Contains(c[1].URL, "/own-") {
+		t.Fatalf("own lists missing: %+v", c[1:3])
+	}
+	if SnapshotFor(c[1]) != "" {
+		t.Fatal("a sealed bucket has no plaintext snapshot")
 	}
 	// Every install reads two different parts, and every part is read.
 	seen := map[string]bool{}
 	for i := range uint32(64) {
 		c := Central(i)
-		if c[0].URL == c[1].URL {
+		if c[1].URL == c[2].URL {
 			t.Fatalf("install %d reads one part twice", i)
 		}
-		seen[c[0].URL], seen[c[1].URL] = true, true
+		seen[c[1].URL], seen[c[2].URL] = true, true
 	}
 	if len(seen) != OwnBuckets {
 		t.Fatalf("%d parts read, want %d", len(seen), OwnBuckets)
@@ -117,5 +124,25 @@ func TestAddressesOwnStorageFirst(t *testing.T) {
 	}
 	if got := Addresses("https://example.net/sub.txt"); !slices.Equal(got, []string{"https://example.net/sub.txt"}) {
 		t.Fatalf("plain file: %v", got)
+	}
+}
+
+func TestDomesticMirrors(t *testing.T) {
+	defer func(a, b string) { WorkerMirror, DomesticMirror = a, b }(WorkerMirror, DomesticMirror)
+	WorkerMirror, DomesticMirror = "https://accounts.example", "http://5.6.7.8:8081/tok, http://mirror.example.ir:8081/tok/"
+	u := CentralBase + "own-0.bin"
+	addrs := Addresses(u)
+	if addrs[0] != "https://accounts.example/list/servers/own-0.bin" || addrs[1] != u {
+		t.Fatalf("own storage then GitHub first: %v", addrs[:2])
+	}
+	last := addrs[len(addrs)-2:]
+	if last[0] != "http://5.6.7.8:8081/tok/list/servers/own-0.bin" || last[1] != "http://mirror.example.ir:8081/tok/list/servers/own-0.bin" {
+		t.Fatalf("domestic mirrors last as usual: %v", last)
+	}
+	if !IsDomestic(last[0]) || IsDomestic(u) || IsDomestic("http://5.6.7.8:8081/other") {
+		t.Fatal("IsDomestic")
+	}
+	if len(Mirrors("https://raw.githubusercontent.com/other/repo/main/x.txt")) != 4 {
+		t.Fatal("domestic mirrors serve only the app's own files")
 	}
 }

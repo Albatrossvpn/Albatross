@@ -51,6 +51,7 @@ type region struct {
 type publicSettings struct {
 	Mode            string `json:"mode"`
 	Bypass          string `json:"bypass"`
+	BypassApps      bool   `json:"bypass_apps"`
 	Protocol        string `json:"protocol"`
 	BlockAds        bool   `json:"block_ads"`
 	SecureOnly      bool   `json:"secure_only"`
@@ -64,7 +65,7 @@ type publicSettings struct {
 
 func publicSettingsOf(s engine.Settings) publicSettings {
 	return publicSettings{
-		Mode: s.Mode, Bypass: s.Bypass, Protocol: s.Protocol, BlockAds: s.BlockAds,
+		Mode: s.Mode, Bypass: s.Bypass, BypassApps: s.BypassApps, Protocol: s.Protocol, BlockAds: s.BlockAds,
 		SecureOnly: s.SecureOnly, AutoConnect: s.AutoConnect, StartWithSystem: s.StartWithSystem,
 		AllowLAN: s.AllowLAN, HelpOthers: s.HelpOthers, ShareStats: s.ShareStats, OverrideGPS: s.OverrideGPS,
 	}

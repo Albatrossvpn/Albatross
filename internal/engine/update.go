@@ -16,12 +16,19 @@ import (
 	"time"
 
 	"github.com/Albatrossvpn/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/updatesig"
 )
 
 // UpdateURL is the manifest that says which versions may still connect.
 // Editing update.json on the main branch reaches every installed copy
 // within hours (GitHub's CDN mirrors cache it); see the README.
 var UpdateURL = "https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json"
+
+// UpdateKey is the hex Ed25519 public key the update manifest must be
+// signed with (internal/updatesig), set at build time with
+// -X .../internal/engine.UpdateKey=<hex>. Empty (development builds and
+// tests) accepts unsigned manifests.
+var UpdateKey = ""
 
 const releasesURL = "https://github.com/Albatrossvpn/Albatross/releases/latest"
 
@@ -48,6 +55,30 @@ type UpdateManifest struct {
 	// Files are the new version's installers by platform (updateKey), which
 	// the app downloads and opens itself.
 	Files map[string]UpdateFile `json:"files,omitempty"`
+	// Signed is the manifest as signed (base64 of its JSON) and Sig the
+	// signature (updatesig). A build with UpdateKey trusts only those
+	// contents; the plain fields above serve copies before 1.0.0.
+	Signed string `json:"signed,omitempty"`
+	Sig    string `json:"sig,omitempty"`
+}
+
+// verifyManifest returns the manifest to trust. With UpdateKey set, that is
+// the signed payload's contents (and false when the signature is missing or
+// wrong); without a key, the manifest as given.
+func verifyManifest(m UpdateManifest) (UpdateManifest, bool) {
+	if UpdateKey == "" {
+		return m, true
+	}
+	payload, err := updatesig.Verify(UpdateKey, m.Signed, m.Sig)
+	if err != nil {
+		return UpdateManifest{}, false
+	}
+	var inner UpdateManifest
+	if json.Unmarshal(payload, &inner) != nil {
+		return UpdateManifest{}, false
+	}
+	inner.Signed, inner.Sig = m.Signed, m.Sig
+	return inner, true
 }
 
 // UpdateFile is one platform's installer: where to get it, in order, and
@@ -83,6 +114,13 @@ func (e *Engine) checkUpdate() {
 	if res.Text == "" || json.Unmarshal([]byte(res.Text), &m) != nil {
 		return
 	}
+	m, ok := verifyManifest(m)
+	if !ok {
+		// A forged or damaged manifest changes nothing: the last good one
+		// stays in force.
+		e.logf("warn", "The update manifest is not signed by the project's key; ignored.")
+		return
+	}
 	saveJSON(filepath.Join(e.dir, "update.json"), m)
 	e.applyUpdate(m)
 }
@@ -91,6 +129,9 @@ func (e *Engine) loadUpdate() {
 	b, err := os.ReadFile(filepath.Join(e.dir, "update.json"))
 	var m UpdateManifest
 	ok := err == nil && json.Unmarshal(b, &m) == nil
+	if ok {
+		m, ok = verifyManifest(m)
+	}
 	if !ok {
 		m = UpdateManifest{}
 	}
@@ -154,10 +195,21 @@ func (e *Engine) applyUpdate(m UpdateManifest) {
 		info.Progress, info.Error = was.Progress, was.Error
 	}
 	e.update = info
+	forcing := e.forcing
+	if info != nil && info.Required && info.InApp && !forcing {
+		// One retry loop at a time; a newer forced version is picked up
+		// by the running loop.
+		e.forcing = true
+	}
 	e.mu.Unlock()
 	if info != nil && info.Required && (was == nil || !was.Required) {
 		e.logf("warn", "This version is no longer supported; install the new version to connect.")
+	}
+	if info != nil && info.Required && !(was != nil && was.Required && !info.InApp) {
 		if info.InApp {
+			if forcing {
+				return // the running loop follows the manifest
+			}
 			// Fetched while the connection still stands, so a network
 			// that blocks the download site does not strand the user: the
 			// app disconnects only once the new version is downloaded and
@@ -293,6 +345,12 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 	if sha256File(path) == want {
 		return path, nil
 	}
+	e.mu.Lock()
+	bad := e.badDownloads[version]
+	e.mu.Unlock()
+	if bad >= 2 {
+		return "", errors.New("the downloaded file did not match its checksum twice; waiting for a new release")
+	}
 	var clients []*http.Client
 	if c := e.proxyClient(); c != nil {
 		clients = append(clients, c)
@@ -300,11 +358,26 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 	direct := directUpdateClient()
 	clients = append(clients, direct)
 	err := errors.New("no address")
+	// Mirrors inside the country serve the installers too, by name: last
+	// as usual, first where foreign addresses are cut. Plain http is fine
+	// for them alone: the file is checked against its SHA-256.
+	urls := append([]string(nil), f.URLs...)
+	var dom []string
+	for _, u := range f.URLs {
+		for _, b := range sources.DomesticBases() {
+			dom = append(dom, b+"/dl/"+filepath.Base(u))
+		}
+	}
+	if e.fetchMode() == sources.ModeDomestic {
+		urls = append(dom, urls...)
+	} else {
+		urls = append(urls, dom...)
+	}
 	for _, c := range clients {
 		isDirect := c == direct
 		c = withHeaderTimeout(c)
-		for _, u := range f.URLs {
-			if !strings.HasPrefix(u, "https://") {
+		for _, u := range urls {
+			if !strings.HasPrefix(u, "https://") && !sources.IsDomestic(u) {
 				continue
 			}
 			uc := c
@@ -330,6 +403,12 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 				return path, nil
 			}
 			os.Remove(path)
+			e.mu.Lock()
+			if e.badDownloads == nil {
+				e.badDownloads = map[string]int{}
+			}
+			e.badDownloads[version]++
+			e.mu.Unlock()
 			err = errors.New("the file does not match its checksum")
 		}
 	}
@@ -441,13 +520,24 @@ func sha256File(path string) string {
 // minutes (through the VPN once one is up), and disconnects once its
 // installer is open.
 func (e *Engine) forceUpdate(version string) {
+	defer func() {
+		e.mu.Lock()
+		e.forcing = false
+		e.mu.Unlock()
+	}()
+	fails := 0
 	for {
 		err := e.GetUpdate()
 		e.mu.Lock()
 		u := e.update
 		e.mu.Unlock()
-		if u == nil || !u.Required || u.Latest != version {
-			return // a newer manifest took over
+		if u == nil || !u.Required || !u.InApp {
+			return // the requirement was lifted, or it has no installer
+		}
+		if u.Latest != version {
+			// A newer forced version: the loop follows it.
+			version, fails = u.Latest, 0
+			continue
 		}
 		if err == nil {
 			e.Disconnect()
@@ -455,10 +545,15 @@ func (e *Engine) forceUpdate(version string) {
 			return
 		}
 		// A download the user started (or an earlier call) is still running:
-		// wait for it rather than treating it as done.
+		// wait for it rather than treating it as done. Failures back off,
+		// from a few minutes to two hours: each try may fetch 100 MB
+		// through a metered connection.
 		wait := updateRetry
 		if errors.Is(err, errUpdating) {
 			wait = updatePoll
+		} else {
+			wait = min(updateRetry<<min(fails, 6), 2*time.Hour)
+			fails++
 		}
 		done := context.Background().Done()
 		if e.ctx != nil {
@@ -552,6 +647,11 @@ func (e *Engine) InstallerFile() (string, error) {
 	path, err := e.downloadUpdate(f, m.LatestVersion)
 	e.mu.Lock()
 	e.updating = false
+	// The download wrote its progress onto the update on offer, which is
+	// not downloading: the banner must not stay at "Downloading… N%".
+	if e.update != nil && e.update.Latest == m.LatestVersion && e.update.Progress < 100 {
+		e.update.Progress = 0
+	}
 	e.mu.Unlock()
 	if err != nil {
 		return "", errors.New("The installer could not be downloaded: " + err.Error())

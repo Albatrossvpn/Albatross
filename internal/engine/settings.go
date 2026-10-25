@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Albatrossvpn/vp/internal/sources"
 )
@@ -16,6 +17,10 @@ type Settings struct {
 	// Bypass is the code of a region (see regions.go) whose own sites are
 	// opened directly instead of through the VPN; "" turns it off.
 	Bypass string `json:"bypass"`
+	// BypassApps leaves the bypass region's own apps outside the tunnel on
+	// phones (DomesticApps): banks and other services that refuse a foreign
+	// address or stop when a VPN is on keep working while connected.
+	BypassApps bool `json:"bypass_apps"`
 	// Protocol limits connections to one protocol ("" = automatic); see
 	// ProtocolChoices.
 	Protocol string `json:"protocol"`
@@ -64,6 +69,9 @@ type Settings struct {
 	DisabledSources []string `json:"disabled_sources"`
 	// UserSources are subscriptions and channels the user added.
 	UserSources []sources.Source `json:"user_sources"`
+	// DomesticMirrors are mirror bases inside the country learned from
+	// share codes (sources.DomesticBases), beside the built-in ones.
+	DomesticMirrors []string `json:"domestic_mirrors,omitempty"`
 	// Warp also tries Cloudflare WARP, WARP in WARP and Psiphon.
 	Warp bool `json:"warp"`
 	// SpoofSNI, when set and running as administrator, sends a forged
@@ -106,6 +114,7 @@ func DefaultSettings() Settings {
 		// Iranian sites open directly: faster, it saves the servers'
 		// bandwidth, and many of them refuse foreign visitors.
 		Bypass:      "IR",
+		BypassApps:  true,
 		ProxyPort:   10808,
 		AutoSwitch:  true,
 		Fragment:    "auto",
@@ -187,4 +196,11 @@ func (s *Settings) normalize() {
 	if !known {
 		s.Protocol = ""
 	}
+	var mirrors []string
+	for _, m := range s.DomesticMirrors {
+		if m = strings.TrimRight(strings.TrimSpace(m), "/"); validMirror(m) && len(mirrors) < shareMirrorMax {
+			mirrors = append(mirrors, m)
+		}
+	}
+	s.DomesticMirrors = mirrors
 }

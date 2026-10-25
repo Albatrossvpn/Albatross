@@ -29,6 +29,28 @@ jobs:
         with:
           ref: servers
           path: published
+      # wrangler reads users' reports from the project's own storage and
+      # puts the files back there (deploy/files/lib.sh).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Users' reports
+        # What users' apps found works on their networks (crowd.json,
+        # written hourly by the account service): confirmed servers go
+        # first in hot.txt, failing ones are left out.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        working-directory: backend
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            npx wrangler r2 object get albatross-files/list/servers/crowd.json --file "$RUNNER_TEMP/crowd.json" --remote || echo "::warning::no crowd.json yet"
+            npx wrangler r2 object get albatross-files/list/servers/iran.json --file "$RUNNER_TEMP/iran.json" --remote || echo "::warning::no report from a tester inside the country yet (deploy/tester)"
+          fi
       - name: Cores
         env:
           SINGBOX_VERSION: "1.14.4"
@@ -43,9 +65,12 @@ jobs:
         env:
           SING_BOX: /tmp/cores/sing-box
           XRAY: /tmp/cores/xray
+          GLOBALPING_TOKEN: ${{ secrets.GLOBALPING_TOKEN }}
+          # Tags of the project's own probes inside the country (dashboard), comma separated.
+          GLOBALPING_TAGS: ${{ vars.GLOBALPING_TAGS }}
         run: |
           cat published/hot.txt published/fresh.txt 2>/dev/null | head -n 4000 > "$RUNNER_TEMP/try.txt"
-          go run ./cmd/collect -hot-from "$RUNNER_TEMP/try.txt" -real 1500 -out published
+          go run ./cmd/collect -hot-from "$RUNNER_TEMP/try.txt" -real 1500 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" -out published
       - name: Publish
         working-directory: published
         run: |
@@ -71,4 +96,6 @@ jobs:
         env:
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: bash deploy/files/publish-lists.sh "$(bash build/account-url.sh | cut -d, -f1)" servers published/hot.txt

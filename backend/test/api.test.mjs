@@ -131,6 +131,17 @@ test("the administrator renews, limits time, disables and re-enables", async () 
   assert.equal((await call("PATCH", `admin/users/${id}`, { token: admin, body: { quota_bytes: -5 } })).status, 400);
 });
 
+test("a usage report sent again with the same id is counted once", async () => {
+  const c = await call("POST", "admin/users", { token: admin, body: { username: "twice", password: "twice-pass-1", quota_bytes: 10 * GB } });
+  assert.equal(c.status, 201);
+  const tok = (await call("POST", "login", { body: { username: "twice", password: "twice-pass-1" } })).body.token;
+  const body = { bytes: 1000, seconds: 10, id: "abcdef0123456789" };
+  assert.equal((await call("POST", "usage", { token: tok, body })).body.account.used_bytes, 1000);
+  assert.equal((await call("POST", "usage", { token: tok, body })).body.account.used_bytes, 1000, "the same report again");
+  assert.equal((await call("POST", "usage", { token: tok, body: { ...body, id: "fedcba9876543210" } })).body.account.used_bytes, 2000, "a new report");
+  assert.equal((await call("POST", "usage", { token: tok, body: { bytes: 5, seconds: 0 } })).body.account.used_bytes, 2005, "without an id, as before");
+});
+
 test("concurrent reports from several devices add up exactly", async () => {
   const id = (await call("GET", "admin/users?q=ada", { token: admin })).body.users[0].id;
   await call("PATCH", `admin/users/${id}`, { token: admin, body: { reset_usage: true, quota_bytes: 0 } });
@@ -280,6 +291,24 @@ test("crowd stats: operators appear after three reports; bad reports are refused
   if (mine.asn !== 58224) assert.equal(mine.asns["58224"], undefined, "asn=self gives only the asker's network");
 });
 
+test("users' reports about servers are summed for the collector", async () => {
+  const body = { asn: 44244, proto: [[2, 3, 4]], servers: [["1a2b", 3, 3], ["ffff", 0, 6]] };
+  assert.equal((await call("POST", "stats", { body, ip: "5.5.5.1" })).status, 200);
+  assert.equal((await call("POST", "stats", { body: { asn: 1, servers: [["zz", 1, 1]] }, ip: "5.5.5.2" })).status, 400, "a key is hex");
+  assert.equal((await call("POST", "stats", { body: { asn: 1, servers: [["1a2b", 2, 1]] }, ip: "5.5.5.3" })).status, 400, "passes within tests");
+  assert.equal((await call("POST", "stats", { body: { asn: 44244, servers: [["1a2b", 1, 2]] }, ip: "5.5.5.4" })).status, 200);
+  assert.equal((await call("POST", "admin/crowd/publish")).status, 401);
+  const pub = await call("POST", "admin/crowd/publish", { token: admin });
+  assert.equal(pub.status, 200);
+  assert.equal(pub.body.servers, 2);
+  const f = await fetch(BASE + "/list/servers/crowd.json");
+  assert.equal(f.status, 200);
+  const j = await f.json();
+  assert.deepEqual(j.servers["1a2b"], [4, 5]);
+  assert.deepEqual(j.servers.ffff, [0, 6]);
+  assert.equal(j.days, 3);
+});
+
 test("pages are served; unknown API paths are 404", async () => {
   const home = await fetch(BASE + "/");
   assert.equal(home.status, 200);
@@ -316,6 +345,52 @@ test("the app's own files: only the administrator publishes them; anyone reads t
   const m = await fetch(BASE + "/list/main/update.json");
   assert.match(m.headers.get("content-type"), /^application\/json/);
   assert.equal((await m.json()).latest_version, "9.9.9");
+});
+
+test("subscriptions for other devices: one address per account, servers by country, void after a password change", async () => {
+  const put = fetch(BASE + "/api/v1/admin/list/servers/hot.txt", {
+    method: "PUT", headers: { Authorization: "Bearer " + admin, "Content-Type": "text/plain" },
+    body: "vless://a@b:443#Germany-1\ntrojan://p@h:443#US%20%F0%9F%87%BA%F0%9F%87%B8%20fast\nss://YWVzOmJhc2U@h:8388#no-country\n",
+  });
+  assert.equal((await put).status, 200);
+  const c = await call("POST", "admin/users", { token: admin, body: { username: "subscriber", password: "sub-pass-1234", quota_bytes: 100 * GB } });
+  assert.equal(c.status, 201);
+  let token = (await call("POST", "login", { body: { username: "subscriber", password: "sub-pass-1234" } })).body.token;
+  assert.equal((await call("GET", "sub")).status, 401, "signed-in users only");
+  const info = await call("GET", "sub", { token });
+  assert.equal(info.status, 200);
+  assert.match(info.body.url, /^https?:\/\/[^/]+\/sub\/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  assert.deepEqual(info.body.countries.map((x) => [x.code, x.count]), [["DE", 1], ["US", 1]]);
+  assert.equal(info.body.servers, 3);
+  // The local server answers under the deployed name; the address is reached here.
+  info.body.url = BASE + new URL(info.body.url).pathname;
+
+  const all = await fetch(info.body.url);
+  assert.equal(all.status, 200);
+  assert.match(all.headers.get("subscription-userinfo"), /download=0; total=107374182400/);
+  assert.equal(all.headers.get("profile-title"), "base64:" + btoa("Albatross All servers"));
+  const links = atob(await all.text()).trim().split("\n");
+  assert.equal(links.length, 3);
+  assert.equal(decodeURIComponent(links[0].split("#")[1]), "Albatross 🇩🇪 Germany 1");
+  assert.equal(links.some((l) => /Raydikalx|fast|no-country/.test(l)), false, "the servers' own names never show");
+  const de = await fetch(info.body.url + "?c=de");
+  assert.equal(atob(await de.text()).trim().split("\n").length, 1);
+  assert.equal((await fetch(info.body.url + "?c=zz")).status, 200, "an unknown country is an empty list");
+  assert.equal((await fetch(info.body.url + "?c=nope")).status, 404);
+  assert.equal((await fetch(BASE + "/sub/not.a.token")).status, 401);
+
+  // The address stops working when the password changes, like every other session.
+  const pw = await call("POST", "password", { token, body: { old_password: "sub-pass-1234", new_password: "sub-pass-5678" } });
+  assert.equal(pw.status, 200);
+  assert.equal((await fetch(info.body.url)).status, 401);
+  // An account that may not connect gets no servers.
+  token = pw.body.token;
+  const fresh = BASE + new URL((await call("GET", "sub", { token })).body.url).pathname;
+  assert.equal((await fetch(fresh)).status, 200);
+  const users = await call("GET", "admin/users?q=subscriber", { token: admin });
+  const id = users.body.users[0].id;
+  assert.equal((await call("PATCH", `admin/users/${id}`, { token: admin, body: { disabled: true } })).status, 200);
+  assert.equal((await fetch(fresh)).status, 403);
 });
 
 test("copies older than the manifest's min_version are refused; the website never is", async () => {
