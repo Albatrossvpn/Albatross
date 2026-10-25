@@ -97,3 +97,16 @@ func Regions() []RegionInfo {
 	}
 	return out
 }
+
+// DomesticApps lists the package-name prefixes of the region's own apps
+// (Settings.BypassApps). Iranian apps are published under ir.* almost
+// without exception; the banks and services that are not are named.
+func DomesticApps(code string) []string {
+	if code != "IR" {
+		return nil
+	}
+	return []string{"ir.", "com.pmb.", "com.samanpr.", "com.farazpardazan.", "com.bki.", "com.sadad", "com.tosan.",
+		"com.ada.mbank", "com.refah", "com.saman", "com.bsi.", "com.tejarat", "com.pasargad", "com.parsian", "com.sepah",
+		"com.ansar", "com.resalat", "com.mellat", "com.bmi.", "com.hamrahbank", "com.snapp", "com.digikala", "com.zarinpal",
+		"com.mydigipay", "com.sibche", "com.tap30", "com.alibaba.ir", "com.divar", "com.sheypoor", "com.myket", "com.farsitel"}
+}

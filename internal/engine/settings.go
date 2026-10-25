@@ -16,6 +16,10 @@ type Settings struct {
 	// Bypass is the code of a region (see regions.go) whose own sites are
 	// opened directly instead of through the VPN; "" turns it off.
 	Bypass string `json:"bypass"`
+	// BypassApps leaves the bypass region's own apps outside the tunnel on
+	// phones (DomesticApps): banks and other services that refuse a foreign
+	// address or stop when a VPN is on keep working while connected.
+	BypassApps bool `json:"bypass_apps"`
 	// Protocol limits connections to one protocol ("" = automatic); see
 	// ProtocolChoices.
 	Protocol string `json:"protocol"`
@@ -106,6 +110,7 @@ func DefaultSettings() Settings {
 		// Iranian sites open directly: faster, it saves the servers'
 		// bandwidth, and many of them refuse foreign visitors.
 		Bypass:      "IR",
+		BypassApps:  true,
 		ProxyPort:   10808,
 		AutoSwitch:  true,
 		Fragment:    "auto",
