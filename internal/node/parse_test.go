@@ -356,3 +356,34 @@ func TestUsqueMethods(t *testing.T) {
 		t.Fatalf("register args: %q", r)
 	}
 }
+
+func TestVMessDNSTunnel(t *testing.T) {
+	j := `{"v":"2","ps":"Albatross-DNS","add":"203.0.113.9","port":"53","id":"007a5c24-cdbe-4adc-a79f-ca2768fef8bb","aid":"0","scy":"aes-128-gcm","net":"kcp","type":"none","path":"abcd1234","host":"","tls":"","fm":{"udp":[{"type":"xdns","settings":{"domains":[{"names":["t.example.com"]}]}}]}}`
+	n := mustParse(t, "vmess://"+base64.StdEncoding.EncodeToString([]byte(j)))
+	if !n.DNSTunnel() || !StyleDNSTunnel(n.Style()) || !StyleDNSPort(n.Style()) {
+		t.Fatalf("a DNS tunnel must be recognised: style %d", n.Style())
+	}
+	if StyleDNSTunnel(mustParse(t, "vmess://"+base64.StdEncoding.EncodeToString([]byte(`{"v":"2","add":"1.2.3.4","port":"53","id":"007a5c24-cdbe-4adc-a79f-ca2768fef8bb","net":"kcp","path":"s"}`))).Style()) {
+		t.Fatal("plain mKCP on 53 is not a DNS tunnel")
+	}
+	obs := n.Xray("x0")
+	if len(obs) == 0 {
+		t.Fatal("no outbound")
+	}
+	ob := obs[0]
+	SetDNSTunnelResolvers(ob, "192.168.1.1")
+	stream := ob["streamSettings"].(map[string]any)
+	k := stream["kcpSettings"].(map[string]any)
+	if k["mtu"] != 130 || k["tti"] != 200 {
+		t.Fatalf("kcp tuning: %v", k)
+	}
+	udp := stream["finalmask"].(map[string]any)["udp"].([]any)
+	settings := udp[0].(map[string]any)["settings"].(map[string]any)
+	res := settings["resolvers"].([]any)[0].(map[string]any)["addrs"].([]string)
+	if res[0] != "udp://192.168.1.1:53" || len(res) < 2 {
+		t.Fatalf("resolvers: %v", res)
+	}
+	if n.Engine() != EngineXray {
+		t.Fatalf("engine %v", n.Engine())
+	}
+}

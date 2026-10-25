@@ -42,6 +42,9 @@ type BuildOptions struct {
 	Spoof string
 	// LineMbps is the measured line speed (see node.SingBoxOptions).
 	LineMbps int
+	// LocalDNS is the network's resolver (host or host:port), which DNS
+	// tunnels send their queries through; empty means unknown.
+	LocalDNS string
 	// OnLine, when set, receives every line the cores of this run print.
 	OnLine func(core, line string)
 	// warpPorts maps warp-plus nodes to the SOCKS port their process
@@ -125,6 +128,9 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 			"settings": map[string]any{"udp": true, "auth": "password", "accounts": []any{map[string]any{"user": inTag, "pass": pass}}},
 		})
 		for _, ob := range n.Xray(xtag) {
+			if n.DNSTunnel() {
+				node.SetDNSTunnelResolvers(ob, o.LocalDNS)
+			}
 			outbounds = append(outbounds, ob)
 		}
 		rules = append(rules, map[string]any{"inboundTag": []string{inTag}, "outboundTag": xtag})

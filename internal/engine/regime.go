@@ -423,6 +423,10 @@ func (r regime) bonus(p regimeProbe, en *pool.Entry) float64 {
 		tr := (wire - 1) % 8
 		cdn := (tr == 1 || tr == 2 || tr == 4 || tr == 5) && (port >= 1 && port <= 3)
 		switch {
+		case node.StyleDNSTunnel(en.Style):
+			// Queries go through the network's own resolver, which keeps
+			// answering when every foreign address is cut.
+			b += 110
 		case node.StyleICMP(en.Style):
 			// Ping stayed open when TCP and UDP to foreign addresses were cut.
 			b += 100
@@ -435,7 +439,7 @@ func (r regime) bonus(p regimeProbe, en *pool.Entry) float64 {
 			b -= 80
 		}
 	}
-	if r.severity() >= regimeFiltered.severity() && !p.UDP && en.Flags&pool.FlagUDP != 0 && !node.StyleICMP(en.Style) {
+	if r.severity() >= regimeFiltered.severity() && !p.UDP && en.Flags&pool.FlagUDP != 0 && !node.StyleICMP(en.Style) && !node.StyleDNSTunnel(en.Style) {
 		b -= 60
 	}
 	return b

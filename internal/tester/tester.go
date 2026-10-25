@@ -148,7 +148,7 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 	}
 	port := ports[0]
 	pass := randomHex(8)
-	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof, LineMbps: t.LineMbps}
+	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof, LineMbps: t.LineMbps, LocalDNS: t.LocalDNS}
 	run, err := t.Runtime.Run(ctx, name, nodes, opts, func(s *core.Set) map[string]any {
 		return testConfig(s, port, pass, t.LocalDNS, t.Mobile)
 	}, "127.0.0.1:"+strconv.Itoa(port))
@@ -215,7 +215,7 @@ func (t *Tester) Through(ctx context.Context, name string, nodes []*node.Node, t
 	}
 	port := ports[0]
 	pass := randomHex(8)
-	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof, LineMbps: t.LineMbps}
+	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof, LineMbps: t.LineMbps, LocalDNS: t.LocalDNS}
 	run, err := t.Runtime.Run(ctx, name, nodes, opts, func(s *core.Set) map[string]any {
 		return testConfig(s, port, pass, t.LocalDNS, t.Mobile)
 	}, "127.0.0.1:"+strconv.Itoa(port))

@@ -479,8 +479,20 @@ func (n *Node) Style() uint8 {
 	if n.ICMP() {
 		tr = 7
 	}
+	if n.DNSTunnel() {
+		sec, tr = 3, 6 // 31: the one value the kcp wire and this class share
+	}
 	return sec*8 + tr + 1 + n.portClass()<<5 // 0 means unknown
 }
+
+// DNSTunnel reports whether the node travels inside DNS queries (Xray's
+// xdns mask) through whatever resolver the network offers.
+func (n *Node) DNSTunnel() bool {
+	return strings.Contains(n.FinalMask, `"xdns"`)
+}
+
+// StyleDNSTunnel reports whether a style byte names a DNS tunnel.
+func StyleDNSTunnel(s uint8) bool { return StyleWire(s) == 31 }
 
 // ICMP reports whether the node travels inside ICMP echo packets (Xray's
 // xicmp mask): neither TCP nor UDP, so neither probe says anything about it.
