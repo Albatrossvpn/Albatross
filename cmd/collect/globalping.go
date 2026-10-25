@@ -11,6 +11,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -57,6 +58,32 @@ func iranReach(ctx context.Context, endpoints []string, probes int) map[string]b
 	return out
 }
 
+// gpLocations picks the probes: the project's own adopted probes inside
+// the country when GLOBALPING_TAGS names their tags (comma separated, as
+// the dashboard shows them, like u-albatrossvpn), else any probe in Iran.
+// Own probes are always there and earn the credits the checks spend.
+func gpLocations() []any {
+	if tags := strings.TrimSpace(os.Getenv("GLOBALPING_TAGS")); tags != "" {
+		var list []string
+		for _, t := range strings.Split(tags, ",") {
+			if t = strings.TrimSpace(t); t != "" {
+				list = append(list, t)
+			}
+		}
+		return []any{map[string]any{"tags": list}}
+	}
+	return []any{map[string]any{"country": "IR"}}
+}
+
+// gpProbes is how many probes test each address: one own probe is
+// enough; among volunteers' probes two make up for a flaky one.
+func gpProbes() int {
+	if strings.TrimSpace(os.Getenv("GLOBALPING_TAGS")) != "" {
+		return 1
+	}
+	return 2
+}
+
 var (
 	errNoProbes = fmt.Errorf("no probes in Iran right now")
 	errQuota    = fmt.Errorf("hourly quota used up")
@@ -71,7 +98,7 @@ func tcpFromIran(ctx context.Context, endpoint string, probes int) (bool, error)
 	body, _ := json.Marshal(map[string]any{
 		"type":               "ping",
 		"target":             host,
-		"locations":          []any{map[string]any{"country": "IR"}},
+		"locations":          gpLocations(),
 		"limit":              probes,
 		"measurementOptions": map[string]any{"packets": 2, "protocol": "TCP", "port": port},
 	})
