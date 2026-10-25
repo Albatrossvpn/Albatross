@@ -20,6 +20,7 @@ rest:
 | TUIC v5 (BBR) | 8444/udp |
 | VMess (AEAD) + HTTPUpgrade, no TLS | 80/tcp |
 | VMess (AEAD) + mKCP inside ICMP echo (Xray xicmp) | ping |
+| VMess (AEAD) + mKCP inside DNS queries (Xray xdns), with `DNS_TUNNEL` | 53/udp |
 
 Every TLS protocol uses a real Let's Encrypt certificate (for the machine's
 `<ip>.sslip.io` name unless `DOMAIN` is set), so the app verifies the server
@@ -45,6 +46,12 @@ session travels inside echo packets, slowly, but it connects.
    ```sh
    curl -fsSL https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/main/deploy/server/install.sh | bash
    ```
+   To add the DNS tunnel, which gets out through the network's own resolver
+   when every foreign address is cut, you need a domain: add an `A` record
+   `ns1.<domain>` pointing at the machine's IP (in Cloudflare: DNS only, grey
+   cloud) and an `NS` record `t.<domain>` pointing at `ns1.<domain>`, then
+   run the script with `DNS_TUNNEL=t.<domain>` (it is remembered). UDP 53
+   then serves the tunnel instead of Hysteria 2.
    It installs sing-box and Xray, makes the keys (kept in
    `/etc/albatross/secrets.env`, so running it again keeps the links),
    gets the certificate, opens the machine's own firewall, turns on BBR and
