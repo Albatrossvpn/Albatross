@@ -471,8 +471,23 @@ func (n *Node) Style() uint8 {
 	case "kcp", "quic":
 		tr = 6
 	}
+	if n.ICMP() {
+		tr = 7
+	}
 	return sec*8 + tr + 1 + n.portClass()<<5 // 0 means unknown
 }
+
+// ICMP reports whether the node travels inside ICMP echo packets (Xray's
+// xicmp mask): neither TCP nor UDP, so neither probe says anything about it.
+func (n *Node) ICMP() bool {
+	return strings.Contains(n.FinalMask, `"xicmp"`)
+}
+
+// StyleICMP reports whether a style byte names an ICMP carrier.
+func StyleICMP(s uint8) bool { return (StyleWire(s)-1)%8 == 7 }
+
+// StyleDNSPort reports whether a style byte names port 53.
+func StyleDNSPort(s uint8) bool { return StylePort(s) == 5 }
 
 // portClass groups ports the way filtering treats them: 443 is watched
 // hardest, Cloudflare's other HTTPS ports and the plain-HTTP ports less.
@@ -484,6 +499,9 @@ func (n *Node) portClass() uint8 {
 		return 2
 	case 80, 8080, 8880, 2052, 2082, 2086, 2095:
 		return 3
+	case 53:
+		// The one UDP port left open in the June 2025 shutdown.
+		return 5
 	case 0:
 		return 0
 	}
