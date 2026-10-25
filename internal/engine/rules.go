@@ -164,6 +164,8 @@ func download(ctx context.Context, c *http.Client, url string, limit int64) ([]b
 	if resp.StatusCode != http.StatusOK {
 		return nil, io.ErrUnexpectedEOF
 	}
+	// The headers may have used most of the idle time; the body gets its own.
+	idle.Reset(downloadIdle)
 	m := &moving{r: resp.Body, idle: idle}
 	b, err := io.ReadAll(io.LimitReader(m, limit))
 	if err != nil && m.n > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
