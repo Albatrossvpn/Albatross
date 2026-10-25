@@ -6,8 +6,6 @@ import android.app.NotificationManager;
 import android.net.ConnectivityManager;
 import android.net.LinkProperties;
 import android.net.Network;
-import android.net.NetworkCapabilities;
-import android.net.NetworkRequest;
 import android.os.Build;
 
 import java.net.Inet4Address;
@@ -34,38 +32,10 @@ public final class App extends Application {
         // This app is left out of its own VPN, so its default network is the
         // real one (Wi-Fi or mobile data) even while connected.
         ConnectivityManager cm = getSystemService(ConnectivityManager.class);
-        if (Build.VERSION.SDK_INT >= 24) {
-            cm.registerDefaultNetworkCallback(new ConnectivityManager.NetworkCallback() {
-                @Override
-                public void onLinkPropertiesChanged(Network network, LinkProperties lp) {
-                    String dns = pickDns(lp);
-                    if (dns != null) Mobile.setDNS(dns);
-                }
-            });
-            return;
-        }
-        // Android 6 reports every network with internet, not only the
-        // default one: read the default one's resolver on each change.
-        NetworkRequest req = new NetworkRequest.Builder().addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET).build();
-        cm.registerNetworkCallback(req, new ConnectivityManager.NetworkCallback() {
-            @Override
-            public void onAvailable(Network network) {
-                update();
-            }
-
-            @Override
-            public void onLost(Network network) {
-                update();
-            }
-
+        cm.registerDefaultNetworkCallback(new ConnectivityManager.NetworkCallback() {
             @Override
             public void onLinkPropertiesChanged(Network network, LinkProperties lp) {
-                update();
-            }
-
-            private void update() {
-                Network n = cm.getActiveNetwork();
-                String dns = n == null ? null : pickDns(cm.getLinkProperties(n));
+                String dns = pickDns(lp);
                 if (dns != null) Mobile.setDNS(dns);
             }
         });

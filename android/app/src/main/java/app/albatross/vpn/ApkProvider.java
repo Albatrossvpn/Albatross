@@ -3,21 +3,14 @@ package app.albatross.vpn;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
-import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.provider.OpenableColumns;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 
 /**
  * Serves the app's own installer to the app that the user shares it with,
@@ -36,47 +29,6 @@ public final class ApkProvider extends ContentProvider {
     // process restarts.
     static void setUpdate(Context ctx, File f) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("path", f.getAbsolutePath()).commit();
-    }
-
-    // Where the system installer reads the update from. Android 6's opens
-    // only file:// links, so it gets a copy in the app's external cache,
-    // which the app may write without a permission and the installer, which
-    // holds the storage one, may read. Android 7 and later read the update
-    // through this provider.
-    static Uri updateUri(Context ctx, File f) throws IOException {
-        if (Build.VERSION.SDK_INT >= 24) return UPDATE_URI;
-        File dir = ctx.getExternalCacheDir();
-        if (dir == null) throw new FileNotFoundException("no shared storage");
-        File copy = new File(dir, UPDATE_NAME);
-        // Half a copy would stay, and a forced update's next try would fill
-        // the phone's storage again: check for room first, and never leave
-        // one behind.
-        if (dir.getUsableSpace() + copy.length() < f.length()) {
-            copy.delete();
-            throw new IOException("no room for the update's copy");
-        }
-        try (InputStream in = new FileInputStream(f); OutputStream out = new FileOutputStream(copy)) {
-            byte[] buf = new byte[64 << 10];
-            for (int n; (n = in.read(buf)) > 0; ) out.write(buf, 0, n);
-        } catch (IOException e) {
-            copy.delete();
-            throw e;
-        }
-        return Uri.fromFile(copy);
-    }
-
-    // Deletes Android 6's copy once the app has been installed since it was
-    // made: it was that update or one given up, and each try makes its own.
-    static void removeSpentCopy(Context ctx) {
-        if (Build.VERSION.SDK_INT >= 24) return;
-        File dir = ctx.getExternalCacheDir();
-        if (dir == null) return;
-        File copy = new File(dir, UPDATE_NAME);
-        try {
-            long installed = ctx.getPackageManager().getPackageInfo(ctx.getPackageName(), 0).lastUpdateTime;
-            if (copy.lastModified() < installed) copy.delete();
-        } catch (PackageManager.NameNotFoundException ignored) {
-        }
     }
 
     private File apk(Uri uri) throws FileNotFoundException {

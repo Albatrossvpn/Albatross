@@ -4,13 +4,10 @@ import (
 	"bytes"
 	"context"
 	"embed"
-	"errors"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
@@ -23,14 +20,11 @@ import (
 var bundledRules embed.FS
 
 var ruleSets = map[string]string{
-	"geoip-cn.srs":   "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
-	"geosite-cn.srs": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
-	"geoip-ir.srs":   "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geoip-ir.srs",
-	"geosite-ir.srs": "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geosite-ir.srs",
-	// Built every day from the big free lists (.github/workflows/adblock.yml).
-	// The copy shipped with the app is a smaller one (Chocolate4U's, with the
-	// same allowlist), used until the first download.
-	"ads.srs": "https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/rules/ads.srs",
+	"geoip-cn.srs":    "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+	"geosite-cn.srs":  "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+	"geoip-ir.srs":    "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geoip-ir.srs",
+	"geosite-ir.srs":  "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geosite-ir.srs",
+	"geosite-ads.srs": "https://raw.githubusercontent.com/Chocolate4U/Iran-sing-box-rules/rule-set/geosite-category-ads-all.srs",
 }
 
 // installRules writes the bundled rule sets unless a newer copy exists.
@@ -38,9 +32,6 @@ func installRules(dir string) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	// Before 0.3.4 the ad list was Chocolate4U's, under this name; it
-	// blocks services the allowlist keeps working.
-	os.Remove(filepath.Join(dir, "geosite-ads.srs"))
 	for name := range ruleSets {
 		path := filepath.Join(dir, name)
 		if _, err := os.Stat(path); err == nil {
@@ -52,11 +43,6 @@ func installRules(dir string) error {
 		}
 		if err := os.WriteFile(path, b, 0o644); err != nil {
 			return err
-		}
-		if name == "ads.srs" {
-			// Old as far as updateRules is concerned: the daily list is
-			// fetched at the first chance.
-			os.Chtimes(path, time.Unix(0, 0), time.Unix(0, 0))
 		}
 	}
 	// The core refuses to start without the learned list, even empty.
@@ -75,34 +61,20 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// rulesMu keeps two updates from writing the same file.
-var rulesMu sync.Mutex
-
-// updateRules downloads fresh rule sets if the local ones are a day old,
-// those want says yes to. private is for the Worker (sources.IsWorker).
-func updateRules(ctx context.Context, dir string, client, private func() *http.Client, want func(name string) bool) {
-	rulesMu.Lock()
-	defer rulesMu.Unlock()
+// updateRules downloads fresh rule sets if the local ones are a day old.
+// private is for the Worker (sources.IsWorker).
+func updateRules(ctx context.Context, dir string, client, private func() *http.Client) {
 	for name, url := range ruleSets {
 		path := filepath.Join(dir, name)
-		if st, err := os.Stat(path); !want(name) || err == nil && time.Since(st.ModTime()) < 24*time.Hour {
+		if st, err := os.Stat(path); err == nil && time.Since(st.ModTime()) < 24*time.Hour {
 			continue
 		}
-		slow, got := 0, false
 		for _, u := range append([]string{url}, sources.Mirrors(url)...) {
 			c := client()
 			if sources.IsWorker(u) {
 				c = private()
 			}
 			b, err := download(ctx, c, u, 8<<20)
-			if errors.Is(err, errSlow) {
-				// The host may be the slow part, so one more; when that
-				// is slow too the line is, and the data is not spent now.
-				if slow++; slow == 2 {
-					break
-				}
-				continue
-			}
 			if err != nil || len(b) < 64 || !bytes.HasPrefix(b, []byte("SRS")) {
 				continue
 			}
@@ -110,52 +82,18 @@ func updateRules(ctx context.Context, dir string, client, private func() *http.C
 			if os.WriteFile(tmp, b, 0o644) == nil {
 				os.Rename(tmp, path)
 			}
-			got = true
 			break
-		}
-		if !got && slow > 0 {
-			// A slow download spends minutes of data: the next try is
-			// in rulesBackoff, not at the next connection.
-			back := time.Now().Add(rulesBackoff - 24*time.Hour)
-			os.Chtimes(path, back, back)
 		}
 	}
 }
 
-// rulesBackoff is how long updateRules waits after slow downloads.
-const rulesBackoff = 6 * time.Hour
-
-// refreshRules updates the rule sets in the background. The ad list, a few
-// megabytes, only while ads are blocked.
-func (e *Engine) refreshRules() {
-	e.mu.Lock()
-	ads := e.settings.BlockAds
-	e.mu.Unlock()
-	want := func(name string) bool { return ads || name != "ads.srs" }
-	go updateRules(e.ctx, filepath.Join(e.dir, "rules"), e.anyClient, e.accountHTTP, want)
-}
-
-// A download may take as long as it keeps moving (the ad list needs
-// minutes on a slow line), but not downloadIdle without a byte, which is
-// how a blocked address behaves, nor more than downloadMax in all.
-var downloadIdle, downloadMax = 30 * time.Second, 10 * time.Minute
-
-// errSlow means a download was still moving when downloadMax ran out.
-var errSlow = errors.New("download too slow")
-
 func download(ctx context.Context, c *http.Client, url string, limit int64) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, downloadMax)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	if strings.HasPrefix(url, "https://api.github.com/") {
-		// The contents API sends the file itself only when asked to.
-		req.Header.Set("Accept", "application/vnd.github.raw")
-	}
-	idle := time.AfterFunc(downloadIdle, cancel)
-	defer idle.Stop()
 	resp, err := c.Do(req)
 	if err != nil {
 		return nil, err
@@ -164,26 +102,5 @@ func download(ctx context.Context, c *http.Client, url string, limit int64) ([]b
 	if resp.StatusCode != http.StatusOK {
 		return nil, io.ErrUnexpectedEOF
 	}
-	m := &moving{r: resp.Body, idle: idle}
-	b, err := io.ReadAll(io.LimitReader(m, limit))
-	if err != nil && m.n > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return nil, errSlow
-	}
-	return b, err
-}
-
-// moving puts the idle timer back each time bytes arrive.
-type moving struct {
-	r    io.Reader
-	idle *time.Timer
-	n    int64
-}
-
-func (m *moving) Read(p []byte) (int, error) {
-	n, err := m.r.Read(p)
-	if n > 0 {
-		m.n += int64(n)
-		m.idle.Reset(downloadIdle)
-	}
-	return n, err
+	return io.ReadAll(io.LimitReader(resp.Body, limit))
 }

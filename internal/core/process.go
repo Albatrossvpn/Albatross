@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -71,12 +72,13 @@ func fileExists(p string) bool {
 
 // Process is a running core.
 type Process struct {
-	Name  string
-	child *child
-	done  chan struct{}
+	Name string
+	cmd  *exec.Cmd
+	done chan struct{}
 
 	mu   sync.Mutex
 	logs []string
+	err  error
 }
 
 const keepLogLines = 300
@@ -86,19 +88,20 @@ func Start(name, bin string, args []string, env []string, onLine func(string)) (
 	if bin == "" {
 		return nil, fmt.Errorf("%s is not installed", name)
 	}
-	pr, pw, err := os.Pipe()
-	if err != nil {
+	cmd := exec.Command(bin, args...)
+	cmd.Dir = filepath.Dir(bin)
+	cmd.Env = append(os.Environ(), env...)
+	hideWindow(cmd)
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
+	if err := cmd.Start(); err != nil {
+		pw.Close()
 		return nil, err
 	}
-	c, err := spawn(bin, args, append(os.Environ(), env...), filepath.Dir(bin), pw)
-	pw.Close()
-	if err != nil {
-		pr.Close()
-		return nil, err
-	}
-	p := &Process{Name: name, child: c, done: make(chan struct{})}
+	attachToJob(cmd.Process)
+	p := &Process{Name: name, cmd: cmd, done: make(chan struct{})}
 	go func() {
-		defer pr.Close()
 		sc := bufio.NewScanner(pr)
 		sc.Buffer(make([]byte, 64<<10), 1<<20)
 		for sc.Scan() {
@@ -115,14 +118,18 @@ func Start(name, bin string, args []string, env []string, onLine func(string)) (
 		}
 	}()
 	go func() {
-		c.wait()
+		err := cmd.Wait()
+		pw.Close()
+		p.mu.Lock()
+		p.err = err
+		p.mu.Unlock()
 		close(p.done)
 	}()
 	return p, nil
 }
 
 // Pid is the operating-system process ID.
-func (p *Process) Pid() int { return p.child.pid() }
+func (p *Process) Pid() int { return p.cmd.Process.Pid }
 
 // Done is closed when the process exits.
 func (p *Process) Done() <-chan struct{} { return p.done }
@@ -152,11 +159,11 @@ func (p *Process) Stop() {
 	if p == nil || p.Exited() {
 		return
 	}
-	p.child.stop()
+	stopProcess(p.cmd.Process)
 	select {
 	case <-p.done:
 	case <-time.After(3 * time.Second):
-		p.child.kill()
+		p.cmd.Process.Kill()
 		<-p.done
 	}
 }

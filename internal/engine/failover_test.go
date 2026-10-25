@@ -283,35 +283,3 @@ func TestGroupSpreadsAcrossNetworks(t *testing.T) {
 		t.Fatalf("group %v %v %v", g[0].Name, g[1].Name, g[2].Name)
 	}
 }
-
-// The members still being tested when a race has its winner are recorded
-// once they answer, even though the caller has moved on and cancelled: they
-// are the backups known to work.
-func TestRaceKeepsTesting(t *testing.T) {
-	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer e.pool.Close()
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/proxies/slow/") {
-			time.Sleep(300 * time.Millisecond)
-		}
-		w.Write([]byte(`{"delay": 40}`))
-	}))
-	defer api.Close()
-	c := &connection{clashAddr: strings.TrimPrefix(api.URL, "http://")}
-	fast, slow := &member{tag: "fast", server: &Server{}}, &member{tag: "slow", server: &Server{}}
-	c.members = []*member{fast, slow}
-	ctx, cancel := context.WithCancel(context.Background())
-	if m := e.race(ctx, c, c.members, 5*time.Second); m != fast {
-		t.Fatalf("the race went to %v", m)
-	}
-	cancel()
-	time.Sleep(600 * time.Millisecond)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !slow.alive || slow.delay != 40 {
-		t.Fatalf("the slower member was not recorded: alive %v, delay %d", slow.alive, slow.delay)
-	}
-}
