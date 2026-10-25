@@ -477,10 +477,16 @@ func (e *Engine) pickBatch(size int) []candidate {
 	wantProto := protoCodes[protocol] // 0 = any
 	haveXray := e.bin.Xray != ""
 	targetHasServers := false
+	// Protocols with a working server now; the others are stocked first,
+	// so every protocol the user may choose has a server ready.
+	stocked := map[uint8]bool{}
 	var recheck []*Server
 	for _, s := range e.good {
 		if !s.matches(protocol) {
 			continue
+		}
+		if s.usable(now) {
+			stocked[protoCodes[s.Proto]] = true
 		}
 		if target != "" && s.Country == target && s.usable(now) {
 			targetHasServers = true
@@ -556,6 +562,9 @@ func (e *Engine) pickBatch(size int) []candidate {
 		}
 		if en.State == pool.StateDead {
 			sc -= 40
+		}
+		if wantProto == 0 && en.Proto != 0 && !stocked[en.Proto] {
+			sc += 60
 		}
 		if tb[0] != 0 {
 			if en.Hint == tb {
@@ -768,10 +777,14 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 			r.setHello(learned.nextHello(r.fp(), r.frag))
 			changed = true
 		}
-		if cleanOn && len(clean) > 0 && antiblock.CDNFrontable(c.node) && r.pinReason != "clean" {
+		// A clean edge address is tried too, or a fresh one when the address
+		// a server was pinned to is no longer among this network's clean
+		// ones (another network, or the address got blocked). The pin goes
+		// on r.node, so the ClientHello or ECH change above is kept.
+		if cleanOn && len(clean) > 0 && antiblock.CDNFrontable(r.node) && (r.pinReason != "clean" || !inClean(clean, r.pin)) {
 			i := rand.Intn(min(len(clean), 3))
 			ip := clean[i].IP
-			r.node, r.pin, r.pinReason, changed = antiblock.Pin(c.node, ip), ip, "clean", true
+			r.node, r.pin, r.pinReason, changed = antiblock.Pin(r.node, ip), ip, "clean", true
 			if r.node.Transport == "xhttp" && len(clean) > 1 {
 				r.split = clean[(i+1)%min(len(clean), 4)].IP
 				r.node.SplitDownload = r.split
@@ -1023,4 +1036,14 @@ func (e *Engine) statsLoop() {
 		e.scan.recent = e.scan.recent[i:]
 		e.mu.Unlock()
 	}
+}
+
+// inClean says whether ip is one of the clean edge addresses found here.
+func inClean(clean []antiblock.CleanIP, ip string) bool {
+	for _, c := range clean {
+		if c.IP == ip {
+			return true
+		}
+	}
+	return false
 }

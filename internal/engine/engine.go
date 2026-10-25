@@ -546,7 +546,7 @@ func (e *Engine) Countries() []CountryInfo {
 	}
 	m := map[string]*CountryInfo{}
 	for _, s := range e.good {
-		if s.Country == "" || s.Country == "IR" || !s.usable(now) || !s.matches(e.settings.Protocol) {
+		if s.Country == "" || s.Country == "IR" || s.Proto == "direct" || !s.matches(e.settings.Protocol) || !s.usable(now) {
 			continue
 		}
 		ci, ok := m[s.Country]

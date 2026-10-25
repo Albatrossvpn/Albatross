@@ -30,6 +30,31 @@ type Set struct {
 	xrayIdx   []int    // node index per Xray node
 	Xray      map[string]any
 	XrayProbe string
+	// Direct lists the tags of serverless nodes (node.Direct), whose TLS
+	// connections must be fragmented by a route option (FragmentRules).
+	Direct []string
+}
+
+// FragmentRules are the route rules that split the TLS ClientHello of the
+// serverless nodes' connections (sing-box allows tls_fragment as a route
+// option only, and not together with tls_record_fragment). match adds the
+// rule's condition for one tag, for configs that route by user; nil makes
+// the rule apply to everything, for a live connection on that node alone.
+func FragmentRules(s *Set, match func(tag string) map[string]any) []any {
+	var out []any
+	for _, tag := range s.Direct {
+		r := map[string]any{}
+		if match != nil {
+			r = match(tag)
+		}
+		r["action"] = "route-options"
+		r["tls_fragment"] = true
+		out = append(out, r)
+		if match == nil {
+			break
+		}
+	}
+	return out
 }
 
 // BuildOptions tune generated outbounds.
@@ -72,6 +97,9 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 			frag = frag || o.FragmentFor(n)
 		}
 		obj, ep := n.SingBox(tag, node.SingBoxOptions{Fragment: frag, Spoof: o.Spoof, LineMbps: o.LineMbps})
+		if n.Proto == "direct" {
+			s.Direct = append(s.Direct, tag)
+		}
 		if ep {
 			s.Endpoints = append(s.Endpoints, obj)
 			s.epIdx = append(s.epIdx, i)
@@ -243,8 +271,10 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 		var xr *Process
 		if set.Xray != nil {
 			if r.Bin.Xray == "" {
-				// Without Xray those nodes cannot run at all.
-				nodes, rejected = dropIdx(nodes, set.xrayIdx, rejected)
+				// Without Xray those nodes cannot run now. That says nothing
+				// about the servers (an antivirus may have taken the file),
+				// so they fail this time instead of being refused for good.
+				nodes, failed = dropIdx(nodes, set.xrayIdx, failed)
 				continue
 			}
 			xr, err = r.start(ctx, "xray", name, set.Xray, set.XrayProbe, o.OnLine, func(path string) []string {
@@ -256,7 +286,10 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 						i, _ := strconv.Atoi(m[1])
 						nodes, rejected = dropIdx(nodes, []int{i}, rejected)
 					} else {
-						nodes, rejected = dropIdx(nodes, set.xrayIdx, rejected)
+						// Xray quit for a reason that names no config (a port
+						// taken meanwhile, the phone killing it): a failure of
+						// this run, not of every server in it.
+						nodes, failed = dropIdx(nodes, set.xrayIdx, failed)
 					}
 					continue
 				}
