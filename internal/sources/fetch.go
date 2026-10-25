@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
 )
 
 const (
@@ -82,6 +84,22 @@ func (f *Fetcher) Fetch(ctx context.Context, s Source) Result {
 		if err == nil {
 			res.Text, res.Via = text, via
 			f.store(s, cacheMeta{URL: u, FetchedAt: time.Now()}, text)
+			return res
+		}
+		return f.fallback(res, err)
+	case KindLEAP:
+		var clients []*http.Client
+		if proxy != nil {
+			clients = append(clients, proxy)
+		}
+		clients = append(clients, f.Direct)
+		if f.Private != nil {
+			clients = append(clients, f.Private)
+		}
+		text, err := f.fetchLEAP(ctx, s.URL, clients)
+		if err == nil {
+			res.Text, res.Via = text, "direct"
+			f.store(s, cacheMeta{URL: s.URL, FetchedAt: time.Now()}, text)
 			return res
 		}
 		return f.fallback(res, err)
@@ -388,4 +406,42 @@ func writeAtomic(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// fetchLEAP downloads a LEAP provider's gateway list, an anonymous client
+// certificate and the provider's CA, and joins them as a node.LEAPDoc.
+func (f *Fetcher) fetchLEAP(ctx context.Context, api string, clients []*http.Client) (string, error) {
+	caURL, ok := leapProviders[api]
+	if !ok {
+		return "", fmt.Errorf("unknown LEAP provider")
+	}
+	var lastErr error
+	for _, c := range clients {
+		if c == nil {
+			continue
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		eip, err := f.getPage(ctx, c, api+"/3/config/eip-service.json")
+		if err == nil {
+			var cert, ca string
+			if cert, err = f.getPage(ctx, c, api+"/3/cert"); err == nil {
+				ca, err = f.getPage(ctx, c, caURL)
+			}
+			if err == nil {
+				if !json.Valid([]byte(eip)) || !strings.Contains(cert, "PRIVATE KEY") || !strings.Contains(ca, "CERTIFICATE") {
+					err = errors.New("unexpected LEAP answer")
+				} else {
+					b, _ := json.Marshal(node.LEAPDoc{Provider: LEAPName(api), EIP: json.RawMessage(eip), Cert: cert, CA: ca})
+					return string(b), nil
+				}
+			}
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errors.New("no way to reach source")
+	}
+	return "", lastErr
 }
