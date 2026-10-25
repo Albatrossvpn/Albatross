@@ -36,6 +36,27 @@ public final class MainActivity extends Activity {
         return visible.get();
     }
 
+    /** Opens links away from the app's own page in the browser. */
+    private boolean openOutside(Uri u) {
+        if (origin != null && u.toString().startsWith(origin)) return false;
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, u));
+        } catch (Exception ignored) {
+        }
+        return true;
+    }
+
+    /** The Chrome version in a WebView's user agent, 0 when there is none. */
+    static int chromeMajor(String ua) {
+        int i = ua == null ? -1 : ua.indexOf("Chrome/");
+        if (i < 0) return 0;
+        int n = 0;
+        for (i += "Chrome/".length(); i < ua.length() && Character.isDigit(ua.charAt(i)); i++) {
+            n = n * 10 + (ua.charAt(i) - '0');
+        }
+        return n;
+    }
+
     @Override
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -47,16 +68,20 @@ public final class MainActivity extends Activity {
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
         ws.setSupportZoom(false);
+        // WebViews before Chrome 80 (Android 10 ships 74) abort the whole
+        // app when the GPU draws color emoji such as the flags.
+        if (chromeMajor(ws.getUserAgentString()) < 80) web.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest req) {
-                Uri u = req.getUrl();
-                if (origin != null && u.toString().startsWith(origin)) return false;
-                try {
-                    startActivity(new Intent(Intent.ACTION_VIEW, u));
-                } catch (Exception ignored) {
-                }
-                return true;
+                return openOutside(req.getUrl());
+            }
+
+            // Android 6 calls only this one.
+            @Override
+            @SuppressWarnings("deprecation")
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return openOutside(Uri.parse(url));
             }
         });
         root.addView(web, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));

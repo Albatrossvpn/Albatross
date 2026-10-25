@@ -42,6 +42,9 @@ type BuildOptions struct {
 	Spoof string
 	// LineMbps is the measured line speed (see node.SingBoxOptions).
 	LineMbps int
+	// LocalDNS is the network's resolver (host or host:port), which DNS
+	// tunnels send their queries through; empty means unknown.
+	LocalDNS string
 	// OnLine, when set, receives every line the cores of this run print.
 	OnLine func(core, line string)
 	// warpPorts maps warp-plus nodes to the SOCKS port their process
@@ -84,6 +87,14 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 			s.outIdx = append(s.outIdx, i)
 		}
 	}
+	for k, i := range s.outIdx {
+		// Helper outbounds (ShadowTLS) come last, so the node outbounds keep
+		// their indexes; an error in a helper still names its node.
+		for _, h := range nodes[i].SingBoxHelpers(s.Tags[i]) {
+			s.Outbounds = append(s.Outbounds, h)
+			s.outIdx = append(s.outIdx, s.outIdx[k])
+		}
+	}
 	for _, i := range wpNodes {
 		port := o.warpPorts[nodes[i]]
 		if port == 0 {
@@ -117,6 +128,9 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 			"settings": map[string]any{"udp": true, "auth": "password", "accounts": []any{map[string]any{"user": inTag, "pass": pass}}},
 		})
 		for _, ob := range n.Xray(xtag) {
+			if n.DNSTunnel() {
+				node.SetDNSTunnelResolvers(ob, o.LocalDNS)
+			}
 			outbounds = append(outbounds, ob)
 		}
 		rules = append(rules, map[string]any{"inboundTag": []string{inTag}, "outboundTag": xtag})
@@ -312,6 +326,19 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 				}(i)
 				continue
 			}
+			if n.Usque() {
+				if r.Bin.Usque == "" {
+					continue
+				}
+				wg.Add(1)
+				go func(i, port int) {
+					defer wg.Done()
+					if p := r.startUsque(ctx, n, port); p != nil {
+						procs[i] = p
+					}
+				}(i, ports[k])
+				continue
+			}
 			if r.Bin.WarpPlus == "" {
 				continue
 			}
@@ -429,4 +456,44 @@ func (r *Runtime) start(ctx context.Context, coreName, name string, cfg map[stri
 		return nil, err
 	}
 	return p, nil
+}
+
+// startUsque runs usque (WARP over MASQUE) as a SOCKS proxy on port. The
+// first run registers a WARP device, which needs Cloudflare's API; the
+// registration is kept, so later runs start at once.
+func (r *Runtime) startUsque(ctx context.Context, n *node.Node, port int) *Process {
+	cache := filepath.Join(r.Dir, "usque")
+	os.MkdirAll(cache, 0o755)
+	var onLine func(string)
+	if r.OnLine != nil {
+		onLine = func(l string) { r.OnLine("usque", l) }
+	}
+	if _, err := os.Stat(node.UsqueConfig(cache)); err != nil {
+		reg, err := Start("usque", r.Bin.Usque, node.UsqueRegisterArgs(cache), nil, onLine)
+		if err != nil {
+			return nil
+		}
+		select {
+		case <-reg.Done():
+		case <-ctx.Done():
+			reg.Stop()
+			return nil
+		case <-time.After(60 * time.Second):
+			reg.Stop()
+			return nil
+		}
+		if _, err := os.Stat(node.UsqueConfig(cache)); err != nil {
+			return nil
+		}
+	}
+	bind := "127.0.0.1:" + strconv.Itoa(port)
+	p, err := Start("usque", r.Bin.Usque, n.UsqueArgs("127.0.0.1", strconv.Itoa(port), cache), nil, onLine)
+	if err != nil {
+		return nil
+	}
+	if err := p.WaitListening(ctx, bind, 75*time.Second); err != nil {
+		p.Stop()
+		return nil
+	}
+	return p
 }

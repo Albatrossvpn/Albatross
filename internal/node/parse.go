@@ -20,7 +20,7 @@ var schemes = []string{
 	"tuic://", "wireguard://", "wg://", "anytls://", "socks5://", "socks://", "socks4://",
 }
 
-var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|ssr?|hysteria2|hy2|hysteria|tuic|wireguard|wg|anytls|socks5?|socks4)://`)
+var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|anytls|socks5?|socks4)://`)
 
 // ErrUnsupported marks links that parse but cannot be run by any core.
 var ErrUnsupported = errors.New("unsupported")
@@ -174,6 +174,8 @@ func ParseLink(link string) (*Node, error) {
 		n, err = parseAnyTLS(link)
 	case "wireguard", "wg":
 		n, err = parseWireGuard(link)
+	case "ssh":
+		return parseSSH(link)
 	case "socks", "socks5":
 		n, err = parseSocks(link)
 	case "albatross":
@@ -397,27 +399,28 @@ func parseStandard(link, scheme string) (*Node, error) {
 
 // vmessJSON is the v2rayN share format. Numbers arrive as strings or numbers.
 type vmessJSON struct {
-	PS          any `json:"ps"`
-	Add         any `json:"add"`
-	Port        any `json:"port"`
-	ID          any `json:"id"`
-	Aid         any `json:"aid"`
-	Scy         any `json:"scy"`
-	Net         any `json:"net"`
-	Type        any `json:"type"`
-	Host        any `json:"host"`
-	Path        any `json:"path"`
-	TLS         any `json:"tls"`
-	SNI         any `json:"sni"`
-	ALPN        any `json:"alpn"`
-	FP          any `json:"fp"`
-	Insecure    any `json:"insecure"`
-	AllowInsec  any `json:"allowInsecure"`
-	SkipVerify  any `json:"skip-cert-verify"`
-	ServiceName any `json:"serviceName"`
-	Mode        any `json:"mode"`
-	PBK         any `json:"pbk"`
-	SID         any `json:"sid"`
+	FM          json.RawMessage `json:"fm"` // Xray finalmask (own servers)
+	PS          any             `json:"ps"`
+	Add         any             `json:"add"`
+	Port        any             `json:"port"`
+	ID          any             `json:"id"`
+	Aid         any             `json:"aid"`
+	Scy         any             `json:"scy"`
+	Net         any             `json:"net"`
+	Type        any             `json:"type"`
+	Host        any             `json:"host"`
+	Path        any             `json:"path"`
+	TLS         any             `json:"tls"`
+	SNI         any             `json:"sni"`
+	ALPN        any             `json:"alpn"`
+	FP          any             `json:"fp"`
+	Insecure    any             `json:"insecure"`
+	AllowInsec  any             `json:"allowInsecure"`
+	SkipVerify  any             `json:"skip-cert-verify"`
+	ServiceName any             `json:"serviceName"`
+	Mode        any             `json:"mode"`
+	PBK         any             `json:"pbk"`
+	SID         any             `json:"sid"`
 }
 
 func str(v any) string {
@@ -501,6 +504,9 @@ func parseVMess(link string) (*Node, error) {
 	}
 	if n.Transport == "kcp" || n.Transport == "mkcp" {
 		n.Seed = n.Path
+	}
+	if len(j.FM) > 0 && j.FM[0] == '{' {
+		n.FinalMask = string(j.FM)
 	}
 	return n, nil
 }
@@ -968,6 +974,10 @@ func EachText(text string, fn func(*Node)) (seen int) {
 		}
 		return len(clash)
 	}
+	if n := ParseOutlineJSON(text); n != nil {
+		fn(n)
+		return 1
+	}
 	links := ExtractLinks(text)
 	for _, l := range links {
 		if n, err := ParseLink(l); err == nil {
@@ -1010,10 +1020,38 @@ func WarpPlus(mode, country string) *Node {
 		n.Name = "WARP in WARP"
 	case "tor":
 		n.Name = "Tor"
+	case "masque":
+		n.Name = "WARP over MASQUE"
+	case "masque2":
+		n.Name = "WARP over MASQUE (TCP)"
 	default:
 		n.Name = "Cloudflare WARP"
 	}
 	return n
+}
+
+// Usque reports whether the method runs on usque (WARP over MASQUE)
+// rather than warp-plus.
+func (n *Node) Usque() bool { return n.WPMode == "masque" || n.WPMode == "masque2" }
+
+// UsqueConfig is the file usque keeps its device registration in.
+func UsqueConfig(cacheDir string) string { return cacheDir + "/config.json" }
+
+// UsqueRegisterArgs registers a WARP device (no account, Cloudflare's
+// terms accepted) into cacheDir; run once before UsqueArgs.
+func UsqueRegisterArgs(cacheDir string) []string {
+	return []string{"-c", UsqueConfig(cacheDir), "register", "-a", "-n", "Albatross"}
+}
+
+// UsqueArgs runs usque as a SOCKS5 proxy on host:port over MASQUE: HTTP/3
+// over QUIC, or for masque2 HTTP/2 over TCP, which gets through networks
+// that throttle UDP.
+func (n *Node) UsqueArgs(host, port, cacheDir string) []string {
+	args := []string{"-c", UsqueConfig(cacheDir), "socks", "-b", host, "-p", port, "--always-reconnect"}
+	if n.WPMode == "masque2" {
+		args = append(args, "--http2")
+	}
+	return args
 }
 
 // WarpPlusArgs are the command-line flags that run this method.
@@ -1026,4 +1064,71 @@ func (n *Node) WarpPlusArgs(bind, cacheDir string) []string {
 		args = append(args, "--cfon", "--country", n.WPCountry)
 	}
 	return args
+}
+
+// ParseOutlineJSON reads the answer of an Outline dynamic access key
+// (ssconf://host/path, fetched over HTTPS): a JSON object naming one
+// Shadowsocks server. Anything else gives nil.
+func ParseOutlineJSON(text string) *Node {
+	t := strings.TrimSpace(text)
+	if !strings.HasPrefix(t, "{") || len(t) > 1<<16 {
+		return nil
+	}
+	var k struct {
+		Server string `json:"server"`
+		Port   int    `json:"server_port"`
+		Pass   string `json:"password"`
+		Method string `json:"method"`
+		Prefix string `json:"prefix"`
+		Name   string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(t), &k); err != nil || k.Server == "" || k.Port <= 0 || k.Method == "" {
+		return nil
+	}
+	name := k.Name
+	if name == "" {
+		name = "Outline " + k.Server
+	}
+	n := &Node{Proto: "shadowsocks", Name: cleanName(name), Server: k.Server, Port: k.Port, Method: strings.ToLower(k.Method), Password: k.Pass}
+	n.normalize()
+	if n.Validate() != nil {
+		return nil
+	}
+	return n
+}
+
+// parseSSH reads ssh://user:password@host:port?hk=<host key>#name, the
+// form sing-box runs as an ssh outbound: the connection is a plain SSH
+// session whose port forwarding carries the traffic. hk, optional, is the
+// server's public host key ("ssh-ed25519 AAAA..."); without it any key is
+// accepted, as with a first connection in a terminal.
+func parseSSH(link string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	n := &Node{Proto: "ssh", Name: cleanName(u.fragment), Server: u.host, Port: atoi(u.port)}
+	if n.Port == 0 {
+		n.Port = 22
+	}
+	user := unescape(u.user)
+	if !strings.Contains(user, ":") {
+		if dec, err := decodeB64(user); err == nil && strings.Contains(string(dec), ":") {
+			user = string(dec)
+		}
+	}
+	n.Username, n.Password, _ = strings.Cut(user, ":")
+	if n.Username == "" || n.Password == "" {
+		return nil, fmt.Errorf("ssh link needs user:password")
+	}
+	n.HostKey = firstNonEmpty(u.query["hk"], u.query["host_key"], u.query["hostkey"])
+	return n, nil
+}
+
+// Direct makes the serverless method: no server at all, the device's own
+// connection with the TLS ClientHello fragmented, which opens sites that
+// are blocked only by name (SNI) at full speed. It hides nothing from the
+// network's operator, so the engine uses it only when no server works.
+func Direct() *Node {
+	return &Node{Proto: "direct", Name: "No server (TLS fragment)"}
 }

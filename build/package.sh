@@ -4,9 +4,10 @@
 set -euo pipefail
 
 VERSION="${VERSION:-0.0.0-dev}"
-SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.3}"
-XRAY_VERSION="${XRAY_VERSION:-26.9.30}"
+SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
+XRAY_VERSION="${XRAY_VERSION:-26.10.21}"
 WARPPLUS_VERSION="${WARPPLUS_VERSION:-1.2.6}"
+USQUE_VERSION="${USQUE_VERSION:-4.2.1}"
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -45,6 +46,11 @@ cp "$tmp/xray/LICENSE" "$out/licenses/xray-LICENSE.txt"
 unzip -q -o "$dl/warp-plus-$WARPPLUS_VERSION.zip" -d "$tmp/wp"
 cp "$(find "$tmp/wp" -iname 'warp-plus*.exe' | head -1)" "$out/core/warp-plus.exe"
 cp "$(find "$tmp/wp" -iname 'LICENSE*' | head -1)" "$out/licenses/warp-plus-LICENSE.txt"
+# usque (WARP over MASQUE) publishes no checksummed Windows build: built
+# from its source with this Go.
+git clone -q --depth 1 --branch "v$USQUE_VERSION" https://github.com/Diniboy1123/usque "$tmp/usque"
+(cd "$tmp/usque" && GOTOOLCHAIN=auto GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w" -o "$out/core/usque.exe" .)
+cp "$tmp/usque/LICENSE.md" "$out/licenses/usque-LICENSE.txt"
 bash "$root/build/tor.sh" windows-x86_64 "$out/core" "$dl"
 # The Snowflake proxy for "Help others" is its own module: its library
 # needs a newer Go than the app.
@@ -60,11 +66,14 @@ Bundled components (see the licenses folder):
   sing-box $SINGBOX_VERSION  https://github.com/SagerNet/sing-box  (GPL-3.0-or-later; source at that address)
   Xray-core $XRAY_VERSION    https://github.com/XTLS/Xray-core    (MPL-2.0)
   warp-plus $WARPPLUS_VERSION   https://github.com/bepass-org/warp-plus (MIT)
+  usque $USQUE_VERSION          https://github.com/Diniboy1123/usque (MIT)
   Tor Expert Bundle         https://www.torproject.org (BSD-3-Clause; transports under their own licenses)
   Snowflake proxy           https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/snowflake (BSD-3-Clause)
   Twemoji country flags     https://github.com/talkjs/country-flag-emoji-polyfill (CC-BY 4.0 graphics by Twitter)
   Site rule sets            https://github.com/SagerNet/sing-geoip, https://github.com/SagerNet/sing-geosite (GPL-3.0-or-later),
                             https://github.com/Chocolate4U/Iran-sing-box-rules
+  Ad list (updated daily)   HaGeZi, OISD, AdGuard DNS filter (GPL-3.0), PersianBlocker (AGPL-3.0);
+                            https://github.com/cezomagoanlace29861-jpg/Albatross/tree/rules
 TXT
 sed -i 's/$/\r/' "$out/README.txt"
 

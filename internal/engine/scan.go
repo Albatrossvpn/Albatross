@@ -4,7 +4,6 @@ import (
 	"container/heap"
 	"math/rand"
 	"net"
-	"path/filepath"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -32,7 +31,7 @@ type scanState struct {
 
 var protoCodes = map[string]uint8{
 	"vmess": 1, "vless": 2, "trojan": 3, "shadowsocks": 4, "hysteria2": 5, "hysteria": 6,
-	"tuic": 7, "anytls": 8, "wireguard": 9, "socks": 10, "http": 11, "openvpn": 12,
+	"tuic": 7, "anytls": 8, "wireguard": 9, "socks": 10, "http": 11, "openvpn": 12, "ssh": 13, "direct": 14,
 }
 
 // refreshEvery says how often each kind of source is downloaded again.
@@ -53,7 +52,7 @@ func refreshEvery(s sources.Source, mobile bool) time.Duration {
 		return time.Hour
 	case s.Kind == sources.KindTelegram:
 		return 20 * time.Minute
-	case s.Kind == sources.KindVPNGate:
+	case s.Kind == sources.KindVPNGate, s.Kind == sources.KindLEAP:
 		return time.Hour
 	case s.Tier == sources.TierDeep:
 		// The deep lists are large; their new servers mostly reach the
@@ -73,7 +72,7 @@ func (e *Engine) refreshLoop() {
 	for {
 		if time.Since(ruleCheck) > 6*time.Hour {
 			ruleCheck = time.Now()
-			go updateRules(e.ctx, filepath.Join(e.dir, "rules"), e.anyClient, e.accountHTTP)
+			e.refreshRules()
 			go e.checkUpdate()
 		}
 		e.refreshDue()
@@ -376,6 +375,10 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 	switch s.Kind {
 	case sources.KindVPNGate:
 		for _, v := range node.ParseVPNGate(text) {
+			add(v.Node, v.Country)
+		}
+	case sources.KindLEAP:
+		for _, v := range node.ParseLEAP(text) {
 			add(v.Node, v.Country)
 		}
 	default:
@@ -807,7 +810,7 @@ func (e *Engine) unpoison(cands []candidate) []candidate {
 	drop := make([]bool, len(cands))
 	for i, c := range cands {
 		out[i] = c
-		if c.pin != "" || c.node.Proto == "warpplus" || net.ParseIP(c.node.Server) != nil {
+		if c.pin != "" || c.node.NoEndpoint() || net.ParseIP(c.node.Server) != nil {
 			continue
 		}
 		sem <- struct{}{}

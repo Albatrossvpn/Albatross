@@ -3,6 +3,7 @@ package node
 import (
 	"encoding/base64"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -225,5 +226,179 @@ func TestHysteria2AsksForLineSpeed(t *testing.T) {
 	}
 	if out, _ := n.SingBox("x", SingBoxOptions{}); out["down_mbps"] != nil {
 		t.Fatal("asked for a speed nobody measured")
+	}
+}
+
+func TestParseOutlineJSON(t *testing.T) {
+	text := `{"server":"1.2.3.4","server_port":8388,"password":"pw","method":"chacha20-ietf-poly1305","prefix":"\u0016\u0003\u0001"}`
+	nodes, seen := ParseText(text)
+	if seen != 1 || len(nodes) != 1 {
+		t.Fatalf("want one node, got %d (%d seen)", len(nodes), seen)
+	}
+	n := nodes[0]
+	if n.Proto != "shadowsocks" || n.Server != "1.2.3.4" || n.Port != 8388 || n.Method != "chacha20-ietf-poly1305" || n.Password != "pw" {
+		t.Fatalf("bad node: %+v", n)
+	}
+	for _, bad := range []string{`{"server":"1.2.3.4"}`, `{"a":1}`, `[]`, `ss://x`} {
+		if ParseOutlineJSON(bad) != nil {
+			t.Fatalf("%q should not parse", bad)
+		}
+	}
+}
+
+func TestParseSSH(t *testing.T) {
+	n := mustParse(t, "ssh://alice:s3cret@ssh.example.net:2222?hk=ssh-ed25519%20AAAAC3#Free%20SSH")
+	if n.Proto != "ssh" || n.Username != "alice" || n.Password != "s3cret" || n.Server != "ssh.example.net" || n.Port != 2222 || n.HostKey != "ssh-ed25519 AAAAC3" || n.Name != "Free SSH" {
+		t.Fatalf("bad node: %+v", n)
+	}
+	if n.Engine() != EngineSingBox {
+		t.Fatalf("ssh runs on sing-box, got %v", n.Engine())
+	}
+	out, _ := n.SingBox("out", SingBoxOptions{})
+	if out["type"] != "ssh" || out["user"] != "alice" || out["password"] != "s3cret" || out["server_port"] != 2222 {
+		t.Fatalf("bad outbound: %v", out)
+	}
+	if hk, _ := out["host_key"].([]string); len(hk) != 1 {
+		t.Fatalf("host key missing: %v", out)
+	}
+	d := mustParse(t, "ssh://bob:pw@1.2.3.4")
+	if d.Port != 22 {
+		t.Fatalf("default port 22, got %d", d.Port)
+	}
+	if _, err := ParseLink("ssh://nouser@1.2.3.4:22"); err == nil {
+		t.Fatal("a link without a password must not parse")
+	}
+	if _, err := ParseLink("ssh://1.2.3.4:22"); err == nil {
+		t.Fatal("a link without a user must not parse")
+	}
+}
+
+func TestVMessICMPCarrier(t *testing.T) {
+	j := `{"v":"2","ps":"Albatross-ICMP","add":"203.0.113.9","port":"7","id":"007a5c24-cdbe-4adc-a79f-ca2768fef8bb","aid":"0","scy":"aes-128-gcm","net":"kcp","type":"none","path":"abcd1234","host":"","tls":"","fm":{"udp":[{"type":"xicmp"}]}}`
+	n := mustParse(t, "vmess://"+base64.StdEncoding.EncodeToString([]byte(j)))
+	if n.Transport != "kcp" || n.Seed != "abcd1234" || n.FinalMask == "" {
+		t.Fatalf("kcp seed or finalmask lost: %+v", n)
+	}
+	if n.Engine() != EngineXray {
+		t.Fatalf("an mKCP node runs on Xray, got %v", n.Engine())
+	}
+	s := n.xrayStream()
+	k, _ := s["kcpSettings"].(map[string]any)
+	if k == nil || k["seed"] != "abcd1234" {
+		t.Fatalf("kcp settings: %v", s)
+	}
+	fm, _ := s["finalmask"].(map[string]any)
+	udp, _ := fm["udp"].([]any)
+	if len(udp) != 1 {
+		t.Fatalf("finalmask: %v", s)
+	}
+	mask := udp[0].(map[string]any)
+	settings, _ := mask["settings"].(map[string]any)
+	if mask["type"] != "xicmp" || settings == nil || settings["dgram"] != (runtime.GOOS != "windows") {
+		t.Fatalf("xicmp mask: %v", mask)
+	}
+}
+
+func TestShadowTLS(t *testing.T) {
+	key := base64.RawURLEncoding.EncodeToString([]byte("2022-blake3-aes-128-gcm:" + base64.StdEncoding.EncodeToString(make([]byte, 16))))
+	n := mustParse(t, "ss://"+key+"@203.0.113.9:8445?plugin=shadow-tls%3Bhost%3Dwww.microsoft.com%3Bpassword%3Dpw1%3Bversion%3D3#STLS")
+	if n.Plugin != "shadow-tls" || n.pluginOpt("host") != "www.microsoft.com" || n.pluginOpt("password") != "pw1" {
+		t.Fatalf("plugin not kept: %+v", n)
+	}
+	if n.Engine() != EngineSingBox {
+		t.Fatalf("shadow-tls runs on sing-box, got %v", n.Engine())
+	}
+	out, _ := n.SingBox("n1", SingBoxOptions{})
+	if out["detour"] != "n1-stls" || out["plugin"] != nil {
+		t.Fatalf("the Shadowsocks outbound must detour, not use a plugin: %v", out)
+	}
+	h := n.SingBoxHelpers("n1")
+	if len(h) != 1 || h[0]["type"] != "shadowtls" || h[0]["tag"] != "n1-stls" || h[0]["version"] != 3 || h[0]["password"] != "pw1" {
+		t.Fatalf("helper: %v", h)
+	}
+	tls := h[0]["tls"].(map[string]any)
+	if tls["server_name"] != "www.microsoft.com" {
+		t.Fatalf("helper tls: %v", tls)
+	}
+	plain := mustParse(t, "ss://"+key+"@203.0.113.9:8388#SS")
+	if plain.SingBoxHelpers("n2") != nil {
+		t.Fatal("plain Shadowsocks needs no helper")
+	}
+	if _, err := ParseLink("ss://" + key + "@203.0.113.9:8445?plugin=shadow-tls%3Bhost%3Dx"); err == nil {
+		if nn, _ := ParseLink("ss://" + key + "@203.0.113.9:8445?plugin=shadow-tls%3Bhost%3Dx"); nn.Engine() != EngineNone {
+			t.Fatal("shadow-tls without a password must not run")
+		}
+	}
+}
+
+func TestUsqueMethods(t *testing.T) {
+	m := WarpPlus("masque", "")
+	m2 := WarpPlus("masque2", "")
+	if !m.Usque() || !m2.Usque() || WarpPlus("warp", "").Usque() {
+		t.Fatal("Usque() must name only the MASQUE methods")
+	}
+	if m.Engine() != EngineWarpPlus || m2.Engine() != EngineWarpPlus {
+		t.Fatalf("MASQUE methods run as sidecar methods: %v %v", m.Engine(), m2.Engine())
+	}
+	if m.Key() == m2.Key() || m.Name == m2.Name {
+		t.Fatal("the two MASQUE methods must differ")
+	}
+	a := m2.UsqueArgs("127.0.0.1", "1080", "/tmp/x")
+	got := strings.Join(a, " ")
+	if !strings.Contains(got, "-c /tmp/x/config.json socks -b 127.0.0.1 -p 1080") || !strings.Contains(got, "--http2") {
+		t.Fatalf("masque2 args: %v", a)
+	}
+	if strings.Contains(strings.Join(m.UsqueArgs("127.0.0.1", "1080", "/tmp/x"), " "), "--http2") {
+		t.Fatal("masque (HTTP/3) must not ask for HTTP/2")
+	}
+	r := strings.Join(UsqueRegisterArgs("/tmp/x"), " ")
+	if !strings.Contains(r, "register -a") || !strings.Contains(r, "-c /tmp/x/config.json") {
+		t.Fatalf("register args: %q", r)
+	}
+}
+
+func TestVMessDNSTunnel(t *testing.T) {
+	j := `{"v":"2","ps":"Albatross-DNS","add":"203.0.113.9","port":"53","id":"007a5c24-cdbe-4adc-a79f-ca2768fef8bb","aid":"0","scy":"aes-128-gcm","net":"kcp","type":"none","path":"abcd1234","host":"","tls":"","fm":{"udp":[{"type":"xdns","settings":{"domains":[{"names":["t.example.com"]}]}}]}}`
+	n := mustParse(t, "vmess://"+base64.StdEncoding.EncodeToString([]byte(j)))
+	if !n.DNSTunnel() || !StyleDNSTunnel(n.Style()) || !StyleDNSPort(n.Style()) {
+		t.Fatalf("a DNS tunnel must be recognised: style %d", n.Style())
+	}
+	if StyleDNSTunnel(mustParse(t, "vmess://"+base64.StdEncoding.EncodeToString([]byte(`{"v":"2","add":"1.2.3.4","port":"53","id":"007a5c24-cdbe-4adc-a79f-ca2768fef8bb","net":"kcp","path":"s"}`))).Style()) {
+		t.Fatal("plain mKCP on 53 is not a DNS tunnel")
+	}
+	obs := n.Xray("x0")
+	if len(obs) == 0 {
+		t.Fatal("no outbound")
+	}
+	ob := obs[0]
+	SetDNSTunnelResolvers(ob, "192.168.1.1")
+	stream := ob["streamSettings"].(map[string]any)
+	k := stream["kcpSettings"].(map[string]any)
+	if k["mtu"] != 130 || k["tti"] != 200 {
+		t.Fatalf("kcp tuning: %v", k)
+	}
+	udp := stream["finalmask"].(map[string]any)["udp"].([]any)
+	settings := udp[0].(map[string]any)["settings"].(map[string]any)
+	res := settings["resolvers"].([]any)[0].(map[string]any)["addrs"].([]string)
+	if res[0] != "udp://192.168.1.1:53" || len(res) < 2 {
+		t.Fatalf("resolvers: %v", res)
+	}
+	if n.Engine() != EngineXray {
+		t.Fatalf("engine %v", n.Engine())
+	}
+}
+
+func TestDirectMethod(t *testing.T) {
+	n := Direct()
+	if n.Engine() != EngineSingBox {
+		t.Fatalf("direct runs on sing-box, got %v", n.Engine())
+	}
+	out, ep := n.SingBox("d", SingBoxOptions{})
+	if ep || out["type"] != "direct" || out["tls_fragment"] != true || out["tls_record_fragment"] != true {
+		t.Fatalf("bad outbound: %v", out)
+	}
+	back, err := ParseLink(n.Link())
+	if err != nil || back.Proto != "direct" || back.Key() != n.Key() {
+		t.Fatalf("round trip: %v %+v", err, back)
 	}
 }

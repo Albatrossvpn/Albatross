@@ -90,8 +90,40 @@ func (e *Engine) checkUpdate() {
 func (e *Engine) loadUpdate() {
 	b, err := os.ReadFile(filepath.Join(e.dir, "update.json"))
 	var m UpdateManifest
-	if err == nil && json.Unmarshal(b, &m) == nil {
+	ok := err == nil && json.Unmarshal(b, &m) == nil
+	if !ok {
+		m = UpdateManifest{}
+	}
+	// Before applyUpdate, which may start a download.
+	e.removeOldUpdates(m.LatestVersion)
+	if ok {
 		e.applyUpdate(m)
+	}
+}
+
+// removeOldUpdates deletes the installers of this version and older ones,
+// about 135 MB each, and partial downloads no try will resume: those of
+// such versions and of any version but latest, the one on offer. A newer
+// version's installer stays until it is installed.
+func (e *Engine) removeOldUpdates(latest string) {
+	cur, ok := parseVersion(e.opt.Version)
+	if !ok {
+		return
+	}
+	dir := filepath.Join(e.dir, "update")
+	entries, _ := os.ReadDir(dir)
+	for _, d := range entries {
+		// Named by downloadUpdate: Albatross-<version>.apk or .exe, plus
+		// .part while downloading.
+		name, part := strings.CutSuffix(d.Name(), ".part")
+		v, mine := strings.CutPrefix(strings.TrimSuffix(strings.TrimSuffix(name, ".apk"), ".exe"), "Albatross-")
+		ver, ok := parseVersion(v)
+		if !mine || !ok {
+			continue
+		}
+		if !versionLess(cur, ver) || part && latest != "" && v != latest {
+			os.Remove(filepath.Join(dir, d.Name()))
+		}
 	}
 }
 
@@ -153,6 +185,10 @@ func requiredFrom(cur [3]int, mins ...string) bool {
 // manifest; the UI opens the download page instead.
 var ErrNoInAppUpdate = errors.New("no in-app update")
 
+// errUpdating means GetUpdate is already downloading; the caller may try
+// again later.
+var errUpdating = errors.New("already downloading")
+
 // updateKey names this platform's entry in UpdateManifest.Files.
 func updateKey(mobile bool) string {
 	if mobile {
@@ -161,6 +197,8 @@ func updateKey(mobile bool) string {
 			return "android-x86_64"
 		case "arm64":
 			return "android-arm64-v8a"
+		case "arm":
+			return "android-armeabi-v7a"
 		}
 		return "android-" + runtime.GOARCH // no installer is published
 	}
@@ -179,27 +217,36 @@ func (e *Engine) GetUpdate() error {
 	}
 	if e.updating {
 		e.mu.Unlock()
-		return nil
+		return errUpdating
 	}
 	e.updating = true
 	f, version := *u.file, u.Latest
 	u.Progress, u.Error = 0, ""
 	e.mu.Unlock()
 	path, err := e.downloadUpdate(f, version)
-	if err == nil {
+	downloaded := err == nil
+	if downloaded {
 		err = e.opt.InstallUpdate(path)
 	}
 	e.mu.Lock()
 	e.updating = false
 	if e.update != nil && e.update.Latest == version {
-		if err != nil {
-			e.update.Error = "The download failed; tap to try again."
-		} else {
+		// Progress is reset on failure: left between 0 and 100 it shows as
+		// still downloading. The platform shows nothing itself, since a
+		// forced update retries in the background every few minutes.
+		switch {
+		case err == nil:
 			e.update.Progress = 100
+		case downloaded:
+			e.update.Progress, e.update.Error = 0, "The new version could not be opened; tap to try again, or download it from the releases page."
+		default:
+			e.update.Progress, e.update.Error = 0, "The download failed; tap to try again."
 		}
 	}
 	e.mu.Unlock()
-	if err != nil {
+	if err != nil && downloaded {
+		e.logf("warn", "Opening version %s failed: %v", version, err)
+	} else if err != nil {
 		e.logf("warn", "Downloading version %s failed: %v", version, err)
 	}
 	return err
@@ -207,6 +254,32 @@ func (e *Engine) GetUpdate() error {
 
 // directUpdateClient fetches the installer outside the VPN. Tests replace it.
 var directUpdateClient = func() *http.Client { return &http.Client{} }
+
+// A try gives up after updateHeaders without an answer, updateIdle
+// without a byte or updateTry in all, and the next one resumes where it
+// stopped. The cap ends a slow try too, so a download begun outside the
+// VPN takes the VPN in a later round once it is up. Tests shorten them.
+var updateHeaders, updateIdle, updateTry = 30 * time.Second, time.Minute, 20 * time.Minute
+
+// errStalled ends a try that received nothing for updateIdle.
+var errStalled = errors.New("the download stalled")
+
+// withHeaderTimeout is c giving up on a server that takes the request but
+// never answers it.
+func withHeaderTimeout(c *http.Client) *http.Client {
+	t, ok := c.Transport.(*http.Transport)
+	if c.Transport == nil {
+		t, ok = http.DefaultTransport.(*http.Transport)
+	}
+	if !ok {
+		return c
+	}
+	t = t.Clone()
+	t.ResponseHeaderTimeout = updateHeaders
+	cc := *c
+	cc.Transport = t
+	return &cc
+}
 
 func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 	ext := ".exe"
@@ -227,6 +300,7 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 	clients = append(clients, directUpdateClient())
 	err := errors.New("no address")
 	for _, c := range clients {
+		c = withHeaderTimeout(c)
 		for _, u := range f.URLs {
 			if !strings.HasPrefix(u, "https://") {
 				continue
@@ -251,13 +325,22 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 	return "", err
 }
 
-func (e *Engine) fetchUpdate(c *http.Client, u, path, version string) error {
+func (e *Engine) fetchUpdate(c *http.Client, u, path, version string) (err error) {
 	parent := e.ctx
 	if parent == nil { // not started (tests)
 		parent = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parent, 20*time.Minute)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(parent)
+	defer cancel(nil)
+	ctx, stop := context.WithTimeout(ctx, updateTry)
+	defer stop()
+	idle := time.AfterFunc(updateIdle, func() { cancel(errStalled) })
+	defer idle.Stop()
+	defer func() {
+		if err != nil && errors.Is(context.Cause(ctx), errStalled) {
+			err = errStalled
+		}
+	}()
 	part := path + ".part"
 	var have int64
 	if fi, err := os.Stat(part); err == nil {
@@ -275,6 +358,7 @@ func (e *Engine) fetchUpdate(c *http.Client, u, path, version string) error {
 		return err
 	}
 	defer resp.Body.Close()
+	idle.Reset(updateIdle)
 	flags, total := os.O_CREATE|os.O_WRONLY|os.O_TRUNC, resp.ContentLength
 	switch {
 	case resp.StatusCode == http.StatusPartialContent && have > 0:
@@ -299,6 +383,7 @@ func (e *Engine) fetchUpdate(c *http.Client, u, path, version string) error {
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
+			idle.Reset(updateIdle)
 			if _, err := tmp.Write(buf[:n]); err != nil {
 				tmp.Close()
 				return err
@@ -358,6 +443,12 @@ func (e *Engine) forceUpdate(version string) {
 			e.setStatus(StatusIdle, "Install the new version to connect.")
 			return
 		}
+		// A download the user started (or an earlier call) is still running:
+		// wait for it rather than treating it as done.
+		wait := updateRetry
+		if errors.Is(err, errUpdating) {
+			wait = updatePoll
+		}
 		done := context.Background().Done()
 		if e.ctx != nil {
 			done = e.ctx.Done()
@@ -365,13 +456,14 @@ func (e *Engine) forceUpdate(version string) {
 		select {
 		case <-done:
 			return
-		case <-time.After(updateRetry):
+		case <-time.After(wait):
 		}
 	}
 }
 
-// updateRetry is how long forceUpdate waits after a failed download.
-var updateRetry = 3 * time.Minute
+// updateRetry is how long forceUpdate waits after a failed download, and
+// updatePoll how often it looks again while another download is running.
+var updateRetry, updatePoll = 3 * time.Minute, 5 * time.Second
 
 // updateRequired reports whether this version may no longer connect. A
 // version that downloads its update itself may still connect until the
