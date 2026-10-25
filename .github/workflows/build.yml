@@ -483,15 +483,24 @@ jobs:
           ACCOUNT_URL="$(bash repo/build/account-url.sh)"
           SITE_URL="https://$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' repo/site/wrangler.toml | head -1)"
           export ACCOUNT_URL SITE_URL
-          jq -r '.assets[] | select(.digest != null) | "\(.name) \(.browser_download_url) \(.digest | ltrimstr("sha256:"))"' rel.json |
-            while read -r name url sha; do
-              bash repo/deploy/files/push.sh "${ACCOUNT_URL%%,*}" "$SITE_URL" "$name" "$url" "$sha"
-            done
+          # A file that could not be stored is left out of the website's
+          # addresses (the account service's /dl/ still fetches it from the
+          # release), so a storage problem never blocks the update.
+          : > stored.txt
+          jq -r '.assets[] | select(.digest != null) | "\(.name) \(.browser_download_url) \(.digest | ltrimstr("sha256:"))"' rel.json > assets.txt
+          while read -r name url sha; do
+            if bash repo/deploy/files/push.sh "${ACCOUNT_URL%%,*}" "$SITE_URL" "$name" "$url" "$sha"; then
+              echo "$name" >> stored.txt
+            else
+              echo "::warning::$name could not be stored; the website will not list it until a deploy stores it."
+            fi
+          done < assets.txt
           python3 - <<'PY'
           import json, os, re, sys
           v = os.environ["VERSION"]
           rel = json.load(open("rel.json"))
           site = os.environ["SITE_URL"].rstrip("/")
+          stored = set(open("stored.txt").read().split())
           mirrors = [m.strip().rstrip("/") for m in os.environ.get("ACCOUNT_URL", "").split(",") if m.strip()]
           # The one APK serves every ABI; 0.3.3 and earlier read only the
           # arm64-v8a entry. The website comes first, then the account
@@ -502,7 +511,7 @@ jobs:
           for a in rel["assets"]:
               for part, names in keys.items():
                   if part in a["name"] and (a.get("digest") or "").startswith("sha256:"):
-                      urls = [f"{site}/download/{a['name']}"] + [f"{m}/dl/v{v}/{a['name']}" for m in mirrors] + [a["browser_download_url"]]
+                      urls = ([f"{site}/download/{a['name']}"] if a["name"] in stored else []) + [f"{m}/dl/v{v}/{a['name']}" for m in mirrors] + [a["browser_download_url"]]
                       for key in names:
                           files[key] = {"urls": urls, "sha256": a["digest"][7:]}
           path = "repo/update.json"
