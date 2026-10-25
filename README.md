@@ -33,7 +33,7 @@ What the app guarantees, and what it cannot:
 | Share-link and Clash parsing, sing-box/Xray outbound generation | `internal/node` |
 | Server lists, GitHub CDN mirrors, VPN Gate, ETag cache | `internal/sources` |
 | Disk-backed candidate pool (hundreds of thousands of servers in tens of MB) | `internal/pool` |
-| Runs sing-box with Xray and warp-plus sidecars; drops configs a core rejects | `internal/core` |
+| Runs sing-box with Xray, warp-plus and usque sidecars; drops configs a core rejects | `internal/core` |
 | TCP probe plus a real HTTPS request through each server (delay, exit IP, exit country) | `internal/tester` |
 | DNS unpoisoning over DoH, edge-address scanner, IP pinning | `internal/antiblock` |
 | Scheduler, connect, same-location failover, speed checks, local-site learning, update check | `internal/engine` |
@@ -43,7 +43,7 @@ What the app guarantees, and what it cannot:
 | Account service and website (Cloudflare Worker + D1) | `backend/` |
 | Android bridge (gomobile): VpnService hooks and tun2socks into the local proxy | `mobile`, `android/` |
 
-Every server runs through sing-box. Servers only Xray supports are served by an Xray sidecar on a local SOCKS port that sing-box connects to, and warp-plus methods work the same way.
+Every server runs through sing-box. Servers only Xray supports are served by an Xray sidecar on a local SOCKS port that sing-box connects to, and the warp-plus methods (Cloudflare WARP, WARP in WARP, Psiphon) and usque's WARP over MASQUE (HTTP/3, or HTTP/2 over TCP where UDP is throttled) work the same way.
 
 ## Build
 
@@ -77,4 +77,4 @@ ALBATROSS_LINKS=links.txt SING_BOX=/path/sing-box XRAY=/path/xray go test -run R
 
 ## Licenses
 
-Bundled third-party components keep their own licenses: sing-box (GPL-3.0-or-later), Xray-core (MPL-2.0), warp-plus (MIT), tun2socks (GPL-3.0), Twemoji flags (CC-BY 4.0), and the site rule sets from SagerNet (sing-geoip, sing-geosite; GPL-3.0-or-later) and Chocolate4U.
+Bundled third-party components keep their own licenses: sing-box (GPL-3.0-or-later), Xray-core (MPL-2.0), warp-plus (MIT), usque (MIT), tun2socks (GPL-3.0), Twemoji flags (CC-BY 4.0), and the site rule sets from SagerNet (sing-geoip, sing-geosite; GPL-3.0-or-later) and Chocolate4U.

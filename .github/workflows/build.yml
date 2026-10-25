@@ -38,6 +38,7 @@ env:
   SINGBOX_VERSION: "1.14.4"
   XRAY_VERSION: "26.10.21"
   WARPPLUS_VERSION: "1.2.6"
+  USQUE_VERSION: "4.2.1"
 
 jobs:
   backend:
@@ -337,7 +338,7 @@ jobs:
           $h = @{ "X-Token" = $token }
           $state = Invoke-RestMethod -Uri "http://127.0.0.1:18080/api/state" -Headers $h
           # The page is not told about cores; check the files and that the engine answers.
-          foreach ($c in "sing-box", "xray", "warp-plus") { if (-not (Test-Path "dist\Albatross\core\$c.exe")) { throw "$c is missing" } }
+          foreach ($c in "sing-box", "xray", "warp-plus", "usque") { if (-not (Test-Path "dist\Albatross\core\$c.exe")) { throw "$c is missing" } }
           if (-not $state.status) { throw "the engine did not answer" }
           if ($state.PSObject.Properties.Name -contains "cores") { throw "the state still lists cores" }
           $page = Invoke-WebRequest -Uri "http://127.0.0.1:18080/" -UseBasicParsing
@@ -411,7 +412,7 @@ jobs:
           $setup = Get-ChildItem dist\Albatross-Setup-*.exe | Select-Object -First 1
           $dir = Join-Path $env:RUNNER_TEMP "albatross-installed"
           Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/CURRENTUSER","/DIR=`"$dir`"" -Wait
-          foreach ($f in "Albatross.exe","core\sing-box.exe","core\xray.exe","core\warp-plus.exe") {
+          foreach ($f in "Albatross.exe","core\sing-box.exe","core\xray.exe","core\warp-plus.exe","core\usque.exe") {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f after install" }
           }
           "installed OK: $dir"

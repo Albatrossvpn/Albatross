@@ -1020,10 +1020,38 @@ func WarpPlus(mode, country string) *Node {
 		n.Name = "WARP in WARP"
 	case "tor":
 		n.Name = "Tor"
+	case "masque":
+		n.Name = "WARP over MASQUE"
+	case "masque2":
+		n.Name = "WARP over MASQUE (TCP)"
 	default:
 		n.Name = "Cloudflare WARP"
 	}
 	return n
+}
+
+// Usque reports whether the method runs on usque (WARP over MASQUE)
+// rather than warp-plus.
+func (n *Node) Usque() bool { return n.WPMode == "masque" || n.WPMode == "masque2" }
+
+// UsqueConfig is the file usque keeps its device registration in.
+func UsqueConfig(cacheDir string) string { return cacheDir + "/config.json" }
+
+// UsqueRegisterArgs registers a WARP device (no account, Cloudflare's
+// terms accepted) into cacheDir; run once before UsqueArgs.
+func UsqueRegisterArgs(cacheDir string) []string {
+	return []string{"-c", UsqueConfig(cacheDir), "register", "-a", "-n", "Albatross"}
+}
+
+// UsqueArgs runs usque as a SOCKS5 proxy on host:port over MASQUE: HTTP/3
+// over QUIC, or for masque2 HTTP/2 over TCP, which gets through networks
+// that throttle UDP.
+func (n *Node) UsqueArgs(host, port, cacheDir string) []string {
+	args := []string{"-c", UsqueConfig(cacheDir), "socks", "-b", host, "-p", port, "--always-reconnect"}
+	if n.WPMode == "masque2" {
+		args = append(args, "--http2")
+	}
+	return args
 }
 
 // WarpPlusArgs are the command-line flags that run this method.

@@ -45,7 +45,7 @@ adb logcat -d -s AlbatrossTest:I | tail -c 60000
 libdir="$(adb shell pm dump app.albatross.vpn | tr -d '\r' | sed -n 's/.*legacyNativeLibraryDir=//p' | head -1)/x86_64"
 # Each core must also say what it is: a binary that is missing, not
 # executable or killed before printing anything would otherwise pass.
-for c in "libsingbox.so version|sing-box" "libxray.so version|Xray" "libwarpplus.so --help|warp" "libtor.so --version|Tor version"; do
+for c in "libsingbox.so version|sing-box" "libxray.so version|Xray" "libwarpplus.so --help|warp" "libusque.so --help|usque" "libtor.so --version|Tor version"; do
   want="${c##*|}"; c="${c%|*}"
   out="$(adb shell run-as app.albatross.vpn "$libdir/${c% *}" "${c#* }" 2>&1 | tr -d '\r' | head -c 4000)"
   echo "== $c: $(printf '%s' "$out" | head -3)"
