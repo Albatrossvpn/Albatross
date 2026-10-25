@@ -166,9 +166,10 @@ jobs:
           # Releases ask users to sign in (backend/); test builds connect
           # without an account.
           if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            # Without it a release cannot open the project's own servers.
-            # Both platforms embed it, and every later job needs this one.
-            [ -n "$OWN_KEY" ] || { echo "::error::A release needs the OWN_KEY secret."; exit 1; }
+            # Without it a release cannot open the project's own servers
+            # (the sealed list stays closed); everything else works, so the
+            # release goes on with a warning.
+            [ -n "$OWN_KEY" ] || echo "::warning::The OWN_KEY secret is not set: this release cannot open the project's own servers."
             ACCOUNT_URL="$(bash build/account-url.sh)"
             export ACCOUNT_URL
           fi
