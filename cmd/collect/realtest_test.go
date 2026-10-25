@@ -142,3 +142,24 @@ func TestIranFirst(t *testing.T) {
 		t.Fatalf("got %v", got)
 	}
 }
+
+func TestDiscoverMentions(t *testing.T) {
+	text := `see https://github.com/some/repo/blob/main/sub/all.txt and https://raw.githubusercontent.com/a/b/0123456789abcdef0123456789abcdef01234567/x.yaml?token=1
+	join t.me/s/Good_Channel or @another_one, not t.me/joinchat/abc, https://example.com/page.html`
+	subs, chans := mentions(text)
+	if len(subs) != 2 || subs[0] != "https://raw.githubusercontent.com/some/repo/main/sub/all.txt" || subs[1] != "https://raw.githubusercontent.com/a/b/HEAD/x.yaml" {
+		t.Fatalf("subs %v", subs)
+	}
+	if strings.Join(chans, ",") != "good_channel,another_one,joinchat" {
+		t.Fatalf("channels %v", chans)
+	}
+	if canonical("ftp://x/y.txt") != "" || canonical("https://host/") != "" {
+		t.Fatal("non-https or bare addresses must be dropped")
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "s.txt"), []byte("# found\nhttps://a/b.txt\n\nhttps://c/d.txt\n"), 0o644)
+	got := extraSources(filepath.Join(dir, "s.txt"), "sub")
+	if len(got) != 2 || got[1].URL != "https://c/d.txt" || got[0].Tier != 1 {
+		t.Fatalf("extra %v", got)
+	}
+}

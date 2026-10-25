@@ -1,0 +1,53 @@
+name: Discover sources
+
+# Finds more sources for the collector (cmd/collect -discover): GitHub code
+# search for every link scheme, repository search, and the lists and
+# channels mentioned inside the known ones; keeps those that hold servers
+# and publishes sources.txt and channels.txt into the project's own
+# storage, where the collector reads them. Weekly, within a private
+# repository's free minutes; run it by hand to refresh sooner.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 2 * * 0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discover
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Discover
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          go run ./cmd/collect -discover "$RUNNER_TEMP/discovered"
+          cat "$RUNNER_TEMP/discovered/discover.json"
+          wc -l "$RUNNER_TEMP"/discovered/*.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Publish to the project's own storage
+        env:
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          account="$(bash build/account-url.sh | cut -d, -f1)"
+          bash deploy/files/publish-lists.sh "$account" servers "$RUNNER_TEMP"/discovered/sources.txt "$RUNNER_TEMP"/discovered/channels.txt "$RUNNER_TEMP"/discovered/discover.json
+          echo "- $(grep -c '^https' "$RUNNER_TEMP/discovered/sources.txt") subscriptions and $(grep -vc '^#' "$RUNNER_TEMP/discovered/channels.txt") channels published." >> "$GITHUB_STEP_SUMMARY"

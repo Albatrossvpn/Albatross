@@ -189,7 +189,14 @@ func main() {
 	crowdPath := flag.String("crowd", "", "comma-separated reports about servers from inside the country (list/servers/crowd.json, iran.json): confirmed servers first in hot.txt, failing ones left out")
 	report := flag.String("report", "", "with -hot-from: write this run's results in the report form to this file (for a tester inside the country, deploy/tester)")
 	tester := flag.String("tester", "", "the tester's name in -report (for example iran)")
+	discover := flag.String("discover", "", "find more sources (GitHub search with GITHUB_TOKEN, mentions in known lists and channels) and write sources.txt, channels.txt and discover.json to this directory; nothing else is done")
+	extraSubs := flag.String("sources", "", "a discovered sources.txt to read beside the shipped lists")
+	extraTG := flag.String("channels", "", "a discovered channels.txt to read beside the shipped lists")
 	flag.Parse()
+	if *discover != "" {
+		runDiscover(context.Background(), *discover, os.Getenv("GITHUB_TOKEN"))
+		return
+	}
 	crowd := loadCrowd(*crowdPath)
 	if *hotFrom != "" {
 		refreshHot(*hotFrom, *out, *real, crowd, *report, *tester)
@@ -197,6 +204,18 @@ func main() {
 	}
 
 	srcs := sources.Collected()
+	// Discovered sources (-discover) come after the shipped ones; the
+	// shipped list wins when both name a source.
+	known := map[string]bool{}
+	for _, s := range srcs {
+		known[s.ID] = true
+	}
+	for _, s := range append(extraSources(*extraSubs, sources.KindSubscription), extraSources(*extraTG, sources.KindTelegram)...) {
+		if !known[s.ID] {
+			known[s.ID] = true
+			srcs = append(srcs, s)
+		}
+	}
 	if *limit > 0 && *limit < len(srcs) {
 		srcs = srcs[:*limit]
 	}
