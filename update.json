@@ -1,27 +1,32 @@
 {
-  "min_version": "0.4.0",
-  "latest_version": "0.4.0",
-  "message": "Albatross 0.4.0 is required and this version no longer connects. If the app does not update by itself: 1) Uninstall Albatross. 2) Download the new version with Get the update, or open https://github.com/Albatrossvpn/Albatross/releases/download/v0.4.0/Albatross-0.4.0-android.apk in your browser (Windows: Albatross-Setup-0.4.0.exe from https://github.com/Albatrossvpn/Albatross/releases/latest). 3) Install it and sign in with the username and password you were given. Later updates install from inside the app.",
-  "download_url": "https://github.com/Albatrossvpn/Albatross/releases/latest",
+  "download_url": "https://albatrossvpn.online/#download",
   "files": {
     "android-arm64-v8a": {
+      "sha256": "2870ef05be1198d20e5bb0090c4b98eceee99d3ab75be9d83e43d83b1db64d21",
       "urls": [
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v0.4.0/Albatross-0.4.0-android.apk"
-      ],
-      "sha256": "07796a156cf33f57aafd8ae918b1eb506b94b18d98f511fc11055e6b99ba6954"
+        "https://accounts.albatrossvpn.online/dl/v1.0.0/Albatross-1.0.0-android.apk",
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.0.0/Albatross-1.0.0-android.apk"
+      ]
     },
     "android-armeabi-v7a": {
+      "sha256": "2870ef05be1198d20e5bb0090c4b98eceee99d3ab75be9d83e43d83b1db64d21",
       "urls": [
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v0.4.0/Albatross-0.4.0-android.apk"
-      ],
-      "sha256": "07796a156cf33f57aafd8ae918b1eb506b94b18d98f511fc11055e6b99ba6954"
+        "https://accounts.albatrossvpn.online/dl/v1.0.0/Albatross-1.0.0-android.apk",
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.0.0/Albatross-1.0.0-android.apk"
+      ]
     },
     "windows": {
+      "sha256": "7e42ec74f072f2fc99f5968bed83ee3780b288c554d356a3b24c839860dcf536",
       "urls": [
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v0.4.0/Albatross-Setup-0.4.0.exe"
-      ],
-      "sha256": "3cd7bd3003d076a323aa9db9395059d0f854349f7fe409e60e385b323dd8daac"
+        "https://accounts.albatrossvpn.online/dl/v1.0.0/Albatross-Setup-1.0.0.exe",
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.0.0/Albatross-Setup-1.0.0.exe"
+      ]
     }
   },
-  "require": "0.4.0"
+  "latest_version": "1.0.0",
+  "message": "Albatross 1.0.0 is required and this version no longer connects. If the app does not update by itself: 1) Uninstall Albatross. 2) Download the new version with Get the update, or open https://accounts.albatrossvpn.online/dl/v1.0.0/Albatross-1.0.0-android.apk in your browser (Windows: Albatross-Setup-1.0.0.exe from https://albatrossvpn.online/#download). 3) Install it and sign in with the username and password you were given. Later updates install from inside the app.",
+  "min_version": "1.0.0",
+  "require": "1.0.0",
+  "sig": "msc8w6LIJZE/pxRlJcD63faUA6+0t9fVyitCdwARjpr1H6HzeFyPXVBN549gdk76IrYIWuzwXGaTfEcsgsiYCg==",
+  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiMjg3MGVmMDViZTExOThkMjBlNWJiMDA5MGM0Yjk4ZWNlZWU5OWQzYWI3NWJlOWQ4M2U0M2Q4M2IxZGI2NGQyMSIsInVybHMiOlsiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjAuMC9BbGJhdHJvc3MtMS4wLjAtYW5kcm9pZC5hcGsiLCJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL0FsYmF0cm9zcy9yZWxlYXNlcy9kb3dubG9hZC92MS4wLjAvQWxiYXRyb3NzLTEuMC4wLWFuZHJvaWQuYXBrIl19LCJhbmRyb2lkLWFybWVhYmktdjdhIjp7InNoYTI1NiI6IjI4NzBlZjA1YmUxMTk4ZDIwZTViYjAwOTBjNGI5OGVjZWVlOTlkM2FiNzViZTlkODNlNDNkODNiMWRiNjRkMjEiLCJ1cmxzIjpbImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4wLjAvQWxiYXRyb3NzLTEuMC4wLWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9BbGJhdHJvc3MvcmVsZWFzZXMvZG93bmxvYWQvdjEuMC4wL0FsYmF0cm9zcy0xLjAuMC1hbmRyb2lkLmFwayJdfSwid2luZG93cyI6eyJzaGEyNTYiOiI3ZTQyZWM3NGYwNzJmMmZjOTlmNTk2OGJlZDgzZWUzNzgwYjI4OGM1NTRkMzU2YTNiMjRjODM5ODYwZGNmNTM2IiwidXJscyI6WyJodHRwczovL2FjY291bnRzLmFsYmF0cm9zc3Zwbi5vbmxpbmUvZGwvdjEuMC4wL0FsYmF0cm9zcy1TZXR1cC0xLjAuMC5leGUiLCJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL0FsYmF0cm9zcy9yZWxlYXNlcy9kb3dubG9hZC92MS4wLjAvQWxiYXRyb3NzLVNldHVwLTEuMC4wLmV4ZSJdfX0sImxhdGVzdF92ZXJzaW9uIjoiMS4wLjAiLCJtZXNzYWdlIjoiQWxiYXRyb3NzIDEuMC4wIGlzIHJlcXVpcmVkIGFuZCB0aGlzIHZlcnNpb24gbm8gbG9uZ2VyIGNvbm5lY3RzLiBJZiB0aGUgYXBwIGRvZXMgbm90IHVwZGF0ZSBieSBpdHNlbGY6IDEpIFVuaW5zdGFsbCBBbGJhdHJvc3MuIDIpIERvd25sb2FkIHRoZSBuZXcgdmVyc2lvbiB3aXRoIEdldCB0aGUgdXBkYXRlLCBvciBvcGVuIGh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4wLjAvQWxiYXRyb3NzLTEuMC4wLWFuZHJvaWQuYXBrIGluIHlvdXIgYnJvd3NlciAoV2luZG93czogQWxiYXRyb3NzLVNldHVwLTEuMC4wLmV4ZSBmcm9tIGh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS8jZG93bmxvYWQpLiAzKSBJbnN0YWxsIGl0IGFuZCBzaWduIGluIHdpdGggdGhlIHVzZXJuYW1lIGFuZCBwYXNzd29yZCB5b3Ugd2VyZSBnaXZlbi4gTGF0ZXIgdXBkYXRlcyBpbnN0YWxsIGZyb20gaW5zaWRlIHRoZSBhcHAuIiwibWluX3ZlcnNpb24iOiIxLjAuMCIsInJlcXVpcmUiOiIxLjAuMCJ9"
 }
