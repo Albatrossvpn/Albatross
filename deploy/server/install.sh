@@ -20,6 +20,11 @@ XRAY_VERSION="${XRAY_VERSION:-26.10.21}"
 DRY_RUN="${DRY_RUN:-0}"
 OUT="${OUT:-/etc/albatross}"
 REALITY_DEST="${REALITY_DEST:-www.microsoft.com}"
+# DNS_TUNNEL, when set (e.g. t.example.com), is a name whose NS record
+# points at this server: the app then tunnels through DNS queries to any
+# resolver (Xray xdns), which is what still works when every foreign
+# address is cut. UDP 53 then serves the tunnel instead of Hysteria 2.
+DNS_TUNNEL="${DNS_TUNNEL:-}"
 
 # Ports. Each protocol has its own so one being blocked leaves the rest.
 P_REALITY=443        # VLESS + Reality + Vision (TCP)
@@ -100,6 +105,10 @@ secrets() {
       echo "STLS_PASS=$("$SB" generate rand --hex 16)"
     } >"$f"
     chmod 600 "$f"
+  fi
+  # The tunnel name is kept with the secrets so a rerun keeps it.
+  if [ -n "$DNS_TUNNEL" ]; then
+    sed -i '/^DNS_TUNNEL=/d' "$f" && echo "DNS_TUNNEL=$DNS_TUNNEL" >>"$f"
   fi
   # Servers set up before the ICMP carrier get its seed added.
   grep -q "^KCP_SEED=" "$f" || echo "KCP_SEED=$("$SB" generate rand --hex 8)" >>"$f"
@@ -191,6 +200,25 @@ json.dump(c, open(p, "w"), indent=2)
 PY
 }
 
+# dns_tunnel_inbound prints the DNS tunnel inbound (with its leading comma)
+# when DNS_TUNNEL is set: VMess over mKCP inside DNS queries for the
+# tunnel name, on UDP 53. The small mKCP MTU is Xray's recommendation for
+# TXT answers.
+dns_tunnel_inbound() {
+  [ -n "$DNS_TUNNEL" ] || return 0
+  cat <<EOF
+, {
+    "tag": "xdns", "listen": "0.0.0.0", "port": 53, "protocol": "vmess",
+    "settings": {"clients": [{"id": "$UUID"}]},
+    "streamSettings": {
+      "network": "kcp",
+      "kcpSettings": {"seed": "$KCP_SEED", "mtu": 900, "tti": 200, "header": {"type": "none"}},
+      "finalmask": {"udp": [{"type": "xdns", "settings": {"domains": [{"names": ["$DNS_TUNNEL"]}]}}]}
+    }
+  }
+EOF
+}
+
 xray_config() {
   cat >"$OUT/xray.json" <<EOF
 {
@@ -212,7 +240,7 @@ xray_config() {
       "kcpSettings": {"seed": "$KCP_SEED", "mtu": 1250, "tti": 50, "header": {"type": "none"}},
       "finalmask": {"udp": [{"type": "xicmp"}]}
     }
-  }],
+  }$(dns_tunnel_inbound)],
   "outbounds": [{"protocol": "freedom", "tag": "direct"},
                 {"protocol": "blackhole", "tag": "block"}],
   "routing": {"rules": [{"ip": ["0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
@@ -263,7 +291,14 @@ firewall() {
   done
   # Hysteria 2 port hopping: the whole range, and UDP 53, land on its one
   # port.
-  for r in "$HOP_RANGE" "$P_HY2_DNS"; do
+  local hy2ports="$HOP_RANGE $P_HY2_DNS"
+  if [ -n "$DNS_TUNNEL" ]; then
+    # UDP 53 serves the DNS tunnel; an older rule sending it to Hysteria goes.
+    hy2ports="$HOP_RANGE"
+    iptables -t nat -D PREROUTING -p udp --dport "$P_HY2_DNS" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null || true
+    iptables -C INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport 53 -j ACCEPT
+  fi
+  for r in $hy2ports; do
     iptables -C INPUT -p udp --dport "$r" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$r" -j ACCEPT
     iptables -t nat -C PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null ||
       iptables -t nat -A PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2"
@@ -294,10 +329,11 @@ vless://$UUID@$DOMAIN:$P_GRPC?security=tls&sni=$DOMAIN&fp=chrome&type=grpc&servi
 $(vmess_link "$DOMAIN" "$P_UPGRADE" tls Albatross-HTTPUpgrade)
 $(vmess_link "$h" "$P_HTTP" "" Albatross-HTTP80)
 $(vmess_link "$h" "$P_ICMP" "" Albatross-ICMP icmp)
+$([ -z "$DNS_TUNNEL" ] || vmess_link "$h" 53 "" Albatross-DNS "dns:$DNS_TUNNEL")
 anytls://$PASS@$DOMAIN:$P_ANYTLS?sni=$DOMAIN#$n-AnyTLS
 ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_SS#$n-SS2022
 ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_STLS?plugin=$(urlenc "shadow-tls;host=$REALITY_DEST;password=$STLS_PASS;version=3")#$n-ShadowTLS
-hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS&mport=$P_HY2_DNS,$hop#$n-Hysteria2
+hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS&mport=$([ -n "$DNS_TUNNEL" ] || printf '%s,' "$P_HY2_DNS")$hop#$n-Hysteria2
 tuic://$UUID:$PASS@$DOMAIN:$P_TUIC?sni=$DOMAIN&alpn=h3&congestion_control=bbr#$n-TUIC
 EOF
 }
@@ -316,6 +352,9 @@ v = {"v": "2", "ps": name, "add": host, "port": port, "id": uuid, "aid": "0",
      "scy": "aes-128-gcm", "net": "httpupgrade", "host": host, "path": path, "tls": tls}
 if carrier == "icmp":
     v.update(net="kcp", type="none", path=seed, host="", fm={"udp": [{"type": "xicmp"}]})
+elif carrier.startswith("dns:"):
+    v.update(net="kcp", type="none", path=seed, host="",
+             fm={"udp": [{"type": "xdns", "settings": {"domains": [{"names": [carrier[4:]]}]}}]})
 if tls:
     v.update(sni=host, fp="chrome")
 print("vmess://" + base64.b64encode(json.dumps(v, separators=(",", ":")).encode()).decode())
