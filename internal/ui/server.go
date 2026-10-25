@@ -36,6 +36,9 @@ type Hooks struct {
 	ShareText func(string) error
 	// ShareApp shares the app's own installer (Android).
 	ShareApp func() error
+	// SaveInstaller puts this app's installer where the user can pass it
+	// on (desktop) and returns that path.
+	SaveInstaller func() (string, error)
 	// LocationSetup says what the phone still needs before the app may set
 	// its location (Android): "" when it is ready, "developer" while
 	// Developer options are off, "mock_app" until the app is the selected
@@ -98,6 +101,7 @@ func (s *Server) mux() *http.ServeMux {
 		"POST /api/share":             s.share,
 		"POST /api/share/import":      s.shareImport,
 		"POST /api/share/app":         s.shareApp,
+		"POST /api/share/installer":   s.saveInstaller,
 	}
 	for pattern, h := range api {
 		mux.Handle(pattern, s.guard(h))
@@ -356,6 +360,19 @@ func (s *Server) shareImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"added": n})
+}
+
+func (s *Server) saveInstaller(w http.ResponseWriter, r *http.Request) {
+	if s.hooks.SaveInstaller == nil {
+		fail(w, errors.New("not supported"))
+		return
+	}
+	path, err := s.hooks.SaveInstaller()
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"path": path})
 }
 
 func (s *Server) shareApp(w http.ResponseWriter, r *http.Request) {

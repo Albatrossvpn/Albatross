@@ -347,6 +347,10 @@ $("share-add").addEventListener("click", function () {
   });
 });
 $("row-share-app").addEventListener("click", function () { api("POST", "/api/share/app").catch(function (e) { toast(e.message); }); });
+$("row-save-installer").addEventListener("click", function () {
+  toast("Getting the installer\u2026 this takes a minute");
+  api("POST", "/api/share/installer").then(function (r) { toast("Saved to " + r.path); }).catch(function (e) { toast(e.message); });
+});
 $("country-search").addEventListener("input", renderSheet);
 document.addEventListener("keydown", function (e) {
   // KeyboardEvent.key needs Chrome 51; keyCode covers older WebViews.

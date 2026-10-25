@@ -52,8 +52,39 @@ gobuild() {
     armeabi-v7a) goarch=arm cc=armv7a-linux-androideabi ;;
     x86_64) goarch=amd64 cc=x86_64-linux-android ;;
   esac
+  # Phones from 2025 on use 16 KB memory pages; a library whose segments
+  # are aligned to 4 KB does not load there (and Android 16 refuses it).
   GOOS=android GOARCH="$goarch" GOARM=7 CGO_ENABLED=1 CC="$ndkbin/$cc$api-clang" GOTOOLCHAIN="${toolchain:-auto}" \
+    CGO_LDFLAGS="-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384" \
     go build -trimpath -buildvcs=false -o "$out" "$@"
+}
+
+# check_alignment <lib...> fails the build when a library's loadable
+# segments are not aligned to 16 KB.
+check_alignment() {
+  python3 - "$@" <<'PY'
+import struct, sys
+bad = []
+for path in sys.argv[1:]:
+    d = open(path, "rb").read()
+    if d[:4] != b"\x7fELF":
+        continue
+    is64 = d[4] == 2
+    if is64:
+        phoff = struct.unpack_from("<Q", d, 0x20)[0]; phentsize, phnum = struct.unpack_from("<HH", d, 0x36)
+    else:
+        phoff = struct.unpack_from("<I", d, 0x1c)[0]; phentsize, phnum = struct.unpack_from("<HH", d, 0x2a)
+    for k in range(phnum):
+        off = phoff + k * phentsize
+        ptype = struct.unpack_from("<I", d, off)[0]
+        align = struct.unpack_from("<Q", d, off + 0x30)[0] if is64 else struct.unpack_from("<I", d, off + 0x1c)[0]
+        if ptype == 1 and align < 16384:
+            bad.append("%s (%d)" % (path, align))
+            break
+if bad:
+    print("libraries not aligned to 16 KB pages: " + ", ".join(bad), file=sys.stderr)
+    sys.exit(1)
+PY
 }
 
 # smoke <name> <binary> <args...> runs a core built for this machine from
@@ -107,16 +138,31 @@ usqsrc() {
   echo "$src"
 }
 
+# sing-box's own Android builds are linked for 4 KB memory pages, which
+# phones with 16 KB pages refuse to run: every ABI is built from its source
+# with the tags and flags of its release builds (release/ in its tree).
+sbsrc() {
+  local src="$tmp/sing-box-src"
+  if [ ! -d "$src" ]; then
+    git clone -q --depth 1 --branch "v$SINGBOX_VERSION" "$gh/SagerNet/sing-box" "$src"
+    (cd "$src" && CGO_ENABLED=0 GOTOOLCHAIN=auto go build -trimpath -buildvcs=false -tags "$(cat release/DEFAULT_BUILD_TAGS_OTHERS)" \
+      -ldflags "$(cat release/LDFLAGS) -s -w" -o "$tmp/sing-box-host" ./cmd/sing-box)
+    smoke sing-box "$tmp/sing-box-host" version
+  fi
+  echo "$src"
+}
+
 # Cores for each ABI. Android only lets an app run executables that ship as
 # native libraries, hence the lib*.so names. An empty asset name builds that
 # core from source.
 cores() { # abi sing-box-arch xray-asset warp-plus-asset
   local abi="$1" out="$jni/$1"
   rm -rf "$out" && mkdir -p "$out"
-  fetch "$gh/SagerNet/sing-box/releases/download/v$SINGBOX_VERSION/sing-box-$SINGBOX_VERSION-android-$2.tar.gz" "$dl/sing-box-$SINGBOX_VERSION-android-$2.tar.gz"
-  mkdir -p "$tmp/sb-$abi" && tar xzf "$dl/sing-box-$SINGBOX_VERSION-android-$2.tar.gz" -C "$tmp/sb-$abi" --strip-components=1
-  cp "$tmp/sb-$abi/sing-box" "$out/libsingbox.so"
-  cp "$tmp/sb-$abi/LICENSE" "$app/src/main/assets/licenses/sing-box-LICENSE.txt"
+  local sb
+  sb="$(sbsrc)"
+  (cd "$sb" && gobuild "$abi" "$out/libsingbox.so" -tags "$(cat release/DEFAULT_BUILD_TAGS_OTHERS)" \
+    -ldflags "-X 'github.com/sagernet/sing-box/constant.Version=$SINGBOX_VERSION' $(cat release/LDFLAGS) -s -w -buildid=" ./cmd/sing-box)
+  cp "$sb/LICENSE" "$app/src/main/assets/licenses/sing-box-LICENSE.txt"
   if [ -n "$3" ]; then
     fetch "$gh/XTLS/Xray-core/releases/download/v$XRAY_VERSION/$3" "$dl/xray-$XRAY_VERSION-$3"
     unzip -q -o "$dl/xray-$XRAY_VERSION-$3" xray LICENSE -d "$tmp/x-$abi"
@@ -193,8 +239,13 @@ printf "The engine's root certificates are Mozilla's (https://wiki.mozilla.org/C
 go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target=android/arm64,android/arm,android/amd64 -androidapi "$api" \
   -javapkg app.albatross -trimpath \
-  -ldflags "-s -w -X github.com/Albatrossvpn/vp/mobile.Version=$VERSION -X github.com/Albatrossvpn/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/Albatrossvpn/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.WorkerMirror=${ACCOUNT_URL:-}" \
+  -ldflags "-s -w -extldflags=-Wl,-z,max-page-size=16384 -X github.com/Albatrossvpn/vp/mobile.Version=$VERSION -X github.com/Albatrossvpn/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/Albatrossvpn/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.WorkerMirror=${MIRROR_URL:-${ACCOUNT_URL:-}}" \
   -o "$app/libs/albatross.aar" ./mobile
+
+# The engine's library comes out of the archive for the check; the cores
+# are already in place.
+mkdir -p "$tmp/aar" && (cd "$tmp/aar" && unzip -oq "$app/libs/albatross.aar" 'jni/*')
+check_alignment "$jni"/*/*.so "$tmp"/aar/jni/*/*.so
 
 cd "$root/android"
 VERSION="$VERSION" ./gradlew --no-daemon -q assembleRelease

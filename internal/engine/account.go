@@ -118,6 +118,11 @@ func (e *Engine) Login(username, password string) error {
 		return err
 	}
 	e.logf("info", "Signed in.")
+	// The service's own server (the edge) is for signed-in users.
+	methodsMu.Lock()
+	edgeFetched = time.Time{}
+	methodsMu.Unlock()
+	go e.refreshEdge()
 	return nil
 }
 

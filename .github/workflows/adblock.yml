@@ -5,8 +5,10 @@ name: Ad list
 # "rules" branch, which the apps download through mirrors (rules.go). A
 # pull request, or a run on another branch, only builds and checks it.
 on:
+  # Weekly: the lists change slowly, and a private repository has 2,000
+  # free Actions minutes a month.
   schedule:
-    - cron: "40 11 * * *"
+    - cron: "40 11 * * 1"
   push:
     branches: [main]
     paths: ["cmd/adlist/**", "build/adblock/**", "internal/engine/rules/ads.srs", ".github/workflows/adblock.yml"]
@@ -118,3 +120,11 @@ jobs:
           git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" rules
         env:
           GH_TOKEN: ${{ github.token }}
+      - name: Publish to the project's own storage
+        # The apps read the list from there first; its source form and
+        # licences go with it, as its licence asks.
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: bash deploy/files/publish-lists.sh "$(bash build/account-url.sh | cut -d, -f1)" rules out/ads.srs out/ads.json out/README.md out/LICENSE-GPL-3.0.txt out/LICENSE-AGPL-3.0.txt

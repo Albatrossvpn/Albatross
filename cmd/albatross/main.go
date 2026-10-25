@@ -110,7 +110,8 @@ func main() {
 			}()
 			return nil
 		},
-		OpenURL: platform.OpenURL,
+		OpenURL:       platform.OpenURL,
+		SaveInstaller: func() (string, error) { return saveInstaller(eng) },
 	}, *uiPort)
 	if err != nil {
 		platform.Alert(windowTitle, "The window could not open:\n"+err.Error())

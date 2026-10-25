@@ -43,6 +43,11 @@ func ReleaseInstance() {}
 func Alert(title, text string) { os.Stderr.WriteString(title + ": " + text + "\n") }
 
 // OpenURL opens a link in the default browser.
+// RevealFile opens the folder that holds path.
+func RevealFile(path string) error {
+	return OpenURL(filepath.Dir(path))
+}
+
 func OpenURL(u string) error {
 	cmd := "xdg-open"
 	if runtime.GOOS == "darwin" {

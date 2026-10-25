@@ -67,6 +67,7 @@ func (e *Engine) refreshLoop() {
 	defer e.wg.Done()
 	states := e.loadStates()
 	e.warmStart(states)
+	e.loadEdge()
 	states = nil
 	ruleCheck := time.Time{}
 	for {
@@ -98,6 +99,7 @@ func (e *Engine) refreshLoop() {
 		if warp {
 			e.refreshWarp()
 		}
+		e.refreshEdge()
 		select {
 		case <-e.ctx.Done():
 			return

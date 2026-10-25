@@ -27,7 +27,8 @@ const (
 )
 
 // Fetcher downloads sources, trying the local proxy (when connected), a
-// direct connection and public CDN mirrors of GitHub in turn.
+// direct connection and public CDN mirrors of GitHub in turn; the app's own
+// files start at the project's own storage (Addresses).
 type Fetcher struct {
 	Direct *http.Client
 	Proxy  func() *http.Client // returns nil while disconnected
@@ -109,21 +110,29 @@ func (f *Fetcher) Fetch(ctx context.Context, s Source) Result {
 		if strings.HasPrefix(url, "ssconf://") {
 			url = "https://" + strings.TrimPrefix(url, "ssconf://")
 		}
-		if proxy != nil {
-			attempts = append(attempts, attempt{"proxy", url, proxy})
-		}
-		attempts = append(attempts, attempt{"direct", url, f.Direct})
-		for i, m := range Mirrors(url) {
-			c := f.Direct
-			if IsWorker(m) {
-				if c = proxy; c == nil {
+		n := 0
+		for _, u := range Addresses(url) {
+			switch {
+			case IsWorker(u):
+				// The project's own storage: through the VPN, or the
+				// private client, never a plain direct call (IsWorker).
+				c := proxy
+				if c == nil {
 					c = f.Private
 				}
-				if c == nil {
-					continue
+				if c != nil {
+					n++
+					attempts = append(attempts, attempt{"mirror" + strconv.Itoa(n), u, c})
 				}
+			case u == url:
+				if proxy != nil {
+					attempts = append(attempts, attempt{"proxy", url, proxy})
+				}
+				attempts = append(attempts, attempt{"direct", url, f.Direct})
+			default:
+				n++
+				attempts = append(attempts, attempt{"mirror" + strconv.Itoa(n), u, f.Direct})
 			}
-			attempts = append(attempts, attempt{"mirror" + strconv.Itoa(i+1), m, c})
 		}
 	}
 	meta, _ := f.loadMeta(s)
@@ -274,9 +283,10 @@ func (f *Fetcher) getPage(ctx context.Context, c *http.Client, url string) (stri
 
 var rawGitHubRe = regexp.MustCompile(`^https?://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/(.+)$`)
 
-// WorkerMirror is the project's Cloudflare Worker, which serves the app's
-// own lists (backend/src/index.js): its addresses, comma separated, or empty
-// while it has none.
+// WorkerMirror is the project's own storage as its Workers serve it (the
+// account service and the website, backend/src/index.js and site/src): their
+// addresses, comma separated, or empty while there are none. Both serve the
+// app's own files at /list/<branch>/<path>.
 var WorkerMirror = ""
 
 // Mirrors returns CDN copies of a raw GitHub URL, which often stay
@@ -305,6 +315,24 @@ func Mirrors(u string) []string {
 		}
 	}
 	return out
+}
+
+// Addresses lists where u can be downloaded, in the order to try. The app's
+// own files (the collector's lists, the update manifest, the ad list) live
+// in the project's own storage, served by its Workers (WorkerMirror), so
+// those come first; GitHub, where the files were first published, and its
+// CDN mirrors follow while the repository is public. Any other file starts
+// at u itself.
+func Addresses(u string) []string {
+	var own, rest []string
+	for _, m := range Mirrors(u) {
+		if IsWorker(m) {
+			own = append(own, m)
+		} else {
+			rest = append(rest, m)
+		}
+	}
+	return append(append(own, u), rest...)
 }
 
 // IsWorker says whether u is on the Worker, whose name is also the account

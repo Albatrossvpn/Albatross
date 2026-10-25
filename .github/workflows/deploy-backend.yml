@@ -58,6 +58,9 @@ jobs:
           [ -n "$DOMAIN" ] && args+=(--domain "$DOMAIN")
           [ -n "$SITE_NAME" ] && args+=(--var "SITE_NAME:$SITE_NAME")
           args+=(--var "COMPANY_NAME:$COMPANY_NAME" --var "COMPANY_ADDRESS:$COMPANY_ADDRESS" --var "CONTACT_EMAIL:$CONTACT_EMAIL")
+          # The edge's name, from its own settings, so the service can hand out its links.
+          edge="$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' ../edge/wrangler.toml | head -1)"
+          args+=(--var "EDGE_HOST:$edge")
           npx wrangler deploy "${args[@]}"
       - name: Check Encrypted Client Hello
         # ECH hides the service's name in the TLS handshake; the app reads the
@@ -85,10 +88,85 @@ jobs:
           TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          EDGE_EPOCH: ${{ vars.EDGE_EPOCH }}
         run: |
           for v in TOKEN_SECRET ADMIN_USER ADMIN_PASSWORD; do
             printf '%s' "${!v}" | npx wrangler secret put "$v"
           done
+          # The edge's user id, the same one the edge job derives (edge/README.md).
+          printf '%s' "$(../edge/uuid.sh)" | npx wrangler secret put EDGE_UUID
+      - name: Keep the current release's files in storage
+        # The website serves them (/download/); a release stores its own
+        # files, this covers the release before that and a new bucket.
+        env:
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          account="https://$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml | head -1)"
+          site="https://$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' ../site/wrangler.toml | head -1)"
+          jq -r '.files | to_entries[] | .value | "\(.urls[] | select(startswith("https://github.com/"))) \(.sha256)"' ../update.json | sort -u |
+            while read -r url sha; do
+              bash ../deploy/files/push.sh "$account" "$site" "${url##*/}" "$url" "$sha" || echo "::warning::$url could not be stored; the website will serve it once a release or a later deploy stores it."
+            done
+      # The app's own files (lists, ad list, update manifest) from the
+      # branches CI publishes them to, so the storage holds them from the
+      # first deploy on; the collectors and releases keep them current.
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: servers
+          path: branch-servers
+      - uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: rules
+          path: branch-rules
+      - name: Keep the app's own files in storage
+        env:
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: |
+          account="https://$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml | head -1)"
+          publish() { # branch dir names...
+            local branch="$1" dir="$2" files=() f
+            shift 2
+            for f in "$@"; do [ -f "$dir/$f" ] && files+=("$dir/$f"); done
+            if [ ${#files[@]} -eq 0 ]; then echo "::warning::nothing to store from the $branch branch"; return 0; fi
+            bash ../deploy/files/publish-lists.sh "$account" "$branch" "${files[@]}" || echo "::warning::the $branch files could not all be stored"
+          }
+          publish servers ../branch-servers hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt tor.json meta.json
+          publish rules ../branch-rules ads.srs ads.json README.md LICENSE-GPL-3.0.txt LICENSE-AGPL-3.0.txt
+          publish main .. update.json
+
+  edge:
+    # The edge: a Worker that carries the app's traffic (edge/README.md).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Deploy the edge
+        env:
+          PROXY_IP: ${{ vars.EDGE_PROXY_IP }}
+        run: |
+          args=()
+          [ -n "$PROXY_IP" ] && args+=(--var "PROXY_IP:$PROXY_IP")
+          npx wrangler deploy --config ../edge/wrangler.toml "${args[@]}"
+      - name: Set the edge's user id
+        env:
+          TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
+          EDGE_EPOCH: ${{ vars.EDGE_EPOCH }}
+        run: printf '%s' "$(../edge/uuid.sh)" | npx wrangler secret put EDGE_UUID --config ../edge/wrangler.toml
 
   site:
     # The public website: static pages on the zone's bare domain and www.

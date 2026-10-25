@@ -9,18 +9,22 @@
 <meta property="og:description" content="One button. Instant failover. Nine protocols, four engines, and ways out that work when nothing else does.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://albatrossvpn.online/">
-<meta property="og:image" content="https://albatrossvpn.online/icon.svg">
+<meta property="og:image" content="https://albatrossvpn.online/img/hero-1600.jpg">
+<meta property="og:image:width" content="1600">
+<meta property="og:image:height" content="900">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="canonical" href="https://albatrossvpn.online/">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="preload" href="/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/site.css">
-<meta name="theme-color" content="#070b16">
+<meta name="theme-color" content="#ffffff">
 </head>
 <body>
 
 <header class="nav">
   <div class="wrap">
-    <a class="brand" href="/"><img src="/icon.svg" alt="" width="30" height="30">Albatross</a>
-    <nav>
+    <a class="brand" href="/"><img src="/icon.svg" alt="" width="32" height="32">Albatross</a>
+    <nav aria-label="Main">
       <a href="#features">Features</a>
       <a href="#how">How it works</a>
       <a href="#hard">Hard networks</a>
@@ -29,70 +33,106 @@
       <a href="https://accounts.albatrossvpn.online/account">Account</a>
     </nav>
     <a class="btn primary" href="#download">Download</a>
+    <details class="menu"><summary aria-label="Menu"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></summary><div class="menu-panel"><a href="#features">Features</a><a href="#how">How it works</a><a href="#hard">Hard networks</a><a href="#privacy">Privacy</a><a href="#faq">FAQ</a><a href="https://accounts.albatrossvpn.online/account">Account</a></div></details>
   </div>
 </header>
 
+<main>
 <section class="hero">
   <div class="wrap">
     <div>
       <span class="eyebrow">VPN for Windows and Android</span>
       <h1>Stays connected when others fall silent.</h1>
-      <p class="lead">Pick a location and press the button. Albatross finds the fastest server there, keeps a group of ready backups behind it, and moves your traffic to one within a second if the server in use drops. No server lists, no settings to learn.</p>
+      <p class="lead">Pick a location and press the button. Albatross finds the fastest server there, keeps ready backups behind it, and moves your traffic to one within a second if the server in use drops. No server lists, no settings to learn.</p>
       <div class="actions">
-        <a class="btn primary" href="#download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Get Albatross</a>
-        <a class="btn" href="https://github.com/Albatrossvpn/Albatross">View the source</a>
+        <a class="btn primary" href="#download"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>Get Albatross free</a>
+        <a class="btn" href="#how">See how it works</a>
       </div>
-      <p class="fine">Free to download. Open source. Nine protocols, four engines, one button.</p>
+      <ul class="assure">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Free to download</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Ads and trackers blocked</li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>No email or phone needed</li>
+      </ul>
     </div>
-    <div class="device" aria-hidden="true">
-      <div class="status"><span class="dot"></span>Connected · Frankfurt</div>
-      <div class="muted">Server in use</div>
-      <div class="big">41 ms</div>
-      <div class="muted">6 backups ready in the same location</div>
-      <div class="bar"><i></i></div>
-      <div class="row" style="margin-top:18px"><span>Protocol</span><b>Automatic</b></div>
-      <div class="row"><span>Ads and trackers</span><b>Blocked</b></div>
-      <div class="row"><span>Local sites</span><b>Open directly</b></div>
+    <div class="visual">
+      <div class="photo"><picture><source type="image/webp" srcset="/img/hero-900.webp 900w, /img/hero-1600.webp 1600w" sizes="(max-width: 960px) 100vw, 56vw"><img src="/img/hero-1600.jpg" srcset="/img/hero-900.jpg 900w, /img/hero-1600.jpg 1600w" sizes="(max-width: 960px) 100vw, 56vw" width="1600" height="900" alt="An albatross gliding low over a calm, bright ocean" fetchpriority="high"></picture></div>
+      <div class="status-card" aria-hidden="true">
+        <div class="status"><span class="dot"></span>Connected · Frankfurt</div>
+        <div class="big">41 ms</div>
+        <div class="sub">6 backups ready in the same location</div>
+        <div class="bar"><i></i></div>
+      </div>
     </div>
   </div>
 </section>
 
 <div class="strip">
   <div class="wrap">
-    <div><b>&lt; 1 s</b><span>failover to a ready backup</span></div>
-    <div><b>9</b><span>protocols, chosen for you</span></div>
-    <div><b>4</b><span>engines working together</span></div>
-    <div><b>100%</b><span>open source</span></div>
+    <div class="item"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h8l-1 8 10-12h-8l1-8z"/></svg></div><div><b>Under a second</b><span>to switch to a ready backup</span></div></div>
+    <div class="item"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg></div><div><b>Nine protocols</b><span>chosen for your network, automatically</span></div></div>
+    <div class="item"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></div><div><b>Verified downloads</b><span>a SHA-256 checksum for every file</span></div></div>
+    <div class="item"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M4.9 4.9l14.2 14.2"/></svg></div><div><b>Ads and trackers blocked</b><span>about half a million names, updated daily</span></div></div>
   </div>
 </div>
 
 <section id="features">
   <div class="wrap">
-    <span class="eyebrow">Why Albatross</span>
+    <div class="center"><span class="eyebrow">Why Albatross</span>
     <h2>Built to connect, not to be configured.</h2>
-    <p class="lead">Everything that usually takes a settings screen happens on its own.</p>
+    <p class="lead">Everything that usually takes a settings screen happens on its own.</p></div>
     <div class="grid">
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h8l-1 8 10-12h-8l1-8z"/></svg></div><h3>Instant failover</h3><p>A connection is a group of servers in one location behind a selector. The one in use is watched continuously; backups are checked in the background. A drop moves traffic to the best backup without restarting anything, and your location does not change.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h8l-1 8 10-12h-8l1-8z"/></svg></div><h3>Instant failover</h3><p>Every connection keeps several servers ready in the same location. If the one in use drops, your traffic moves to the best backup without reconnecting, and your location does not change.</p></div>
       <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg></div><h3>The fastest location, measured</h3><p>Servers are ranked by real HTTPS requests through them, not by a ping. Choose the fastest location overall, or any location with servers available, each shown with its server count and best latency.</p></div>
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><h3>Secure by default</h3><p>Plain HTTP, FTP, Telnet and unprotected mail ports are refused, because whoever carries them can read them. Name lookups go through the tunnel. On Android, one tap opens the system's always-on VPN switches.</p></div>
-      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg></div><h3>Nine protocols, chosen for you</h3><p>VLESS, VMess, Trojan, Shadowsocks, Hysteria 2, TUIC, AnyTLS, WireGuard and OpenVPN, with REALITY, ShadowTLS, XHTTP and more underneath. Leave it on Automatic, or fix one.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><h3>Secure by default</h3><p>Connections that would travel unencrypted are refused, so no one along the way can read them. Name lookups go through the tunnel too. On Android, one tap opens the system's always-on VPN switches.</p></div>
+      <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h18M3 6h18M3 18h18"/></svg></div><h3>Nine protocols, chosen for you</h3><p>Nine modern protocols, including VLESS with REALITY, Hysteria 2, WireGuard and OpenVPN. Albatross uses the one your network lets through. Leave it on Automatic, or choose one yourself.</p></div>
       <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8"/><circle cx="12" cy="12" r="10"/></svg></div><h3>Ad and tracker blocking</h3><p>A list built every day from the major public filters plus regional ad networks, about half a million names, blocked at the name level with an allowlist that keeps sign-ins, payments and app stores working.</p></div>
       <div class="card"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l19-9-9 19-2-8-8-2z"/></svg></div><h3>Local sites, direct</h3><p>Sites of your region open directly instead of through the VPN, so banking, shopping and government services stay fast. Names the VPN carries are learned and added as they are found.</p></div>
     </div>
   </div>
 </section>
 
+
+<section class="stories" aria-label="Albatross in everyday life">
+  <div class="wrap">
+    <div class="story">
+      <div class="media"><picture><source type="image/webp" srcset="/img/family-900.webp 900w, /img/family-1600.webp 1600w" sizes="(max-width: 960px) 100vw, 50vw"><img src="/img/family-1600.jpg" srcset="/img/family-900.jpg 900w, /img/family-1600.jpg 1600w" sizes="(max-width: 960px) 100vw, 50vw" width="1600" height="900" alt="A family on a sofa waving at relatives on a video call" loading="lazy" decoding="async"></picture></div>
+      <div>
+        <span class="eyebrow">Stay close</span>
+        <h2>The people who matter, one tap away.</h2>
+        <p class="lead">Video calls, messages and voice notes keep working on networks that try to stop them. Albatross picks the way out that your network still allows, and changes it the moment that stops working.</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Calls that do not drop.</b> A failing server is replaced within a second, without reconnecting.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Nothing to set up.</b> Install, sign in, press the button.</span></li>
+        </ul>
+      </div>
+    </div>
+    <div class="story flip">
+      <div class="media"><picture><source type="image/webp" srcset="/img/onthego-900.webp 900w, /img/onthego-1600.webp 1600w" sizes="(max-width: 960px) 100vw, 50vw"><img src="/img/onthego-1600.jpg" srcset="/img/onthego-900.jpg 900w, /img/onthego-1600.jpg 1600w" sizes="(max-width: 960px) 100vw, 50vw" width="1600" height="900" alt="A woman smiling at her phone on a sunny city street" loading="lazy" decoding="async"></picture></div>
+      <div>
+        <span class="eyebrow">Anywhere</span>
+        <h2>Connected on mobile data, café Wi-Fi and everything between.</h2>
+        <p class="lead">When you move from one network to another, Albatross measures the new one and adjusts on its own, so the connection follows you instead of breaking.</p>
+        <ul>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Local sites stay fast.</b> Banking, shopping and government services open directly.</span></li>
+          <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><span><b>Lighter on the battery.</b> Scanning slows down on phones once a good server is found.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="how">
   <div class="wrap">
-    <span class="eyebrow">How it works</span>
-    <h2>One button. A lot of work behind it.</h2>
+    <div class="center"><span class="eyebrow">How it works</span>
+    <h2>One button. A lot of work behind it.</h2></div>
     <div class="steps">
-      <div class="step"><h3>It learns your network</h3><p>Albatross measures how your network filters right now, from ordinary blocklists to the hardest allowlists, and ranks every way out accordingly. What works for others on your operator helps you start faster, using counts only, never addresses.</p></div>
-      <div class="step"><h3>It tests before it trusts</h3><p>Every server gets a real HTTPS request through it, with its exit checked, before it is used. Servers that forge certificates are dropped for good.</p></div>
+      <div class="step"><h3>It learns your network</h3><p>Albatross measures how your network filters right now, from ordinary blocklists to the hardest allowlists, and ranks every way out accordingly. If you turn on sharing, what works for others on your operator helps you start faster, using counts only, never addresses.</p></div>
+      <div class="step"><h3>It tests before it trusts</h3><p>Every server gets a real HTTPS request through it, with its exit checked, before it is used. Any server caught tampering with secure connections is dropped for good.</p></div>
       <div class="step"><h3>It keeps backups warm</h3><p>While you browse, backups in the same location are checked in the background. When the server in use fails, the switch is a change of selection, not a reconnect.</p></div>
     </div>
   </div>
 </section>
+
 
 <section id="hard" class="hard">
   <div class="wrap">
@@ -101,81 +141,105 @@
     <p class="lead">When a network cuts every ordinary path, Albatross reaches for the ones that survive, in the order they are most likely to work.</p>
     <div class="list">
       <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><div><b>Through DNS</b><span>A tunnel inside ordinary DNS queries, through the network's own resolver, for the days when only names still resolve.</span></div></div>
-      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><div><b>Through ping</b><span>A carrier inside ICMP echo packets, for when both TCP and UDP to foreign addresses are cut.</span></div></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><div><b>Through ping</b><span>Hidden inside ping packets, for networks that block almost everything else.</span></div></div>
       <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><div><b>Port 53 and port 80</b><span>Servers that answer on the ports allowlists leave open, over UDP and TCP.</span></div></div>
       <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><div><b>Real TLS handshakes</b><span>REALITY and ShadowTLS make a genuine handshake with a well-known site, so the connection looks like what it imitates.</span></div></div>
-      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><div><b>Big networks as the front</b><span>Cloudflare edge addresses that your network still lets through are found and used, and WARP over MASQUE, over QUIC or over TCP when UDP is throttled.</span></div></div>
-      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><div><b>Tor bridges as the last resort</b><span>Snowflake, WebTunnel, obfs4, meek and Conjure, fetched fresh, when every server is blocked.</span></div></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><div><b>Big networks as the front</b><span>Through Cloudflare's network, using the addresses your network still allows, and through Cloudflare WARP.</span></div></div>
+      <div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg><div><b>Tor bridges as the last resort</b><span>Tor's bridge network, fetched fresh, when every server is blocked.</span></div></div>
     </div>
   </div>
 </section>
 
+
 <section id="download" class="download">
   <div class="wrap">
-    <span class="eyebrow">Download</span>
-    <h2>Free for Windows and Android.</h2>
-    <p class="lead">One installer per platform. Updates install from inside the app.</p>
+    <div class="center">
+      <span class="eyebrow">Download</span>
+      <h2>Free for Windows and Android.</h2>
+      <p class="lead">One installer per platform, served from Albatross's own storage. Updates install from inside the app.</p>
+    </div>
     <div class="platforms">
       <div class="platform">
         <h3><svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 5.5 11 4.4v7.1H3zm0 13L11 19.6v-7.1H3zM12 4.2 21 3v8.5h-9zm0 15.6 9 1.2v-8.5h-9z"/></svg>Windows</h3>
         <div class="ver" data-ver="windows">Windows 10 and 11, 64-bit</div>
-        <a class="btn primary" data-dl="windows" href="https://github.com/Albatrossvpn/Albatross/releases/latest">Download for Windows</a>
-        <ul><li>Whole-device protection, system proxy, auto-connect, start with Windows</li><li>Portable version available on the releases page</li></ul>
-        <div class="sha" data-sha="windows"></div>
+        <a class="btn primary" data-dl="windows" href="/download/">Download for Windows</a>
+        <ul><li>Whole-device protection, system proxy, auto-connect, start with Windows</li><li>Windows may say “Windows protected your PC” because the installer is not code-signed yet: choose More info, then Run anyway.</li></ul>
+        <details class="sha" hidden><summary>Check this file (SHA-256)</summary><code data-sha="windows"></code></details>
       </div>
       <div class="platform">
         <h3><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.5 8.5a5.5 5.5 0 0 0-11 0v8a1 1 0 0 0 1 1h1v3.5a1.5 1.5 0 0 0 3 0V17.5h1V21a1.5 1.5 0 0 0 3 0V17.5h1a1 1 0 0 0 1-1zM6 8.5l-1.3-2.3M18 8.5l1.3-2.3M4 9.5a1.5 1.5 0 0 0-1.5 1.5v4a1.5 1.5 0 0 0 3 0v-4A1.5 1.5 0 0 0 4 9.5zm16 0a1.5 1.5 0 0 0-1.5 1.5v4a1.5 1.5 0 0 0 3 0v-4A1.5 1.5 0 0 0 20 9.5z"/></svg>Android</h3>
         <div class="ver" data-ver="android">Android 6 and newer, one APK for every phone</div>
-        <a class="btn primary" data-dl="android-arm64-v8a" href="https://github.com/Albatrossvpn/Albatross/releases/latest">Download the APK</a>
-        <ul><li>Signed with one key; later updates install over it</li><li>Always-on VPN and kill switch through the system settings</li></ul>
-        <div class="sha" data-sha="android-arm64-v8a"></div>
+        <a class="btn primary" data-dl="android-arm64-v8a" href="/download/">Download the APK</a>
+        <ul><li>Signed with one key; later updates install over it</li><li>Always-on VPN and kill switch through the system settings</li><li>Albatross is not on Google Play, so your phone asks once to allow installs from your browser.</li></ul>
+        <details class="sha" hidden><summary>Check this file (SHA-256)</summary><code data-sha="android-arm64-v8a"></code></details>
       </div>
     </div>
-    <p class="muted" style="margin-top:18px;font-size:14px">Every file has its SHA-256 next to it; the app checks it before installing an update. The source for every release is on <a href="https://github.com/Albatrossvpn/Albatross/releases">GitHub</a>.</p>
+    <div class="verify"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg><span>Each download has a SHA-256 fingerprint you can check, and the app checks it itself before installing any update. Older versions are listed with <a href="/download/">all downloads</a>.</span></div>
+      <div class="media wide"><picture><source type="image/webp" srcset="/img/workspace-900.webp 900w, /img/workspace-1600.webp 1600w" sizes="(max-width: 960px) 100vw, 50vw"><img src="/img/workspace-1600.jpg" srcset="/img/workspace-900.jpg 900w, /img/workspace-1600.jpg 1600w" sizes="(max-width: 960px) 100vw, 50vw" width="1600" height="900" alt="A laptop and a phone on a bright wooden desk" loading="lazy" decoding="async"></picture></div>
   </div>
 </section>
 
 <section id="privacy" class="honest">
   <div class="wrap">
-    <span class="eyebrow">Privacy, honestly</span>
-    <h2>What we guarantee, and what we cannot.</h2>
-    <p class="lead">A VPN that promises everything is hiding something. Here is exactly how Albatross treats your data.</p>
-    <div class="two">
-      <div class="card"><h3>Guaranteed</h3><ul>
+    <div class="center">
+      <span class="eyebrow">Privacy</span>
+      <h2>How Albatross treats your data.</h2>
+      <p class="lead">What is protected on the way, and the little the account service ever sees.</p>
+    </div>
+    <div class="layout">
+      <div class="media"><picture><source type="image/webp" srcset="/img/privacy-900.webp 900w, /img/privacy-1600.webp 1400w" sizes="(max-width: 960px) 100vw, 40vw"><img src="/img/privacy-1600.jpg" srcset="/img/privacy-900.jpg 900w, /img/privacy-1600.jpg 1400w" sizes="(max-width: 960px) 100vw, 40vw" width="1400" height="1750" alt="Two hands holding a smartphone in a softly lit café" loading="lazy" decoding="async"></picture></div>
+      <div class="two">
+      <div class="card yes"><h3><span class="pill">Guaranteed</span>What Albatross does for you</h3><ul>
+        <li>Signing up needs only a username and password: no email, no phone number, no real name.</li>
         <li>Traffic is encrypted from your device to the server; HTTPS sites stay encrypted to the site.</li>
         <li>Unencrypted traffic is refused, so nothing the app carries can be read in plain text on the way.</li>
         <li>Name lookups for the sites you visit go through the tunnel.</li>
         <li>The account service receives a username, a password at sign-in, and counts of bytes and seconds. It never receives the sites you visit.</li>
-        <li>Shared statistics are counts only: no addresses of servers or devices, no install number.</li>
+        <li>Sharing what works on your network is off unless you turn on “Learn from other users”, and it sends counts only: no server or device addresses, no username, no install number.</li>
       </ul></div>
-      <div class="card"><h3>Not guaranteed</h3><ul>
-        <li>A server operator can still see which sites you connect to and how much data you move. Albatross does not claim anonymity or "no logs", because no VPN can make that promise on your behalf.</li>
-        <li>Account limits are enforced by the app, so they stop honest overuse, not someone who rebuilds the client.</li>
-        <li>The serverless fallback, used only when no server works, opens name-blocked sites through your own line and hides nothing from your network's operator. The app says so when it is in use.</li>
-      </ul></div>
+      
     </div>
-    <p class="muted" style="margin-top:18px">Full text: <a href="https://accounts.albatrossvpn.online/privacy">Privacy policy</a> · <a href="https://accounts.albatrossvpn.online/terms">Terms of service</a> · <a href="https://github.com/Albatrossvpn/Albatross/blob/main/SECURITY.md">Security policy</a></p>
+    </div>
+    <p class="muted center policy-links">Full text: <a href="https://accounts.albatrossvpn.online/privacy">Privacy policy</a> · <a href="https://accounts.albatrossvpn.online/terms">Terms of service</a></p>
   </div>
 </section>
 
-<section id="faq">
+<section id="faq" class="faq">
   <div class="wrap">
-    <span class="eyebrow">Questions</span>
-    <h2>Frequently asked.</h2>
-    <details><summary>Is Albatross free?</summary><p>The app is free to download and open source. Accounts, where a build asks for one, are provided by the operator of your Albatross service, who sets the allowances.</p></details>
+    <div class="center">
+      <span class="eyebrow">Questions</span>
+      <h2>Frequently asked.</h2>
+    </div>
+    <div class="items">
+    <details><summary>Is Albatross free?</summary><p>Yes. The app is free to download. To connect, you sign in with an Albatross account: just a username and password, with no email, name or phone number. An account can have a data or time allowance, which the app and your <a href="https://accounts.albatrossvpn.online/account">account page</a> show.</p></details>
     <details><summary>Why is there no server list?</summary><p>Because choosing is the app's job. It shows how many servers are available, where, and how fast, and keeps a group of them ready behind every connection. You pick a location; it picks and re-picks the server.</p></details>
-    <details><summary>Which protocol should I choose?</summary><p>Automatic. Albatross measures your network and ranks protocols by what works on it right now. Fix a protocol only if you know you need one.</p></details>
-    <details><summary>Does it work on heavily filtered networks?</summary><p>That is what it is built for. Beyond ordinary servers it carries traffic through DNS, through ping, through Cloudflare's network, through Tor bridges, and as a last resort through your own line with the TLS handshake fragmented. It tries them in the order they are most likely to work on your network.</p></details>
-    <details><summary>Can I run my own servers?</summary><p>Yes. One script sets up a server that offers every protocol the app runs, on a free cloud tier, and the app can be built to use it. See the repository's deploy folder.</p></details>
+    <details><summary>Which protocol should I choose?</summary><p>Automatic. Albatross measures your network and ranks protocols by what works on it right now. Fix a protocol only if you know you need one. The app carries VLESS, VMess, Trojan, Shadowsocks, Hysteria 2, TUIC, AnyTLS, WireGuard and OpenVPN, with REALITY, ShadowTLS and XHTTP underneath.</p></details>
+    <details><summary>Does it work on heavily filtered networks?</summary><p>That is what it is built for. Beyond ordinary servers it carries traffic through DNS, through ping, through Cloudflare's network, through Tor bridges, and as a last resort directly over your own connection, split so that filters cannot tell which site it is for. It tries them in the order they are most likely to work on your network.</p></details>
+    <details><summary>Can I run my own servers?</summary><p>Yes. One script sets up a server that offers every protocol the app runs, on a free cloud tier, and the app can be built to use it.</p></details>
     <details><summary>How do updates work?</summary><p>The app checks a signed manifest at start and every six hours, downloads the new version through its own connection, verifies its SHA-256 and installs it in place. A required update stops older versions from connecting until they update.</p></details>
+    </div>
   </div>
 </section>
+
+<section class="cta">
+  <div class="wrap">
+    <div class="box">
+      <picture><source type="image/webp" srcset="/img/sunset-900.webp 900w, /img/sunset-1600.webp 1600w" sizes="100vw"><img src="/img/sunset-1600.jpg" srcset="/img/sunset-900.jpg 900w, /img/sunset-1600.jpg 1600w" sizes="100vw" width="1600" height="1600" alt="" loading="lazy" decoding="async"></picture>
+      <div>
+        <h2>Ready when you need it.</h2>
+        <p>Install it once. On the day your network closes the usual doors, Albatross already knows the other ones.</p>
+        <a class="btn" href="#download">Download Albatross</a>
+      </div>
+    </div>
+  </div>
+</section>
+</main>
 
 <footer>
   <div class="wrap">
     <div class="cols">
       <div>
-        <a class="brand" href="/" style="margin-bottom:12px"><img src="/icon.svg" alt="" width="30" height="30">Albatross</a>
+        <a class="brand" href="/"><img src="/icon.svg" alt="" width="30" height="30">Albatross</a>
         <p>A VPN client for Windows and Android that picks the fastest server, switches to a backup within a second, and keeps every way out ready for the hardest networks.</p>
         <address>Albatross<br>3401 N. Miami Ave, Suite 230<br>Miami, FL 33127<br>United States</address>
       </div>
@@ -188,15 +252,13 @@
       </div>
       <div>
         <h4>Project</h4>
-        <a href="https://github.com/Albatrossvpn/Albatross">Source code</a>
-        <a href="https://github.com/Albatrossvpn/Albatross/releases">Releases</a>
-        <a href="https://github.com/Albatrossvpn/Albatross/security/advisories/new">Report a vulnerability</a>
+        <a href="/download/">Downloads</a>
         <a href="https://accounts.albatrossvpn.online/privacy">Privacy</a>
         <a href="https://accounts.albatrossvpn.online/terms">Terms</a>
       </div>
     </div>
     <div class="legal">
-      <span>© <span data-year>2026</span> Albatross. Open source under the licences listed in the repository; bundled components keep their own.</span>
+      <span>© <span data-year>2026</span> Albatross. Bundled open-source components keep their own licences.</span>
       <span>No analytics, no cookies, no third-party requests on this page.</span>
     </div>
   </div>

@@ -73,3 +73,61 @@ test("usernames and passwords", () => {
   assert.equal(pw.length, 14);
   assert.match(pw, /^[A-Za-z2-9]+$/);
 });
+
+test("edge links name the edge on Cloudflare's TLS ports, or none without an edge", async () => {
+  const { edgeLinks } = await import("../src/lib.js");
+  const uuid = "0f1e2d3c-4b5a-4978-8a9b-0c1d2e3f4a5b";
+  const links = edgeLinks("edge.example.org", uuid);
+  assert.equal(links.length, 3);
+  for (const l of links) {
+    const u = new URL(l);
+    assert.equal(u.protocol, "vless:");
+    assert.equal(u.username, uuid);
+    assert.equal(u.hostname, "edge.example.org");
+    assert.equal(u.searchParams.get("security"), "tls");
+    assert.equal(u.searchParams.get("type"), "ws");
+    assert.equal(u.searchParams.get("host"), "edge.example.org");
+    assert.equal(u.searchParams.get("path"), "/0f1e2d3c4b5a?ed=2560");
+  }
+  assert.deepEqual(new Set(links.map((l) => new URL(l).port)), new Set(["443", "2053", "8443"]));
+  assert.deepEqual(edgeLinks("", uuid), []);
+  assert.deepEqual(edgeLinks("edge.example.org", ""), []);
+  assert.deepEqual(edgeLinks("edge.example.org", "not-a-uuid"), []);
+});
+
+test("release files: names, sources and ranges", async () => {
+  const { FILE_NAME, FILE_SOURCE, parseRange } = await import("../src/files.js");
+  assert.ok(FILE_NAME.test("Albatross-0.4.1-android.apk"));
+  assert.ok(FILE_NAME.test("Albatross-Setup-0.4.1.exe"));
+  assert.ok(!FILE_NAME.test("../x.apk"));
+  assert.ok(!FILE_NAME.test("Albatross-0.4.1-android.apk.part"));
+  const src = "https://github.com/Albatrossvpn/Albatross/releases/download/v0.4.1/Albatross-0.4.1-android.apk";
+  assert.equal(FILE_SOURCE.exec(src)[1], "Albatross-0.4.1-android.apk");
+  assert.equal(FILE_SOURCE.exec("https://example.org/Albatross-0.4.1-android.apk"), null);
+  assert.deepEqual(parseRange("bytes=0-99", 1000), { offset: 0, length: 100 });
+  assert.deepEqual(parseRange("bytes=900-", 1000), { offset: 900, length: 100 });
+  assert.deepEqual(parseRange("bytes=-100", 1000), { offset: 900, length: 100 });
+  assert.deepEqual(parseRange("bytes=0-5000", 1000), { offset: 0, length: 1000 });
+  assert.deepEqual(parseRange("bytes=1000-", 1000), { invalid: true });
+  assert.equal(parseRange("", 1000), null);
+  assert.equal(parseRange("items=0-1", 1000), null);
+});
+
+test("the app's own files: names and types", async () => {
+  const { LIST_PATH, listType } = await import("../src/files.js");
+  for (const p of ["servers/hot.txt", "servers/all-8.txt", "servers/tor.json", "main/update.json", "rules/ads.srs", "rules/ads.json", "rules/LICENSE-GPL-3.0.txt"]) assert.ok(LIST_PATH.test(p), p);
+  for (const p of ["servers/all-9.txt", "main/README.md", "../x", "servers/hot.txt/..", "rules/other.json"]) assert.ok(!LIST_PATH.test(p), p);
+  assert.equal(listType("main/update.json"), "application/json; charset=utf-8");
+  assert.equal(listType("rules/ads.srs"), "application/octet-stream");
+  assert.equal(listType("servers/hot.txt"), "text/plain; charset=utf-8");
+});
+
+test("versions compare by number", async () => {
+  const { versionLess } = await import("../src/lib.js");
+  assert.equal(versionLess("0.4.0", "1.0.0"), true);
+  assert.equal(versionLess("1.0.0", "1.0.0"), false);
+  assert.equal(versionLess("1.0.10", "1.0.9"), false);
+  assert.equal(versionLess("v0.9.9", "1.0.0"), true);
+  assert.equal(versionLess("1.2.0-dev.4", "1.2.0"), false);
+  assert.equal(versionLess("", "0.0.1"), true);
+});

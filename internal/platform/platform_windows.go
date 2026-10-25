@@ -229,6 +229,14 @@ func Alert(title, text string) {
 }
 
 // OpenURL opens a link in the default browser.
+// RevealFile opens the folder that holds path with the file selected.
+func RevealFile(path string) error {
+	verb, _ := windows.UTF16PtrFromString("open")
+	file, _ := windows.UTF16PtrFromString("explorer.exe")
+	args, _ := windows.UTF16PtrFromString("/select,\"" + path + "\"")
+	return windows.ShellExecute(0, verb, file, args, nil, windows.SW_SHOWNORMAL)
+}
+
 func OpenURL(u string) error {
 	verb, _ := windows.UTF16PtrFromString("open")
 	file, _ := windows.UTF16PtrFromString(u)
