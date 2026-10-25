@@ -512,3 +512,38 @@ func (e *Engine) updateCopy() *UpdateInfo {
 	u := *e.update
 	return &u
 }
+
+// InstallerFile downloads this platform's installer of the newest version
+// the app knows of, checked against its SHA-256, and returns its path: for
+// passing the app on when its website cannot be reached. The download goes
+// through the VPN when it is up, then through each listed address.
+func (e *Engine) InstallerFile() (string, error) {
+	b, err := os.ReadFile(filepath.Join(e.dir, "update.json"))
+	var m UpdateManifest
+	if err != nil || json.Unmarshal(b, &m) != nil {
+		return "", errors.New("The installer's address is not known yet. Connect once and try again.")
+	}
+	key := "windows"
+	if e.opt.Mobile {
+		key = "android-arm64-v8a"
+	}
+	f, ok := m.Files[key]
+	if !ok || len(f.URLs) == 0 || m.LatestVersion == "" {
+		return "", errors.New("No installer is listed for this device yet.")
+	}
+	e.mu.Lock()
+	if e.updating {
+		e.mu.Unlock()
+		return "", errUpdating
+	}
+	e.updating = true
+	e.mu.Unlock()
+	path, err := e.downloadUpdate(f, m.LatestVersion)
+	e.mu.Lock()
+	e.updating = false
+	e.mu.Unlock()
+	if err != nil {
+		return "", errors.New("The installer could not be downloaded: " + err.Error())
+	}
+	return path, nil
+}
