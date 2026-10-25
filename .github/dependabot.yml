@@ -1,6 +1,9 @@
 # Free dependency updates: at most one pull request per ecosystem, minor
 # and patch versions only. Major versions change behaviour and break the
-# build, so they are taken by hand.
+# build, so they are taken by hand. The GitHub Actions are the exception:
+# their majors mostly follow the runners' Node.js (v4 to v7 of checkout
+# was that), the CI on the pull request runs them, and skipping them is
+# how every run came to warn about Node 20.
 version: 2
 updates:
   - package-ecosystem: gomod
@@ -17,14 +20,11 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: monthly
+      interval: weekly
     open-pull-requests-limit: 1
     groups:
       all:
         patterns: ["*"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
   - package-ecosystem: gradle
     directory: /android
     schedule:
