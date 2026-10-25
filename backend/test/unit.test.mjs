@@ -131,3 +131,39 @@ test("versions compare by number", async () => {
   assert.equal(versionLess("1.2.0-dev.4", "1.2.0"), false);
   assert.equal(versionLess("", "0.0.1"), true);
 });
+
+test("subscriptions: countries read from names, servers renamed, the edge first", async () => {
+  const { build, countriesOf, headers, nameOf, parseList, rename } = await import("../src/sub.js");
+  const vmess = "vmess://" + Buffer.from(JSON.stringify({ v: "2", ps: "🇯🇵 Tokyo | @chan", add: "1.2.3.4", port: "443", id: "x" })).toString("base64");
+  const text = [
+    "vless://u@h:443?security=tls#US%20%F0%9F%87%BA%F0%9F%87%B8%20%7C%20%40Raydikalx%20%7C%200F0A76",
+    "trojan://p@h:443#Germany-1", "ss://YWVzOmJhc2U@h:8388#@vpnclashfa - 673", vmess, "", "# a comment", "not a link",
+    "vless://u@h:443#%F0%9F%87%AE%F0%9F%87%B7%20Iran",
+  ].join("\n");
+  const entries = parseList(text);
+  assert.deepEqual(entries.map((e) => e.country), ["US", "DE", "", "JP", "IR"]);
+  assert.equal(nameOf(vmess), "🇯🇵 Tokyo | @chan");
+  assert.deepEqual(countriesOf(entries).map((c) => [c.code, c.name, c.count]), [["DE", "Germany", 1], ["JP", "Japan", 1], ["US", "United States", 1]]);
+
+  const edge = ["vless://e@edge:443?type=ws#Albatross%20edge%20443"];
+  const all = build(entries, "", "Albatross", edge);
+  const links = atob(all.body).trim().split("\n");
+  assert.equal(links.length, 5, "every server but the home country's, after the edge");
+  assert.equal(links[0], "vless://e@edge:443?type=ws#Albatross%20Edge%201");
+  assert.equal(nameOf(links[1]), "Albatross 🇺🇸 United States 1");
+  assert.equal(nameOf(links[3]), "Albatross Server 3", "a server without a country keeps no name of its own");
+  assert.equal(nameOf(links[4]), "Albatross 🇯🇵 Japan 4");
+  assert.ok(links[4].startsWith("vmess://"));
+  assert.equal(all.title, "Albatross All servers");
+
+  const de = build(entries, "DE", "Albatross", edge);
+  assert.deepEqual(atob(de.body).trim().split("\n").map(nameOf), ["Albatross 🇩🇪 Germany 1"]);
+  assert.equal(de.title, "Albatross Germany");
+  assert.equal(atob(build(entries, "edge", "Albatross", edge).body).trim().split("\n").length, 1);
+  assert.equal(rename("ss://x@y:1#old", "new name"), "ss://x@y:1#new%20name");
+
+  const h = headers("Albatross Germany", { used_bytes: 5, quota_bytes: 100, expires_at: 1700000000 });
+  assert.equal(h.get("Subscription-Userinfo"), "upload=0; download=5; total=100; expire=1700000000");
+  assert.equal(h.get("Profile-Title"), "base64:" + btoa("Albatross Germany"));
+  assert.equal(headers("x", { used_bytes: 0, quota_bytes: 0, expires_at: 0 }).get("Subscription-Userinfo"), "upload=0; download=0");
+});

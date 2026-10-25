@@ -4,6 +4,7 @@ import {
   DAY, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, verify, verifyPassword,
 } from "./lib.js";
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
+import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, hotList, parseList, readSubToken, subToken } from "./sub.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -49,6 +50,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/list/")) return mirror(request, url, env);
     if (url.pathname.startsWith("/dl/")) return download(request, url, env);
+    if (url.pathname.startsWith("/sub/")) return subscription(request, url, env);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
     try {
       if (!env.TOKEN_SECRET || env.TOKEN_SECRET.length < 24) throw new HttpError(503, "The service is not configured yet.");
@@ -72,6 +74,7 @@ async function route(request, env, url) {
     case "POST signup": return signup(request, env);
     case "GET me": return me(request, env);
     case "GET edge": return edge(request, env);
+    case "GET sub": return subInfo(request, env, url);
     case "POST usage": return usage(request, env);
     case "POST password": return changePassword(request, env);
     case "POST admin/login": return adminLogin(request, env);
@@ -293,6 +296,41 @@ async function edge(request, env) {
   const { user } = await authUser(request, env);
   const a = accountOf(user, now());
   return json({ links: a.allowed ? edgeLinks(env.EDGE_HOST, env.EDGE_UUID) : [], reason: a.reason });
+}
+
+/**
+ * What the account page needs for other devices (iPhone, iPad, Mac):
+ * the subscription address and the countries on offer.
+ */
+async function subInfo(request, env, url) {
+  const { user } = await authUser(request, env);
+  const t = now();
+  const a = accountOf(user, t);
+  const entries = parseList(await hotList(env));
+  return json({
+    url: `${url.origin}/sub/${await subToken(env, user, t)}`,
+    countries: countriesOf(entries),
+    servers: entries.filter((e) => e.country !== "IR").length,
+    edge: edgeFor(env, a).length,
+    brand: env.SITE_NAME || "Albatross",
+  });
+}
+
+/** GET /sub/<token>?c=<country|edge|empty>: the subscription a client app downloads. */
+async function subscription(request, url, env) {
+  if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
+  const t = now();
+  const p = await readSubToken(env, url.pathname.slice("/sub/".length), t);
+  const user = p && (await userById(env, p.u));
+  if (!user || user.token_version !== p.v) return new Response("This subscription address is no longer valid. Sign in to your account for a new one.", { status: 401 });
+  const a = accountOf(user, t);
+  if (!a.allowed) return new Response("This account cannot connect right now (" + a.reason + ").", { status: 403 });
+  const choice = String(url.searchParams.get("c") || "").toUpperCase().replace("EDGE", "edge");
+  if (choice && choice !== "edge" && !/^[A-Z]{2}$/.test(choice)) return new Response("Not found", { status: 404 });
+  const entries = parseList(await hotList(env));
+  const sub = buildSub(entries, choice, env.SITE_NAME || "Albatross", edgeFor(env, a));
+  const h = subHeaders(sub.title, a);
+  return new Response(request.method === "HEAD" ? null : sub.body, { status: 200, headers: h });
 }
 
 const MAX_BYTES_PER_REPORT = 100 * 1024 ** 3;

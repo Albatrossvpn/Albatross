@@ -318,6 +318,52 @@ test("the app's own files: only the administrator publishes them; anyone reads t
   assert.equal((await m.json()).latest_version, "9.9.9");
 });
 
+test("subscriptions for other devices: one address per account, servers by country, void after a password change", async () => {
+  const put = fetch(BASE + "/api/v1/admin/list/servers/hot.txt", {
+    method: "PUT", headers: { Authorization: "Bearer " + admin, "Content-Type": "text/plain" },
+    body: "vless://a@b:443#Germany-1\ntrojan://p@h:443#US%20%F0%9F%87%BA%F0%9F%87%B8%20fast\nss://YWVzOmJhc2U@h:8388#no-country\n",
+  });
+  assert.equal((await put).status, 200);
+  const c = await call("POST", "admin/users", { token: admin, body: { username: "subscriber", password: "sub-pass-1234", quota_bytes: 100 * GB } });
+  assert.equal(c.status, 201);
+  let token = (await call("POST", "login", { body: { username: "subscriber", password: "sub-pass-1234" } })).body.token;
+  assert.equal((await call("GET", "sub")).status, 401, "signed-in users only");
+  const info = await call("GET", "sub", { token });
+  assert.equal(info.status, 200);
+  assert.match(info.body.url, /^https?:\/\/[^/]+\/sub\/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
+  assert.deepEqual(info.body.countries.map((x) => [x.code, x.count]), [["DE", 1], ["US", 1]]);
+  assert.equal(info.body.servers, 3);
+  // The local server answers under the deployed name; the address is reached here.
+  info.body.url = BASE + new URL(info.body.url).pathname;
+
+  const all = await fetch(info.body.url);
+  assert.equal(all.status, 200);
+  assert.match(all.headers.get("subscription-userinfo"), /download=0; total=107374182400/);
+  assert.equal(all.headers.get("profile-title"), "base64:" + btoa("Albatross All servers"));
+  const links = atob(await all.text()).trim().split("\n");
+  assert.equal(links.length, 3);
+  assert.equal(decodeURIComponent(links[0].split("#")[1]), "Albatross 🇩🇪 Germany 1");
+  assert.equal(links.some((l) => /Raydikalx|fast|no-country/.test(l)), false, "the servers' own names never show");
+  const de = await fetch(info.body.url + "?c=de");
+  assert.equal(atob(await de.text()).trim().split("\n").length, 1);
+  assert.equal((await fetch(info.body.url + "?c=zz")).status, 200, "an unknown country is an empty list");
+  assert.equal((await fetch(info.body.url + "?c=nope")).status, 404);
+  assert.equal((await fetch(BASE + "/sub/not.a.token")).status, 401);
+
+  // The address stops working when the password changes, like every other session.
+  const pw = await call("POST", "password", { token, body: { old_password: "sub-pass-1234", new_password: "sub-pass-5678" } });
+  assert.equal(pw.status, 200);
+  assert.equal((await fetch(info.body.url)).status, 401);
+  // An account that may not connect gets no servers.
+  token = pw.body.token;
+  const fresh = BASE + new URL((await call("GET", "sub", { token })).body.url).pathname;
+  assert.equal((await fetch(fresh)).status, 200);
+  const users = await call("GET", "admin/users?q=subscriber", { token: admin });
+  const id = users.body.users[0].id;
+  assert.equal((await call("PATCH", `admin/users/${id}`, { token: admin, body: { disabled: true } })).status, 200);
+  assert.equal((await fetch(fresh)).status, 403);
+});
+
 test("copies older than the manifest's min_version are refused; the website never is", async () => {
   const put = (data) => fetch(BASE + "/api/v1/admin/list/main/update.json", {
     method: "PUT", headers: { Authorization: "Bearer " + admin, "Content-Type": "application/json" }, body: JSON.stringify(data),
