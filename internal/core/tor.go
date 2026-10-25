@@ -292,13 +292,14 @@ func loadPTConfig(torBin string) (*ptConfig, string) {
 // not unquote them, so the path is written relative to tor's folder (tor
 // runs there), which keeps spaces in the install path out of it.
 func ptLine(s, dir, torDir string) (string, bool) {
-	s = strings.ReplaceAll(s, "${pt_path}", dir+string(filepath.Separator))
+	// The line is split before the path goes in: an install folder with a
+	// space in its name must not split the path itself.
 	f := strings.Fields(s)
 	// ClientTransportPlugin <names> exec <path> [args]
 	if len(f) < 4 || f[0] != "ClientTransportPlugin" || f[2] != "exec" {
 		return "", false
 	}
-	exe := f[3]
+	exe := strings.ReplaceAll(f[3], "${pt_path}", dir+string(filepath.Separator))
 	if !filepath.IsAbs(exe) {
 		exe = filepath.Join(dir, exe)
 	}

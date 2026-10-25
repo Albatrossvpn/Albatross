@@ -50,3 +50,36 @@ func TestAddLinkCompact(t *testing.T) {
 		t.Fatalf("append after compact = %q", l)
 	}
 }
+
+// A rejected server is never dropped by Compact, so a list cannot bring it
+// back as a fresh candidate.
+func TestCompactKeepsRejected(t *testing.T) {
+	p, err := Open(filepath.Join(t.TempDir(), "pool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	for i := 0; i < 20; i++ {
+		p.Add(Entry{Key: uint64(i + 1)}, "vless://x@h:1#"+strconv.Itoa(i), nil)
+	}
+	p.Update(1, func(e *Entry) { e.State = StateRejected })
+	p.Update(2, func(e *Entry) { e.State = StateDead })
+	// Everyone was last seen long ago.
+	for i := range p.entries {
+		p.entries[i].SeenAt = 1
+	}
+	if err := p.Compact(time.Hour, 5); err != nil {
+		t.Fatal(err)
+	}
+	var rejected, dead bool
+	p.Each(func(e *Entry) {
+		rejected = rejected || e.Key == 1
+		dead = dead || e.Key == 2
+	})
+	if !rejected || dead {
+		t.Fatalf("rejected kept: %v, dead kept: %v", rejected, dead)
+	}
+	if p.Add(Entry{Key: 1}, "vless://x@h:1#0", nil) {
+		t.Fatal("a rejected server came back as new")
+	}
+}

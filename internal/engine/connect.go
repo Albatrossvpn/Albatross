@@ -466,7 +466,9 @@ func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, o
 	defer e.mu.Unlock()
 	var list []*Server
 	for _, s := range e.good {
-		if exclude[s.Key] || !ok(s, now) || s.Country == "IR" || !s.matches(e.settings.Protocol) {
+		// The serverless method is no server: it only ever comes from
+		// lastResort, whatever country its exit shows.
+		if exclude[s.Key] || !ok(s, now) || s.Country == "IR" || s.Proto == "direct" || !s.matches(e.settings.Protocol) {
 			continue
 		}
 		if country != "" && s.Country != country {
@@ -611,7 +613,9 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		return err
 	}
 	home := country
-	if home == "" {
+	if home == "" && servers[0].Proto != "direct" {
+		// The serverless fallback's country is the user's own: a group
+		// built "at home" there would never find a server to move to.
 		home = servers[0].Country
 	}
 	c := &connection{
@@ -1027,8 +1031,10 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		})
 	}
 	var ruleSets []any
+	rules = append(rules, map[string]any{"action": "sniff"})
+	// On the serverless fallback, every TLS ClientHello is split.
+	rules = append(rules, core.FragmentRules(s, nil)...)
 	rules = append(rules,
-		map[string]any{"action": "sniff"},
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
 		map[string]any{"ip_is_private": true, "outbound": "direct"},
 		map[string]any{"ip_cidr": LANNets, "outbound": "direct"},
@@ -1243,7 +1249,7 @@ func (e *Engine) lastResort(exclude map[string]bool) []*Server {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	for _, s := range e.good {
-		if s.Proto == "direct" && !exclude[s.Key] && s.usable(now) {
+		if s.Proto == "direct" && !exclude[s.Key] && s.usable(now) && s.matches(e.settings.Protocol) {
 			return []*Server{s}
 		}
 	}

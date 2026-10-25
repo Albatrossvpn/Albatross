@@ -121,11 +121,10 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 		out["password"] = n.Password
 		out["tls"] = n.sbTLS(o)
 	case "direct":
-		// Nothing to connect to: the ClientHello of every TLS connection is
-		// split so a name-based filter does not see the name whole.
+		// Nothing to connect to. The ClientHello of every TLS connection is
+		// split so a name-based filter does not see the name whole; sing-box
+		// takes that as a route option (core.Set.Direct), not here.
 		out["type"] = "direct"
-		out["tls_fragment"] = true
-		out["tls_record_fragment"] = true
 		return out, false
 	case "ssh":
 		out["type"] = "ssh"

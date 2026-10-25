@@ -208,7 +208,8 @@ func (e *Engine) loadStates() map[uint64][2]uint32 {
 			break
 		}
 		last := binary.LittleEndian.Uint32(rec[8:])
-		if last < cutoff {
+		// Rejected servers are remembered for good (pool.StateRejected).
+		if last < cutoff && rec[12] != pool.StateRejected {
 			continue
 		}
 		out[binary.LittleEndian.Uint64(rec[0:])] = [2]uint32{last, uint32(rec[12]) | uint32(rec[13])<<8}

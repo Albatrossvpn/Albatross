@@ -226,20 +226,22 @@ func (p *Pool) Compact(keep time.Duration, limit int) error {
 	drop := map[int]bool{}
 	for i := range p.entries {
 		e := &p.entries[i]
-		if e.State != StateOK && e.SeenAt < cutoff {
+		// A rejected server (a forged certificate, a config the core
+		// refuses) is kept so that a list cannot bring it back as new.
+		if e.State != StateOK && e.State != StateRejected && e.SeenAt < cutoff {
 			drop[i] = true
 		}
 	}
 	if over := len(p.entries) - len(drop) - limit; limit > 0 && over > 0 {
 		var cand []int
 		for i := range p.entries {
-			if e := &p.entries[i]; !drop[i] && e.State != StateOK && e.Flags&FlagHot == 0 {
+			if e := &p.entries[i]; !drop[i] && e.State != StateOK && e.State != StateRejected && e.Flags&FlagHot == 0 {
 				cand = append(cand, i)
 			}
 		}
 		rank := func(e *Entry) (int, uint8, uint32) {
 			tier := 2 // from a tested or Telegram list
-			if e.State == StateDead || e.State == StateRejected {
+			if e.State == StateDead {
 				tier = 0
 			} else if e.Flags&FlagFresh == 0 {
 				tier = 1
