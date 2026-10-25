@@ -67,8 +67,19 @@ jobs:
             git commit -qm "Hot servers $(date -u +%Y-%m-%dT%H:%MZ)"
           done
           exit 1
+      # wrangler, to put the files straight into the project's own storage
+      # (deploy/files/lib.sh).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
       - name: Publish to the project's own storage
         env:
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: bash deploy/files/publish-lists.sh "$(bash build/account-url.sh | cut -d, -f1)" servers published/hot.txt
