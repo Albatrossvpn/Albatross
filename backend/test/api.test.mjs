@@ -14,10 +14,14 @@ const ADMIN = { username: "root", password: "admin-pass-for-tests" };
 const dir = mkdtempSync(join(tmpdir(), "albatross-api-"));
 let proc;
 
-async function call(method, path, { token, body } = {}) {
+// `ip` stands in for the client's address: the local Worker keeps a
+// CF-Connecting-IP header it is given.
+async function call(method, path, { token, body, ip } = {}) {
   const res = await fetch(BASE + "/api/v1/" + path, {
     method,
-    headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
+    headers: {
+      "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}), ...(ip ? { "CF-Connecting-IP": ip } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   return { status: res.status, body: await res.json().catch(() => null), headers: res.headers };
@@ -162,6 +166,59 @@ test("repeated wrong passwords are slowed down", async () => {
   assert.equal(last.status, 429);
   const right = await call("POST", "login", { body: { username: "grace", password: "gracepass1" } });
   assert.equal(right.status, 429, "even the right password waits");
+});
+
+test("guesses from many addresses do not lock the owner out", async () => {
+  await call("POST", "admin/users", { token: admin, body: { username: "owner", password: "ownerpass1" } });
+  for (let i = 1; i <= 8; i++) {
+    const r = await call("POST", "login", { ip: `198.51.100.${i}`, body: { username: "owner", password: "wrong" + i } });
+    assert.equal(r.status, 401, `guess ${i}`);
+  }
+  const l = await call("POST", "login", { ip: "198.51.100.99", body: { username: "owner", password: "ownerpass1" } });
+  assert.equal(l.status, 200, "the right password from a fresh address signs in");
+  const p = await call("POST", "password", { ip: "198.51.100.99", token: l.body.token, body: { old_password: "ownerpass1", new_password: "ownerpass2" } });
+  assert.equal(p.status, 200, "and may change the password");
+});
+
+test("guessing from many addresses is still limited", async () => {
+  // The username is still under attack: an address that already failed at it gets few more tries.
+  const guess = (ip, password) => call("POST", "login", { ip, body: { username: "owner", password } });
+  for (let i = 0; i < 2; i++) assert.equal((await guess("198.51.100.1", "again" + i)).status, 401);
+  assert.equal((await guess("198.51.100.1", "ownerpass2")).status, 429, "even the right password waits there");
+  for (let i = 0; i < 3; i++) assert.equal((await guess("198.51.100.50", "fresh" + i)).status, 401);
+  assert.equal((await guess("198.51.100.50", "ownerpass2")).status, 429, "a new address gets only a few tries");
+  assert.equal((await guess("198.51.100.99", "ownerpass2")).status, 200, "the owner's address is unaffected");
+
+  // One address guessing across many usernames is stopped too.
+  for (let i = 0; i < 40; i++) {
+    assert.equal((await call("POST", "login", { ip: "203.0.113.7", body: { username: "nobody" + i, password: "x" } })).status, 401);
+  }
+  assert.equal((await guess("203.0.113.7", "ownerpass2")).status, 429);
+});
+
+test("addresses in one IPv6 /64 count as one", async () => {
+  await call("POST", "admin/users", { token: admin, body: { username: "six", password: "sixpass12" } });
+  const guess = (ip, password) => call("POST", "login", { ip, body: { username: "six", password } });
+  // One prefix's hosts, written every way an address can be.
+  const hosts = ["2001:db8:1:2::1", "2001:DB8:1:2::2", "2001:0db8:0001:0002:0000:0000:0000:0003", "2001:db8:1:2:4::",
+    "2001:db8:1:2:5:6:7:8", "2001:db8:1:2::9", "2001:db8:1:2:ffff::a", "2001:db8:1:2::b"];
+  for (const [i, ip] of hosts.entries()) assert.equal((await guess(ip, "wrong" + i)).status, 401, ip);
+  assert.equal((await guess("2001:db8:1:2::c", "sixpass12")).status, 429, "a new address in the prefix waits");
+  assert.equal((await guess("2001:db8:1:3::1", "sixpass12")).status, 200, "the next prefix signs in");
+});
+
+test("a username guessed at from very many addresses is closed for a while", async () => {
+  await call("POST", "admin/users", { token: admin, body: { username: "target", password: "targetpass1" } });
+  // Eight tries from the first address, then three from each new one.
+  let failures = 0;
+  for (let a = 1; failures < 100; a++) {
+    for (let i = 0; i < (a === 1 ? 8 : 3) && failures < 100; i++, failures++) {
+      const r = await call("POST", "login", { ip: `192.0.2.${a}`, body: { username: "target", password: "guess" + failures } });
+      assert.equal(r.status, 401, `guess ${failures + 1} from 192.0.2.${a}`);
+    }
+  }
+  const r = await call("POST", "login", { ip: "192.0.2.250", body: { username: "target", password: "targetpass1" } });
+  assert.equal(r.status, 429, "even the right password from a fresh address waits");
 });
 
 test("settings, sign-up with the defaults, duplicate names", async () => {
