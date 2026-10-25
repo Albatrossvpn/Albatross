@@ -32,9 +32,13 @@ CONTACT_EMAIL = ""
 # Cloudflare Turnstile site key for the sign-up form (optional; the secret
 # key goes in the TURNSTILE_SECRET secret).
 TURNSTILE_SITEKEY = ""
+# The edge's name (edge/wrangler.toml), set by the deploy workflow; the
+# service hands its links to signed-in users. Empty means no edge.
+EDGE_HOST = ""
 
 # Secrets (set with `npx wrangler secret put NAME`, never in this file):
 #   TOKEN_SECRET     long random string that signs sessions
 #   ADMIN_USER       administrator login name
 #   ADMIN_PASSWORD   administrator password
 #   TURNSTILE_SECRET optional, with TURNSTILE_SITEKEY
+#   EDGE_UUID        the edge's user id (edge/uuid.sh), set by the deploy workflow

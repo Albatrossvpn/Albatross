@@ -1,7 +1,7 @@
 // The account service: the apps sign in and report use here, users see and
 // change their account on the website, the administrator manages everyone.
 import {
-  DAY, accountOf, checkPassword, checkUsername, hashPassword, randomPassword, rollPeriod, safeEqual, sign, tag, verify, verifyPassword,
+  DAY, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, randomPassword, rollPeriod, safeEqual, sign, tag, verify, verifyPassword,
 } from "./lib.js";
 
 const SESSION = 30 * DAY; // an app or browser session
@@ -69,6 +69,7 @@ async function route(request, env, url) {
     case "POST login": return login(request, env);
     case "POST signup": return signup(request, env);
     case "GET me": return me(request, env);
+    case "GET edge": return edge(request, env);
     case "POST usage": return usage(request, env);
     case "POST password": return changePassword(request, env);
     case "POST admin/login": return adminLogin(request, env);
@@ -277,6 +278,13 @@ async function signup(request, env) {
 async function me(request, env) {
   const { user } = await authUser(request, env);
   return json({ account: accountOf(user, now()), created_at: user.created_at, total_bytes: user.total_bytes, total_seconds: user.total_seconds });
+}
+
+/** The edge's links for the signed-in user (edge/README.md); none while the account may not connect. */
+async function edge(request, env) {
+  const { user } = await authUser(request, env);
+  const a = accountOf(user, now());
+  return json({ links: a.allowed ? edgeLinks(env.EDGE_HOST, env.EDGE_UUID) : [], reason: a.reason });
 }
 
 const MAX_BYTES_PER_REPORT = 100 * 1024 ** 3;

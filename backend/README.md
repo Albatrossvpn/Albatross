@@ -35,6 +35,8 @@ The Worker answers only on its custom domain (`routes` in `wrangler.toml`), neve
 | `CLOUDFLARE_API_TOKEN` | an API token with *Workers Scripts: Edit*, *D1: Edit* and *Zone: Workers Routes: Edit* (the *Edit Cloudflare Workers* template works) |
 | `CLOUDFLARE_ACCOUNT_ID` | shown on the Cloudflare dashboard's Workers page |
 | `TOKEN_SECRET` | a long random string (32+ characters) that signs sessions; changing it signs everyone out |
+| `EDGE_EPOCH` (variable, optional) | a number, default `1`; change it to retire the edge's links handed out so far (edge/README.md) |
+| `EDGE_PROXY_IP` (variable, optional) | relays the edge reaches sites behind Cloudflare through, comma separated (edge/wrangler.toml) |
 | `ADMIN_USER`, `ADMIN_PASSWORD` | the administrator's login (use a long password) |
 
 | Variables | |

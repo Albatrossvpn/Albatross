@@ -58,6 +58,9 @@ jobs:
           [ -n "$DOMAIN" ] && args+=(--domain "$DOMAIN")
           [ -n "$SITE_NAME" ] && args+=(--var "SITE_NAME:$SITE_NAME")
           args+=(--var "COMPANY_NAME:$COMPANY_NAME" --var "COMPANY_ADDRESS:$COMPANY_ADDRESS" --var "CONTACT_EMAIL:$CONTACT_EMAIL")
+          # The edge's name, from its own settings, so the service can hand out its links.
+          edge="$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' ../edge/wrangler.toml | head -1)"
+          args+=(--var "EDGE_HOST:$edge")
           npx wrangler deploy "${args[@]}"
       - name: Check Encrypted Client Hello
         # ECH hides the service's name in the TLS handshake; the app reads the
@@ -85,10 +88,43 @@ jobs:
           TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          EDGE_EPOCH: ${{ vars.EDGE_EPOCH }}
         run: |
           for v in TOKEN_SECRET ADMIN_USER ADMIN_PASSWORD; do
             printf '%s' "${!v}" | npx wrangler secret put "$v"
           done
+          # The edge's user id, the same one the edge job derives (edge/README.md).
+          printf '%s' "$(../edge/uuid.sh)" | npx wrangler secret put EDGE_UUID
+
+  edge:
+    # The edge: a Worker that carries the app's traffic (edge/README.md).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - name: Deploy the edge
+        env:
+          PROXY_IP: ${{ vars.EDGE_PROXY_IP }}
+        run: |
+          args=()
+          [ -n "$PROXY_IP" ] && args+=(--var "PROXY_IP:$PROXY_IP")
+          npx wrangler deploy --config ../edge/wrangler.toml "${args[@]}"
+      - name: Set the edge's user id
+        env:
+          TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
+          EDGE_EPOCH: ${{ vars.EDGE_EPOCH }}
+        run: printf '%s' "$(../edge/uuid.sh)" | npx wrangler secret put EDGE_UUID --config ../edge/wrangler.toml
 
   site:
     # The public website: static pages on the zone's bare domain and www.

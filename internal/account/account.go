@@ -352,5 +352,31 @@ func (c *Client) call(ctx context.Context, method, path, token string, body, out
 	return last
 }
 
+// Edge returns the service's own servers for the signed-in user: the
+// share links of the edge (a Cloudflare Worker, see edge/README.md). An
+// account at a limit gets none. A session the service no longer accepts
+// is forgotten, as in Sync.
+func (c *Client) Edge(ctx context.Context) ([]string, error) {
+	c.mu.Lock()
+	token := c.st.Token
+	c.mu.Unlock()
+	if token == "" {
+		return nil, ErrSignedOut
+	}
+	var out struct {
+		Links []string `json:"links"`
+	}
+	err := c.call(ctx, http.MethodGet, "edge", token, nil, &out)
+	var he *Error
+	if errors.As(err, &he) && he.Status == http.StatusUnauthorized {
+		c.Logout()
+		return nil, ErrSignedOut
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out.Links, nil
+}
+
 // SessionPath is where an engine keeps the session inside its data dir.
 func SessionPath(dir string) string { return filepath.Join(dir, "account.json") }

@@ -73,3 +73,24 @@ test("usernames and passwords", () => {
   assert.equal(pw.length, 14);
   assert.match(pw, /^[A-Za-z2-9]+$/);
 });
+
+test("edge links name the edge on Cloudflare's TLS ports, or none without an edge", async () => {
+  const { edgeLinks } = await import("../src/lib.js");
+  const uuid = "0f1e2d3c-4b5a-4978-8a9b-0c1d2e3f4a5b";
+  const links = edgeLinks("edge.example.org", uuid);
+  assert.equal(links.length, 3);
+  for (const l of links) {
+    const u = new URL(l);
+    assert.equal(u.protocol, "vless:");
+    assert.equal(u.username, uuid);
+    assert.equal(u.hostname, "edge.example.org");
+    assert.equal(u.searchParams.get("security"), "tls");
+    assert.equal(u.searchParams.get("type"), "ws");
+    assert.equal(u.searchParams.get("host"), "edge.example.org");
+    assert.equal(u.searchParams.get("path"), "/0f1e2d3c4b5a?ed=2560");
+  }
+  assert.deepEqual(new Set(links.map((l) => new URL(l).port)), new Set(["443", "2053", "8443"]));
+  assert.deepEqual(edgeLinks("", uuid), []);
+  assert.deepEqual(edgeLinks("edge.example.org", ""), []);
+  assert.deepEqual(edgeLinks("edge.example.org", "not-a-uuid"), []);
+});
