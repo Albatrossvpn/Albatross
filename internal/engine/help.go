@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
+	"github.com/Albatrossvpn/vp/internal/core"
 )
 
 // "Help others": a Snowflake proxy that lets people in censored countries

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // Settings are the user's choices, saved as settings.json.

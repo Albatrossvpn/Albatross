@@ -3,8 +3,8 @@ package tester
 import (
 	"testing"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/core"
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 // Android denies apps the netlink socket sing-box watches interfaces with,

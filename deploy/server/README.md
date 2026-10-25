@@ -45,7 +45,7 @@ session travels inside echo packets, slowly, but it connects.
    echo requests (type 8) from everywhere, which carry the ICMP protocol.
 3. On the machine, as root:
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/main/deploy/server/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/deploy/server/install.sh | bash
    ```
    To add the DNS tunnel, which gets out through the network's own resolver
    when every foreign address is cut, you need a domain: add an `A` record

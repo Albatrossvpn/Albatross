@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 // netLearn keeps track of which protocols and wire styles (see node.Style)

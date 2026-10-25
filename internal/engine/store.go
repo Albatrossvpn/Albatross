@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/antiblock"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/pool"
+	"github.com/Albatrossvpn/vp/internal/antiblock"
+	"github.com/Albatrossvpn/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/pool"
 )
 
 // Server is a server that has worked at least once.

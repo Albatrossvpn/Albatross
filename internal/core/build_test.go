@@ -3,7 +3,7 @@ package core
 import (
 	"testing"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 // Xray's local ports need the login sing-box sends, so no other program on

@@ -1,4 +1,4 @@
-module github.com/cezomagoanlace29861-jpg/vp
+module github.com/Albatrossvpn/vp
 
 go 1.26.10
 

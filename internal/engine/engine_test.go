@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/tester"
+	"github.com/Albatrossvpn/vp/internal/core"
+	"github.com/Albatrossvpn/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/tester"
 )
 
 // TestEngineEndToEnd runs the whole engine against local servers: it

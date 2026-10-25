@@ -16,13 +16,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/account"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/antiblock"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/pool"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/tester"
+	"github.com/Albatrossvpn/vp/internal/account"
+	"github.com/Albatrossvpn/vp/internal/antiblock"
+	"github.com/Albatrossvpn/vp/internal/core"
+	"github.com/Albatrossvpn/vp/internal/geo"
+	"github.com/Albatrossvpn/vp/internal/pool"
+	"github.com/Albatrossvpn/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/tester"
 )
 
 // Options configure a new engine.
