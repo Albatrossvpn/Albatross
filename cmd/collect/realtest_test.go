@@ -10,7 +10,7 @@ func TestOrderFresh(t *testing.T) {
 	slow, fast, bad, later := &entry{link: "slow"}, &entry{link: "fast"}, &entry{link: "bad"}, &entry{link: "later"}
 	passed := map[*entry]time.Duration{slow: 900 * time.Millisecond, fast: 200 * time.Millisecond}
 	tested := map[*entry]bool{slow: true, fast: true, bad: true}
-	keep, failed := orderFresh([]*entry{bad, slow, later, fast}, passed, tested)
+	keep, failed := orderFresh([]*entry{bad, slow, later, fast}, passed, tested, nil)
 	var got []string
 	for _, e := range keep {
 		got = append(got, e.link)
@@ -33,8 +33,53 @@ func TestByAddressAndHotList(t *testing.T) {
 		t.Fatalf("reps %v siblings %v", reps, sib)
 	}
 	passed := map[*entry]time.Duration{a1: 1, a2: 2, u: 3}
-	if got := hotList([]*entry{a1, a2, u, b}, passed, 10); len(got) != 2 || got[0] != a1 || got[1] != u {
+	if got := hotList([]*entry{a1, a2, u, b}, passed, 10, nil); len(got) != 2 || got[0] != a1 || got[1] != u {
 		t.Fatalf("hot %v", got)
+	}
+}
+
+func TestHotListSharesProtocols(t *testing.T) {
+	// Six vless servers faster than the rest, then two of each other
+	// protocol: the first half of the list is the fastest, the second half
+	// gives every protocol a turn.
+	var es []*entry
+	passed := map[*entry]time.Duration{}
+	for i := 0; i < 6; i++ {
+		e := &entry{link: "v" + string(rune('0'+i)), proto: "vless", key: uint64(i + 1)}
+		es = append(es, e)
+		passed[e] = time.Duration(i+1) * time.Millisecond
+	}
+	for _, p := range []string{"hysteria2", "trojan", "shadowsocks"} {
+		for i := 0; i < 2; i++ {
+			e := &entry{link: p + string(rune('0'+i)), proto: p, key: uint64(100 + len(es))}
+			es = append(es, e)
+			passed[e] = time.Duration(100+len(es)) * time.Millisecond
+		}
+	}
+	got := hotList(es, passed, 8, nil)
+	if len(got) != 8 {
+		t.Fatalf("got %d", len(got))
+	}
+	count := map[string]int{}
+	for _, e := range got {
+		count[e.proto]++
+	}
+	if count["vless"] != 5 || count["hysteria2"] != 1 || count["trojan"] != 1 || count["shadowsocks"] != 1 {
+		t.Fatalf("shares %v", count)
+	}
+	// Users' reports: a server that fails for them is left out, one that
+	// works for them comes first.
+	crowd := crowdStats{1: {0, 6}, 6: {5, 5}}
+	got = hotList(es, passed, 3, crowd)
+	for _, e := range got {
+		if e.key == 1 {
+			t.Fatal("a server failing for users stayed hot")
+		}
+	}
+	ok := []*entry{es[0], es[1], es[5]}
+	crowdOrder(ok, passed, crowd)
+	if ok[0].key != 6 || ok[1].key != 2 || ok[2].key != 1 {
+		t.Fatalf("order %v %v %v", ok[0].key, ok[1].key, ok[2].key)
 	}
 }
 

@@ -306,12 +306,13 @@ func (e *Engine) SetLocalDNS(addr string) {
 		e.triggerRefill()
 	}
 	if moved && c != nil {
-		// Connections made over the old network are gone; check the
-		// server in use now so traffic recovers at once.
-		select {
-		case c.wake <- struct{}{}:
-		default:
-		}
+		// The cores carry the old network's resolver in their configs: on
+		// a phone that moved from Wi-Fi to mobile data it is unreachable,
+		// and every server named by a host would fail to resolve. The
+		// connection is rebuilt with the new one; connections made over the
+		// old network are gone anyway.
+		e.logf("info", "The network changed; reconnecting with its resolver.")
+		go e.rebuild(c, nil)
 	}
 }
 

@@ -172,6 +172,13 @@ func (l *netLearn) record(proto, style uint8, ok bool) {
 	}
 }
 
+// recordServer counts one test of a server for the crowd report.
+func (l *netLearn) recordServer(key uint64, ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.table().Pend.addServer(key, ok)
+}
+
 // recordLine counts a speed test result; the line is at least as fast as
 // the fastest, and the record fades so a slower network shows through.
 func (l *netLearn) recordLine(bps float64) {
