@@ -606,5 +606,8 @@ jobs:
           # Installed copies read the manifest from the project's own storage
           # first, and copies of 0.4.0 and older reach it there through the
           # account service once the repository is private.
-          bash repo/deploy/files/publish-lists.sh "${ACCOUNT_URL%%,*}" main repo/update.json
+          # The manifest on the main branch is already in force (GitHub and
+          # its mirrors); a storage problem must not fail the release.
+          bash repo/deploy/files/publish-lists.sh "${ACCOUNT_URL%%,*}" main repo/update.json ||
+            echo "::warning::update.json could not be stored; copies read it from GitHub until the next deploy stores it."
           echo "- Released v$VERSION; update.json points at it (forced: $FORCE)." >> "$GITHUB_STEP_SUMMARY"
