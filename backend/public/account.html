@@ -6,6 +6,13 @@
 <title>Your account — {name}</title>
 <meta name="robots" content="noindex">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Albatross">
+<meta name="theme-color" content="#f5f7fc">
 <link rel="stylesheet" href="/site.css">
 <script type="module" src="/account.js"></script>
 </head>
@@ -55,6 +62,18 @@
       <h2>Get the app</h2>
       <div class="row wrap-row" id="d-dl"></div>
       <p class="muted note mt">Sign in to the app with this username and password.</p>
+    </div>
+    <div class="card" id="devices">
+      <h2>iPhone, iPad and Mac</h2>
+      <p class="muted note">On Apple devices a connection app from the App Store carries the traffic. Pick yours, then add your servers to it with one tap; they appear under the <span data-name>Albatross</span> name and refresh by themselves.</p>
+      <div id="a2hs" class="notice ok hidden">Keep this page handy: in Safari tap <b>Share</b>, then <b>Add to Home Screen</b>. It opens like an app.</div>
+      <div class="tabs mt" id="apps" role="tablist"></div>
+      <p class="muted small" id="app-get"></p>
+      <div class="stack" id="sub-list"><span class="muted note">Sign in to see your servers.</span></div>
+      <details class="mt"><summary class="muted small">Add by hand</summary>
+        <p class="muted small">Any app that takes a subscription address can use this one. Keep it to yourself: it is your account.</p>
+        <div class="row wrap-row"><code id="sub-url" class="small"></code><button class="btn small" id="sub-copy" type="button">Copy</button></div>
+      </details>
     </div>
     <div class="card">
       <h2>Change password</h2>
