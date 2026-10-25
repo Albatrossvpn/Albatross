@@ -359,10 +359,22 @@ async function usage(request, env) {
     await env.DB.prepare("UPDATE users SET period_start = ?1, used_bytes = 0, used_seconds = 0 WHERE id = ?2 AND period_start = ?3")
       .bind(p.period_start, user.id, user.period_start).run();
   }
-  await env.DB.prepare(
-    `UPDATE users SET used_bytes = used_bytes + ?1, used_seconds = used_seconds + ?2,
-       total_bytes = total_bytes + ?1, total_seconds = total_seconds + ?2, last_seen = ?3 WHERE id = ?4`,
-  ).bind(bytes, seconds, t, user.id).run();
+  // A report the app sends again (its answer was lost on the way) is
+  // counted once: its id, when it carries one, is remembered for a few days.
+  let apply = true;
+  const id = typeof b.id === "string" && /^[0-9a-f]{8,64}$/.test(b.id) ? user.id + ":" + b.id : "";
+  if (id) {
+    const day = Math.floor(t / DAY);
+    const r = await env.DB.prepare("INSERT OR IGNORE INTO usage_ids (id, day) VALUES (?1, ?2)").bind(id, day).run();
+    apply = r.meta.changes > 0;
+    if (apply && Math.random() < 0.01) await env.DB.prepare("DELETE FROM usage_ids WHERE day < ?1").bind(day - 7).run();
+  }
+  if (apply) {
+    await env.DB.prepare(
+      `UPDATE users SET used_bytes = used_bytes + ?1, used_seconds = used_seconds + ?2,
+         total_bytes = total_bytes + ?1, total_seconds = total_seconds + ?2, last_seen = ?3 WHERE id = ?4`,
+    ).bind(bytes, seconds, t, user.id).run();
+  }
   const fresh = await userById(env, user.id);
   // Sessions are renewed while they are in use.
   const renewed = payload.exp - t < SESSION / 2 ? await session(env, fresh) : token;

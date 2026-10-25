@@ -131,6 +131,17 @@ test("the administrator renews, limits time, disables and re-enables", async () 
   assert.equal((await call("PATCH", `admin/users/${id}`, { token: admin, body: { quota_bytes: -5 } })).status, 400);
 });
 
+test("a usage report sent again with the same id is counted once", async () => {
+  const c = await call("POST", "admin/users", { token: admin, body: { username: "twice", password: "twice-pass-1", quota_bytes: 10 * GB } });
+  assert.equal(c.status, 201);
+  const tok = (await call("POST", "login", { body: { username: "twice", password: "twice-pass-1" } })).body.token;
+  const body = { bytes: 1000, seconds: 10, id: "abcdef0123456789" };
+  assert.equal((await call("POST", "usage", { token: tok, body })).body.account.used_bytes, 1000);
+  assert.equal((await call("POST", "usage", { token: tok, body })).body.account.used_bytes, 1000, "the same report again");
+  assert.equal((await call("POST", "usage", { token: tok, body: { ...body, id: "fedcba9876543210" } })).body.account.used_bytes, 2000, "a new report");
+  assert.equal((await call("POST", "usage", { token: tok, body: { bytes: 5, seconds: 0 } })).body.account.used_bytes, 2005, "without an id, as before");
+});
+
 test("concurrent reports from several devices add up exactly", async () => {
   const id = (await call("GET", "admin/users?q=ada", { token: admin })).body.users[0].id;
   await call("PATCH", `admin/users/${id}`, { token: admin, body: { reset_usage: true, quota_bytes: 0 } });

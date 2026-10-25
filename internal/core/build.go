@@ -189,6 +189,7 @@ type Running struct {
 	Rejected []*node.Node // configs a core refused
 	Failed   []*node.Node // warp-plus methods that could not connect
 	release  func()       // lets go of the shared tor
+	released sync.Once
 }
 
 // Stop stops every core.
@@ -203,10 +204,13 @@ func (r *Running) Stop() {
 	for _, p := range r.WarpPlus {
 		p.Stop()
 	}
-	if r.release != nil {
-		r.release()
-		r.release = nil
-	}
+	// Once, whatever the number of concurrent Stop calls: a second release
+	// would let go of tor for another holder.
+	r.released.Do(func() {
+		if r.release != nil {
+			r.release()
+		}
+	})
 }
 
 // Alive reports whether every core is still running.
@@ -230,7 +234,10 @@ type Runtime struct {
 }
 
 var (
-	sbIndexRe   = regexp.MustCompile(`(outbounds?|endpoints?)\[(\d+)\]`)
+	sbIndexRe = regexp.MustCompile(`(outbounds?|endpoints?)\[(\d+)\]`)
+	// At start and post-start, sing-box names the outbound by tag instead:
+	// "start outbound/vless[n5]: ..."; tags are "n" + the node's index.
+	sbTagRe     = regexp.MustCompile(`(?:outbound|endpoint)/[\w-]+\[n(\d+)(?:-stls)?\]`)
 	xrayIndexRe = regexp.MustCompile(`outbound config with tag x(\d+)`)
 )
 
@@ -318,6 +325,12 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 						continue
 					}
 				}
+				if m := sbTagRe.FindStringSubmatch(ee.Output); m != nil {
+					if k, _ := strconv.Atoi(m[1]); k < len(nodes) {
+						nodes, rejected = dropIdx(nodes, []int{k}, rejected)
+						continue
+					}
+				}
 			}
 			stopWP()
 			return nil, err
@@ -353,7 +366,9 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
-					if port, err := r.acquireTor(ctx); err == nil {
+					sctx, cancel := context.WithTimeout(ctx, sidecarBudget(ctx, torWait))
+					defer cancel()
+					if port, err := r.acquireTor(sctx); err == nil {
 						torPorts[i] = port
 					}
 				}(i)
@@ -389,7 +404,7 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 				if err != nil {
 					return
 				}
-				if err := p.WaitListening(ctx, bind, 75*time.Second); err != nil {
+				if err := p.WaitListening(ctx, bind, sidecarBudget(ctx, 75*time.Second)); err != nil {
 					p.Stop()
 					return
 				}
@@ -431,6 +446,19 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 		}
 	}
 	return running, bound, failed, keep, release
+}
+
+// sidecarBudget is how long a sidecar (warp-plus, usque, tor) may take to
+// come up: its own allowance, or two thirds of what the caller has left,
+// so one slow sidecar never uses up the time the group's other servers
+// need to start.
+func sidecarBudget(ctx context.Context, own time.Duration) time.Duration {
+	if dl, ok := ctx.Deadline(); ok {
+		if left := time.Until(dl) * 2 / 3; left < own {
+			return max(left, time.Second)
+		}
+	}
+	return own
 }
 
 func dropIdx(nodes []*node.Node, idx []int, rejected []*node.Node) ([]*node.Node, []*node.Node) {

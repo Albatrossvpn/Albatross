@@ -139,6 +139,11 @@ func (e *Engine) Connect(country string) error {
 		return err
 	}
 	country = strings.ToUpper(strings.TrimSpace(country))
+	// Checked before anything changes: a refusal must leave the engine
+	// idle, not searching with no loop running.
+	if err := e.needAdmin(); err != nil {
+		return err
+	}
 	e.mu.Lock()
 	e.target = country
 	e.settings.Country = country
@@ -147,15 +152,23 @@ func (e *Engine) Connect(country string) error {
 	e.connGen++
 	e.cancelAttempt()
 	gen := e.connGen
-	mode := e.settings.Mode
 	e.mu.Unlock()
 	saveJSON(filepath.Join(e.dir, "settings.json"), e.Settings())
+	e.poke()
+	return e.connectLoop(gen, country, "", nil, nil)
+}
+
+// needAdmin reports ErrNeedAdmin when the whole-device mode is on but
+// this process cannot create the tunnel.
+func (e *Engine) needAdmin() error {
+	e.mu.Lock()
+	mode := e.settings.Mode
+	e.mu.Unlock()
 	if mode == "tun" && !e.opt.IsAdmin() {
 		e.setStatus(StatusIdle, "")
 		return ErrNeedAdmin
 	}
-	e.poke()
-	return e.connectLoop(gen, country, "", nil, nil)
+	return nil
 }
 
 // ConnectServer connects to one specific working server.
@@ -164,6 +177,9 @@ func (e *Engine) ConnectServer(key string) error {
 		return ErrUpdateRequired
 	}
 	if err := e.AllowConnect(); err != nil {
+		return err
+	}
+	if err := e.needAdmin(); err != nil {
 		return err
 	}
 	e.mu.Lock()
@@ -209,8 +225,13 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 	triedRecent := false
 	for attempt := 0; ; attempt++ {
 		e.mu.Lock()
-		want := e.wantConnect && e.target == country && e.connGen == gen
+		stale := e.connGen != gen
+		want := e.wantConnect && e.target == country && !stale
 		e.mu.Unlock()
+		if stale {
+			// A newer connect took over; its VPN or proxy must stay up.
+			return errStale
+		}
 		if !want || e.ctx.Err() != nil {
 			return errors.New("cancelled")
 		}
@@ -223,6 +244,10 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 			// the scan.
 			triedRecent = true
 			picks = e.reachable(e.recentServers(country, connectWide, exclude), groupSize, exclude)
+		}
+		if len(picks) == 0 && pinned == nil {
+			// No server at all, fresh or recent: the serverless last resort.
+			picks = e.lastResort(exclude)
 		}
 		if len(picks) == 0 {
 			if len(exclude) > 0 {
@@ -247,12 +272,24 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 			return nil
 		}
 		e.mu.Lock()
-		stale := e.connGen != gen
+		stale = e.connGen != gen
 		e.mu.Unlock()
 		if stale || errors.Is(err, errStale) {
 			return errStale
 		}
 		e.logf("warn", "Connection attempt failed: %v", err)
+		if !errors.Is(err, errServers) && pinned == nil {
+			// The local setup failed (the tunnel could not be made, a core
+			// quit at once): the servers are not to blame, and trying the
+			// next group would only repeat it. Say so and try again later.
+			e.setStatus(StatusSearching, "Could not start the connection: "+err.Error())
+			select {
+			case <-e.ctx.Done():
+				return e.ctx.Err()
+			case <-time.After(10 * time.Second):
+			}
+			continue
+		}
 		for _, s := range picks {
 			exclude[s.Key] = true
 		}
@@ -275,15 +312,12 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 // into other countries only when that country runs short.
 func (e *Engine) pickGroup(country, home string, exclude map[string]bool, size int) []*Server {
 	if country != "" {
-		if g := e.bestServers(country, size, exclude); len(g) > 0 {
-			return g
-		}
-		return e.lastResort(exclude)
+		return e.bestServers(country, size, exclude)
 	}
 	if home == "" {
 		best := e.bestServers("", 1, exclude)
 		if len(best) == 0 {
-			return e.lastResort(exclude)
+			return nil
 		}
 		home = best[0].Country
 	}
@@ -355,7 +389,9 @@ func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Se
 	defer cancel()
 	var wg sync.WaitGroup
 	for i, s := range list {
-		nd := s.Node()
+		// As it will run: pinned to its working address when the name is
+		// poisoned or a clean edge was needed.
+		nd := s.runNode()
 		if nd == nil || nd.UDPBased() || nd.NoEndpoint() {
 			ok[i] = nd != nil
 			continue

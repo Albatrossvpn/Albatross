@@ -4,6 +4,7 @@ package platform
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -241,4 +242,50 @@ func OpenURL(u string) error {
 	verb, _ := windows.UTF16PtrFromString("open")
 	file, _ := windows.UTF16PtrFromString(u)
 	return windows.ShellExecute(0, verb, file, nil, nil, windows.SW_SHOWNORMAL)
+}
+
+// SystemDNS returns the resolver of the network adapters as Windows keeps
+// it in the registry: the first IPv4 address set by hand or by DHCP on
+// any adapter with one. Empty when none is known.
+func SystemDNS() string {
+	k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces`, registry.READ)
+	if err != nil {
+		return ""
+	}
+	defer k.Close()
+	names, err := k.ReadSubKeyNames(-1)
+	if err != nil {
+		return ""
+	}
+	pick := func(v string) string {
+		for _, a := range strings.FieldsFunc(v, func(r rune) bool { return r == ',' || r == ' ' }) {
+			if ip := net.ParseIP(a); ip != nil && ip.To4() != nil && !ip.IsLoopback() && !ip.IsUnspecified() {
+				return a
+			}
+		}
+		return ""
+	}
+	for _, name := range names {
+		sub, err := registry.OpenKey(k, name, registry.READ)
+		if err != nil {
+			continue
+		}
+		// An adapter without an address of its own is not in use.
+		if v, _, err := sub.GetStringValue("DhcpIPAddress"); err != nil || v == "" || v == "0.0.0.0" {
+			if vs, _, err := sub.GetStringsValue("IPAddress"); err != nil || len(vs) == 0 || vs[0] == "0.0.0.0" {
+				sub.Close()
+				continue
+			}
+		}
+		for _, key := range []string{"NameServer", "DhcpNameServer"} {
+			if v, _, err := sub.GetStringValue(key); err == nil {
+				if a := pick(v); a != "" {
+					sub.Close()
+					return a
+				}
+			}
+		}
+		sub.Close()
+	}
+	return ""
 }

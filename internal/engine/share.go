@@ -116,7 +116,7 @@ func (e *Engine) ImportShareCode(code string) (int, error) {
 			return
 		}
 		en := pool.Entry{Key: node.Key64(n.Key()), Source: uint16(src), Proto: protoCodes[n.Proto], Engine: uint8(eng),
-			Style: n.Style(), Flags: pool.FlagFresh, Pop: 10}
+			Style: n.Style(), Net: n.NetID(), Flags: pool.FlagFresh, Pop: 10}
 		if h := geo.Hint(n.Name); len(h) == 2 {
 			en.Hint = [2]byte{h[0], h[1]}
 		}
@@ -128,6 +128,16 @@ func (e *Engine) ImportShareCode(code string) (int, error) {
 		}
 		if e.pool.Add(en, n.Link(), func(uint16) float64 { return 100 }) {
 			added++
+		} else {
+			// Known already, and likely marked dead while everything was
+			// failing: a friend says it works, so it is tried again now.
+			e.pool.Update(en.Key, func(p *pool.Entry) {
+				if p.State != pool.StateRejected {
+					p.State, p.Fails, p.LastTest = pool.StateNew, 0, 0
+					p.Flags |= pool.FlagFresh
+					added++
+				}
+			})
 		}
 	})
 	if added > 0 {

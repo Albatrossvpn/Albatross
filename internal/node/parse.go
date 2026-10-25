@@ -175,7 +175,7 @@ func ParseLink(link string) (*Node, error) {
 	case "wireguard", "wg":
 		n, err = parseWireGuard(link)
 	case "ssh":
-		return parseSSH(link)
+		n, err = parseSSH(link)
 	case "socks", "socks5":
 		n, err = parseSocks(link)
 	case "albatross":

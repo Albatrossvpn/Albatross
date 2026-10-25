@@ -195,10 +195,21 @@ func (e *Engine) applyUpdate(m UpdateManifest) {
 		info.Progress, info.Error = was.Progress, was.Error
 	}
 	e.update = info
+	forcing := e.forcing
+	if info != nil && info.Required && info.InApp && !forcing {
+		// One retry loop at a time; a newer forced version is picked up
+		// by the running loop.
+		e.forcing = true
+	}
 	e.mu.Unlock()
 	if info != nil && info.Required && (was == nil || !was.Required) {
 		e.logf("warn", "This version is no longer supported; install the new version to connect.")
+	}
+	if info != nil && info.Required && !(was != nil && was.Required && !info.InApp) {
 		if info.InApp {
+			if forcing {
+				return // the running loop follows the manifest
+			}
 			// Fetched while the connection still stands, so a network
 			// that blocks the download site does not strand the user: the
 			// app disconnects only once the new version is downloaded and
@@ -334,6 +345,12 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 	if sha256File(path) == want {
 		return path, nil
 	}
+	e.mu.Lock()
+	bad := e.badDownloads[version]
+	e.mu.Unlock()
+	if bad >= 2 {
+		return "", errors.New("the downloaded file did not match its checksum twice; waiting for a new release")
+	}
 	var clients []*http.Client
 	if c := e.proxyClient(); c != nil {
 		clients = append(clients, c)
@@ -371,6 +388,12 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 				return path, nil
 			}
 			os.Remove(path)
+			e.mu.Lock()
+			if e.badDownloads == nil {
+				e.badDownloads = map[string]int{}
+			}
+			e.badDownloads[version]++
+			e.mu.Unlock()
 			err = errors.New("the file does not match its checksum")
 		}
 	}
@@ -482,13 +505,24 @@ func sha256File(path string) string {
 // minutes (through the VPN once one is up), and disconnects once its
 // installer is open.
 func (e *Engine) forceUpdate(version string) {
+	defer func() {
+		e.mu.Lock()
+		e.forcing = false
+		e.mu.Unlock()
+	}()
+	fails := 0
 	for {
 		err := e.GetUpdate()
 		e.mu.Lock()
 		u := e.update
 		e.mu.Unlock()
-		if u == nil || !u.Required || u.Latest != version {
-			return // a newer manifest took over
+		if u == nil || !u.Required || !u.InApp {
+			return // the requirement was lifted, or it has no installer
+		}
+		if u.Latest != version {
+			// A newer forced version: the loop follows it.
+			version, fails = u.Latest, 0
+			continue
 		}
 		if err == nil {
 			e.Disconnect()
@@ -496,10 +530,15 @@ func (e *Engine) forceUpdate(version string) {
 			return
 		}
 		// A download the user started (or an earlier call) is still running:
-		// wait for it rather than treating it as done.
+		// wait for it rather than treating it as done. Failures back off,
+		// from a few minutes to two hours: each try may fetch 100 MB
+		// through a metered connection.
 		wait := updateRetry
 		if errors.Is(err, errUpdating) {
 			wait = updatePoll
+		} else {
+			wait = min(updateRetry<<min(fails, 6), 2*time.Hour)
+			fails++
 		}
 		done := context.Background().Done()
 		if e.ctx != nil {
@@ -593,6 +632,11 @@ func (e *Engine) InstallerFile() (string, error) {
 	path, err := e.downloadUpdate(f, m.LatestVersion)
 	e.mu.Lock()
 	e.updating = false
+	// The download wrote its progress onto the update on offer, which is
+	// not downloading: the banner must not stay at "Downloading… N%".
+	if e.update != nil && e.update.Latest == m.LatestVersion && e.update.Progress < 100 {
+		e.update.Progress = 0
+	}
 	e.mu.Unlock()
 	if err != nil {
 		return "", errors.New("The installer could not be downloaded: " + err.Error())

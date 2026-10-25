@@ -68,8 +68,9 @@ type Resolver struct {
 	// connected).
 	Client func() *http.Client
 
-	mu    sync.Mutex
-	cache map[string]cached
+	mu     sync.Mutex
+	cache  map[string]cached
+	flight map[string]*flight // lookups in progress, by name
 }
 
 type cached struct {
@@ -92,18 +93,59 @@ func (r *Resolver) Lookup(ctx context.Context, host string) Result {
 	r.mu.Lock()
 	if r.cache == nil {
 		r.cache = map[string]cached{}
+		r.flight = map[string]*flight{}
 	}
 	if c, ok := r.cache[host]; ok && time.Since(c.at) < 30*time.Minute {
 		r.mu.Unlock()
 		return Result{IP: c.ip, Poisoned: c.poisoned}
 	}
+	// One lookup per name at a time: a batch holds many servers on one
+	// CDN or worker host, and a poisoned name is slow to resolve.
+	if f, ok := r.flight[host]; ok {
+		r.mu.Unlock()
+		<-f.done
+		return f.res
+	}
+	f := &flight{done: make(chan struct{})}
+	r.flight[host] = f
 	r.mu.Unlock()
-	res := r.lookup(ctx, host)
+	f.res = r.lookup(ctx, host)
 	r.mu.Lock()
-	r.cache[host] = cached{ip: res.IP, poisoned: res.Poisoned, at: time.Now()}
+	delete(r.flight, host)
+	if len(r.cache) >= maxCached {
+		// Oldest out; the map holds names from every list seen since
+		// start, so it cannot grow for the life of the process.
+		cut := time.Now().Add(-10 * time.Minute)
+		for k, c := range r.cache {
+			if c.at.Before(cut) {
+				delete(r.cache, k)
+			}
+		}
+		if len(r.cache) >= maxCached {
+			for k := range r.cache {
+				delete(r.cache, k)
+				if len(r.cache) < maxCached/2 {
+					break
+				}
+			}
+		}
+	}
+	// The key is a copy: host is a slice of the node's whole link, which
+	// would otherwise stay alive with it.
+	r.cache[strings.Clone(host)] = cached{ip: f.res.IP, poisoned: f.res.Poisoned, at: time.Now()}
 	r.mu.Unlock()
-	return res
+	close(f.done)
+	return f.res
 }
+
+// flight is a lookup in progress that other callers wait for.
+type flight struct {
+	done chan struct{}
+	res  Result
+}
+
+// maxCached bounds the resolver's cache.
+const maxCached = 4096
 
 func (r *Resolver) lookup(ctx context.Context, host string) Result {
 	lctx, cancel := context.WithTimeout(ctx, 4*time.Second)
@@ -133,9 +175,22 @@ func (r *Resolver) doh(ctx context.Context, host string) string {
 		return ""
 	}
 	c := r.Client()
+	// Every resolver at once, the first good answer wins: one name that
+	// no resolver answers costs one timeout, not one per resolver.
+	ctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+	defer cancel()
+	answers := make(chan string, len(dohEndpoints))
 	for _, ep := range dohEndpoints {
-		ip, err := dohQuery(ctx, c, ep, host)
-		if err == nil && ip != "" {
+		go func(ep string) {
+			ip, err := dohQuery(ctx, c, ep, host)
+			if err != nil {
+				ip = ""
+			}
+			answers <- ip
+		}(ep)
+	}
+	for range dohEndpoints {
+		if ip := <-answers; ip != "" {
 			return ip
 		}
 	}

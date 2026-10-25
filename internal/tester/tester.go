@@ -161,6 +161,14 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 		}
 	}
 	if err != nil {
+		if ctx.Err() == nil && (run == nil || run.Set == nil) {
+			// The core failed without naming a node. Left untested, the
+			// same nodes would form the same batch and fail the same way;
+			// as failures they back off and the pool moves on.
+			for _, n := range nodes {
+				onResult(Result{Node: n, Err: "the core could not start"})
+			}
+		}
 		return err
 	}
 	defer run.Stop()
@@ -191,8 +199,9 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 				limit = 3 * timeout
 			}
 			r := Probe(ctx, proxy, limit)
-			if !run.Alive() {
-				// The core crashed; the result says nothing about the node.
+			if !run.Alive() || ctx.Err() != nil {
+				// The core crashed, or the test was cut off; the result
+				// says nothing about the node.
 				return
 			}
 			r.Node = n
