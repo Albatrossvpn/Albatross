@@ -1,0 +1,77 @@
+name: Scrub commit identities
+
+# Rewrites the whole history so that no commit carries a personal address
+# or a local time zone: every author and committer address that is not a
+# noreply one becomes the repository owner's GitHub noreply address, and
+# every date is written in UTC. The files in every commit stay exactly the
+# same (the run checks this before it pushes), only the metadata changes,
+# so every commit gets a new hash and every clone must be fetched again.
+# Run it by hand, once, after personal addresses got in.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type REWRITE to rewrite every branch and tag'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  scrub:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse without the word
+        if: inputs.confirm != 'REWRITE'
+        run: |
+          echo "::error::Type REWRITE in the confirm field to run this."
+          exit 1
+      - name: Mirror the repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git clone --mirror "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" repo.git
+          git clone --mirror repo.git before.git
+          cd repo.git
+          # Pull request refs are GitHub's own and cannot be pushed.
+          git for-each-ref --format='%(refname)' refs/pull | xargs -r -n1 git update-ref -d
+          git for-each-ref --format='%(refname) %(objectname)' refs/heads refs/tags > ../refs-before.txt
+          wc -l < ../refs-before.txt
+      - name: Rewrite addresses and time zones
+        env:
+          OWNER_ID: ${{ github.repository_owner_id }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          pip install -q git-filter-repo
+          cd repo.git
+          # The callbacks are Python; filter-repo indents them itself, so
+          # every line starts at the same column.
+          git filter-repo --force --email-callback '
+          import os
+          noreply = os.environ["OWNER_ID"].encode() + b"+" + os.environ["OWNER"].encode() + b"@users.noreply.github.com"
+          if email.endswith(b"@users.noreply.github.com") or email in (b"noreply@github.com", b"noreply@anthropic.com"):
+              return email
+          return noreply
+          ' --commit-callback '
+          commit.author_date = commit.author_date.split(b" ")[0] + b" +0000"
+          commit.committer_date = commit.committer_date.split(b" ")[0] + b" +0000"
+          '
+      - name: Check that no file changed
+        run: |
+          cd repo.git
+          bad=0
+          while read -r ref old; do
+            new="$(git rev-parse "$ref")"
+            [ "$(git -C ../before.git rev-parse "$old^{tree}")" = "$(git rev-parse "$new^{tree}")" ] || { echo "::error::$ref: files differ after the rewrite"; bad=1; }
+            [ "$(git -C ../before.git rev-list --count "$old")" = "$(git rev-list --count "$new")" ] || { echo "::error::$ref: commit count differs"; bad=1; }
+          done < ../refs-before.txt
+          left="$(git log --all --format='%ae%n%ce%n%ad%n%cd' --date=format:%z | grep -vcE '^(\+0000|.*@users\.noreply\.github\.com|noreply@github\.com|noreply@anthropic\.com)$' || true)"
+          echo "fields still personal: $left"
+          [ "$bad" = 0 ] && [ "$left" = 0 ] || exit 1
+      - name: Push every branch and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd repo.git
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" 'refs/heads/*:refs/heads/*' 'refs/tags/*:refs/tags/*'
+          echo "Rewritten. Every clone must be fetched again; GitHub keeps the old commits reachable by hash until its support is asked to remove them."
