@@ -62,25 +62,26 @@ jobs:
           edge="$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' ../edge/wrangler.toml | head -1)"
           args+=(--var "EDGE_HOST:$edge")
           npx wrangler deploy "${args[@]}"
-      - name: Check Encrypted Client Hello
-        # ECH hides the service's name in the TLS handshake; the app reads the
-        # key from the HTTPS DNS record (internal/engine/ech.go). Cloudflare
-        # turns it on by default on free zones; this turns it on otherwise,
-        # if the token may change zone settings.
+      - name: Encrypted Client Hello and HTTP/3 off for the websites
+        # Iran's filtering drops TLS handshakes that carry ECH to Cloudflare
+        # and throttles QUIC, and browsers do not always fall back: with
+        # either on, the website and the account page open badly or not at
+        # all from inside the country. Both are zone settings, so they go
+        # off for every name on the zone. The app does not need them here:
+        # it negotiates ECH per server where it works (internal/engine/ech.go
+        # falls back to a plain handshake) and reaches the edge over TCP.
         continue-on-error: true
         run: |
           rc=0
-          for host in $(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml); do
-            if curl -fsS "https://dns.google/resolve?name=$host&type=HTTPS" | jq -e '[.Answer[]?.data | select(test("ech="))] | length > 0' >/dev/null; then
-              echo "ECH is on for $host."; continue
-            fi
-            zone="${host#*.}"
-            api="https://api.cloudflare.com/client/v4/zones"
+          api="https://api.cloudflare.com/client/v4/zones"
+          for zone in $(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml ../site/wrangler.toml ../edge/wrangler.toml | sed 's/^[^.]*\.//' | sort -u); do
             id="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api?name=$zone" | jq -r '.result[0].id // empty')"
-            [ -n "$id" ] || { echo "::warning::The API token cannot see the zone $zone, so ECH was not checked."; rc=1; continue; }
-            out="$(curl -sS -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data '{"value":"on"}' "$api/$id/settings/ech")"
-            echo "$out" | jq -c '{success, errors: [.errors[]?.message], value: .result.value}'
-            [ "$(echo "$out" | jq -r .success)" = true ] || { echo "::warning::ECH could not be turned on: the API token needs the Zone Settings Edit permission for $zone."; rc=1; }
+            [ -n "$id" ] || { echo "::warning::The API token cannot see the zone $zone; turn ECH and HTTP/3 off in its dashboard (SSL/TLS > Edge Certificates, Network)."; rc=1; continue; }
+            for setting in ech http3; do
+              out="$(curl -sS -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data '{"value":"off"}' "$api/$id/settings/$setting")"
+              echo "$zone $setting: $(echo "$out" | jq -c '{success, errors: [.errors[]?.message], value: .result.value}')"
+              [ "$(echo "$out" | jq -r .success)" = true ] || { echo "::warning::$setting could not be turned off on $zone: the API token needs Zone Settings Edit, or turn it off in the dashboard."; rc=1; }
+            done
           done
           exit $rc
       - name: Set the secrets
