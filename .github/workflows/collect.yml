@@ -59,6 +59,7 @@ jobs:
         run: |
           if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
             npx wrangler r2 object get albatross-files/list/servers/crowd.json --file "$RUNNER_TEMP/crowd.json" --remote || echo "::warning::no crowd.json yet"
+            npx wrangler r2 object get albatross-files/list/servers/iran.json --file "$RUNNER_TEMP/iran.json" --remote || echo "::warning::no report from a tester inside the country yet (deploy/tester)"
           fi
       - name: Cores
         env:
@@ -80,7 +81,15 @@ jobs:
           # Raises globalping's quota for the check from inside Iran.
           GLOBALPING_TOKEN: ${{ secrets.GLOBALPING_TOKEN }}
         # 5,000 real tests keep a run near ten minutes.
-        run: go run ./cmd/collect -prev prev -real 5000 -crowd "$RUNNER_TEMP/crowd.json" -out "$RUNNER_TEMP/servers"
+        run: go run ./cmd/collect -prev prev -real 5000 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" -out "$RUNNER_TEMP/servers"
+      # The collector itself, for a tester inside the country (deploy/tester).
+      - name: Build the collector for the tester
+        run: |
+          mkdir -p "$RUNNER_TEMP/tools"
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOARCH=$arch go build -trimpath -buildvcs=false -ldflags "-s -w" -o "$RUNNER_TEMP/tools/collect-linux-$arch" ./cmd/collect
+          done
+          cp deploy/tester/install.sh "$RUNNER_TEMP/tools/tester-install.sh"
       - name: Publish
         working-directory: ${{ runner.temp }}/servers
         run: |
@@ -106,3 +115,4 @@ jobs:
             [ -f "$RUNNER_TEMP/servers/$f" ] && files+=("$RUNNER_TEMP/servers/$f")
           done
           bash deploy/files/publish-lists.sh "$account" servers "${files[@]}"
+          bash deploy/files/publish-lists.sh "$account" tools "$RUNNER_TEMP"/tools/collect-linux-*

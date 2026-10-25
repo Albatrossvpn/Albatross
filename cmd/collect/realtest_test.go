@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +13,7 @@ func TestOrderFresh(t *testing.T) {
 	slow, fast, bad, later := &entry{link: "slow"}, &entry{link: "fast"}, &entry{link: "bad"}, &entry{link: "later"}
 	passed := map[*entry]time.Duration{slow: 900 * time.Millisecond, fast: 200 * time.Millisecond}
 	tested := map[*entry]bool{slow: true, fast: true, bad: true}
-	keep, failed := orderFresh([]*entry{bad, slow, later, fast}, passed, tested, nil)
+	keep, failed := orderFresh([]*entry{bad, slow, later, fast}, passed, tested, crowdStats{})
 	var got []string
 	for _, e := range keep {
 		got = append(got, e.link)
@@ -33,7 +36,7 @@ func TestByAddressAndHotList(t *testing.T) {
 		t.Fatalf("reps %v siblings %v", reps, sib)
 	}
 	passed := map[*entry]time.Duration{a1: 1, a2: 2, u: 3}
-	if got := hotList([]*entry{a1, a2, u, b}, passed, 10, nil); len(got) != 2 || got[0] != a1 || got[1] != u {
+	if got := hotList([]*entry{a1, a2, u, b}, passed, 10, crowdStats{}); len(got) != 2 || got[0] != a1 || got[1] != u {
 		t.Fatalf("hot %v", got)
 	}
 }
@@ -56,7 +59,7 @@ func TestHotListSharesProtocols(t *testing.T) {
 			passed[e] = time.Duration(100+len(es)) * time.Millisecond
 		}
 	}
-	got := hotList(es, passed, 8, nil)
+	got := hotList(es, passed, 8, crowdStats{})
 	if len(got) != 8 {
 		t.Fatalf("got %d", len(got))
 	}
@@ -69,17 +72,59 @@ func TestHotListSharesProtocols(t *testing.T) {
 	}
 	// Users' reports: a server that fails for them is left out, one that
 	// works for them comes first.
-	crowd := crowdStats{1: {0, 6}, 6: {5, 5}}
+	crowd := crowdStats{rates: map[uint64][2]float64{1: {0, 6}, 6: {5, 5}}}
 	got = hotList(es, passed, 3, crowd)
 	for _, e := range got {
 		if e.key == 1 {
-			t.Fatal("a server failing for users stayed hot")
+			t.Fatal("a server failing inside stayed hot")
 		}
 	}
 	ok := []*entry{es[0], es[1], es[5]}
 	crowdOrder(ok, passed, crowd)
 	if ok[0].key != 6 || ok[1].key != 2 || ok[2].key != 1 {
 		t.Fatalf("order %v %v %v", ok[0].key, ok[1].key, ok[2].key)
+	}
+	// A fresh tester report that confirms enough servers makes hot.txt
+	// hold confirmed servers only.
+	crowd.strict = true
+	if got = hotList(es, passed, 8, crowd); len(got) != 1 || got[0].key != 6 {
+		t.Fatalf("strict: %v", got)
+	}
+}
+
+func TestCrowdFiles(t *testing.T) {
+	dir := t.TempDir()
+	users := filepath.Join(dir, "crowd.json")
+	os.WriteFile(users, []byte(`{"updated":"2026-01-01T00:00:00Z","servers":{"a":[1,3],"b":[0,2]}}`), 0o644)
+	var keys []string
+	for i := 0; i < strictMin; i++ {
+		keys = append(keys, `"`+strconv.FormatUint(uint64(1000+i), 16)+`":[2,2]`)
+	}
+	iran := filepath.Join(dir, "iran.json")
+	os.WriteFile(iran, []byte(`{"updated":"`+time.Now().UTC().Format(time.RFC3339)+`","tester":"iran","servers":{"a":[2,2],`+strings.Join(keys, ",")+`}}`), 0o644)
+	c := loadCrowd(users + "," + iran + ",missing.json")
+	if !c.strict {
+		t.Fatal("a fresh tester report confirming enough servers should be strict")
+	}
+	if c.tier(0xa) != 0 || c.tier(0xb) != 2 || c.tier(1000) != 0 || c.tier(5) != 1 {
+		t.Fatalf("tiers %d %d %d %d", c.tier(0xa), c.tier(0xb), c.tier(1000), c.tier(5))
+	}
+	if c.keep(5) || !c.keep(1000) {
+		t.Fatal("strict keeps confirmed servers only")
+	}
+	// A stale tester report never makes the list strict.
+	os.WriteFile(iran, []byte(`{"updated":"2026-01-01T00:00:00Z","tester":"iran","servers":{`+strings.Join(keys, ",")+`}}`), 0o644)
+	if loadCrowd(iran).strict {
+		t.Fatal("a stale report was taken as current")
+	}
+	// The report a tester writes reads back.
+	e1, e2, e3 := &entry{key: 1}, &entry{key: 2}, &entry{key: 3}
+	first := map[*entry]time.Duration{e1: 1, e2: 1}
+	rep := filepath.Join(dir, "rep.json")
+	writeReport(rep, "iran", first, map[*entry]time.Duration{e1: 1}, map[*entry]bool{e1: true, e2: true, e3: true})
+	r := loadCrowd(rep)
+	if r.rates[1] != [2]float64{2, 2} || r.rates[2] != [2]float64{1, 2} || r.rates[3] != [2]float64{0, 1} {
+		t.Fatalf("report %v", r.rates)
 	}
 }
 
