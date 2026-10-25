@@ -389,7 +389,7 @@ each(document.querySelectorAll(".tabs button"), function (b) { b.addEventListene
 // ---------- Settings ----------
 
 var settingsBusy = false;
-var toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats", "allow_lan", "override_gps"];
+var toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats", "allow_lan", "override_gps", "bypass_apps"];
 
 function fillSettings(st) {
   toggles.forEach(function (k) { $("set-" + k).checked = !!st[k]; });
