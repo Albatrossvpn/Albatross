@@ -34,7 +34,7 @@ func (e *Engine) ShareCode() (string, error) {
 	e.mu.Lock()
 	var list []*Server
 	for _, s := range e.good {
-		if s.usable(now) && s.Source != "warp-plus" && s.Source != "tor" {
+		if s.usable(now) && s.Source != "warp-plus" && s.Source != "usque" && s.Source != "tor" && s.Source != "direct" {
 			list = append(list, s)
 		}
 	}

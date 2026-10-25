@@ -16,10 +16,16 @@ android {
 
     defaultConfig {
         applicationId = "app.albatross.vpn"
-        minSdk = 24
+        // Android 6: the lowest the sing-box core runs on.
+        minSdk = 23
         targetSdk = 36
         versionCode = maxOf(appVersionCode, 1)
         versionName = appVersion
+        // One APK for every phone, 64 and 32-bit ARM. The emulator test
+        // builds x86_64 alone (ABIS=x86_64).
+        ndk {
+            abiFilters += (System.getenv("ABIS") ?: "arm64-v8a,armeabi-v7a").split(",")
+        }
     }
 
     // A stable key lets new versions install over old ones. CI passes it
@@ -32,6 +38,8 @@ android {
                 storePassword = System.getenv("ALBATROSS_KEYSTORE_PASSWORD")
                 keyAlias = System.getenv("ALBATROSS_KEY_ALIAS")
                 keyPassword = System.getenv("ALBATROSS_KEY_PASSWORD")
+                // v1 for Android 6, which knows no other scheme.
+                enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
             }
@@ -45,13 +53,10 @@ android {
         }
     }
 
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "x86_64")
-            isUniversalApk = false
-        }
+    // A call newer than minSdk without a version check crashes old phones:
+    // fail the build instead.
+    lint {
+        fatal += "NewApi"
     }
 
     packaging {

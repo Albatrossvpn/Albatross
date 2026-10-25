@@ -124,6 +124,10 @@ func clashProxy(raw map[string]any) *Node {
 			if h := o.s("host"); h != "" {
 				n.PluginOpts += ";obfs-host=" + h
 			}
+		case "shadow-tls":
+			o := p.m("plugin-opts")
+			n.Plugin = "shadow-tls"
+			n.PluginOpts = "host=" + o.s("host") + ";password=" + o.s("password") + ";version=" + firstNonEmpty(o.s("version"), "3")
 		case "v2ray-plugin":
 			o := p.m("plugin-opts")
 			n.Plugin = "v2ray-plugin"
