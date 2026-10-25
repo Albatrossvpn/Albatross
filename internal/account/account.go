@@ -118,6 +118,9 @@ type Client struct {
 	Path string
 	// Now is the clock (tests replace it).
 	Now func() time.Time
+	// Version is this copy's version, sent with every call: the service
+	// refuses copies older than the update manifest's minimum.
+	Version string
 
 	mu sync.Mutex
 	st stored
@@ -308,6 +311,9 @@ func (c *Client) call(ctx context.Context, method, path, token string, body, out
 			continue
 		}
 		req.Header.Set("Content-Type", "application/json")
+		if c.Version != "" {
+			req.Header.Set("X-Albatross-Version", c.Version)
+		}
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}

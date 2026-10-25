@@ -318,6 +318,24 @@ test("the app's own files: only the administrator publishes them; anyone reads t
   assert.equal((await m.json()).latest_version, "9.9.9");
 });
 
+test("copies older than the manifest's min_version are refused; the website never is", async () => {
+  const put = (data) => fetch(BASE + "/api/v1/admin/list/main/update.json", {
+    method: "PUT", headers: { Authorization: "Bearer " + admin, "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  const login = (headers) => fetch(BASE + "/api/v1/login", {
+    method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ username: "nobody-here", password: "whatever-1" }),
+  });
+  assert.equal((await put({ min_version: "1.0.0" })).status, 200);
+  const old = await login({});
+  assert.equal(old.status, 426, "a copy that sends no version is 0.4.0");
+  assert.match((await old.json()).error, /no longer works/);
+  assert.equal((await login({ "X-Albatross-Version": "0.9.9" })).status, 426);
+  assert.equal((await login({ "X-Albatross-Version": "1.0.0" })).status, 401, "current copies get the usual answer");
+  assert.equal((await login({ "X-Albatross-Client": "web" })).status, 401, "the website is never refused");
+  assert.equal((await put({ min_version: "" })).status, 200);
+  assert.equal((await login({})).status, 401, "no minimum, no refusal");
+});
+
 test("too many failed administrator logins lock the sign-in for a while", async () => {
   let last;
   for (let i = 0; i < 11; i++) last = await call("POST", "admin/login", { body: { username: "root", password: "wrong" + i } });

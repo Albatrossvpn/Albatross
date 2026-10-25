@@ -1,7 +1,7 @@
 // The account service: the apps sign in and report use here, users see and
 // change their account on the website, the administrator manages everyone.
 import {
-  DAY, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, randomPassword, rollPeriod, safeEqual, sign, tag, verify, verifyPassword,
+  DAY, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, verify, verifyPassword,
 } from "./lib.js";
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
 
@@ -222,6 +222,7 @@ async function publicInfo(env) {
 // ---------- Users ----------
 
 async function login(request, env) {
+  await requireCurrentClient(request, env);
   const { username, password } = await body(request);
   if (typeof username !== "string" || typeof password !== "string" || password.length > 200 || username.length > 64) {
     throw new HttpError(400, "Enter your username and password.");
@@ -281,12 +282,14 @@ async function signup(request, env) {
 }
 
 async function me(request, env) {
+  await requireCurrentClient(request, env);
   const { user } = await authUser(request, env);
   return json({ account: accountOf(user, now()), created_at: user.created_at, total_bytes: user.total_bytes, total_seconds: user.total_seconds });
 }
 
 /** The edge's links for the signed-in user (edge/README.md); none while the account may not connect. */
 async function edge(request, env) {
+  await requireCurrentClient(request, env);
   const { user } = await authUser(request, env);
   const a = accountOf(user, now());
   return json({ links: a.allowed ? edgeLinks(env.EDGE_HOST, env.EDGE_UUID) : [], reason: a.reason });
@@ -297,6 +300,7 @@ const MAX_SECONDS_PER_REPORT = 7 * DAY;
 
 /** The app reports data and time used since its last report and learns whether the user may go on. */
 async function usage(request, env) {
+  await requireCurrentClient(request, env);
   const { user, token, payload } = await authUser(request, env);
   const b = await body(request);
   const bytes = b.bytes ?? 0;
@@ -323,6 +327,7 @@ async function usage(request, env) {
 }
 
 async function changePassword(request, env) {
+  await requireCurrentClient(request, env);
   const { user } = await authUser(request, env);
   const { old_password, new_password } = await body(request);
   const k = await passwordKeys(request, env, user.username.toLowerCase());
@@ -368,6 +373,39 @@ async function adminPullFile(request, env) {
   }
 }
 
+// Copies of the app send their version (X-Albatross-Version); those before
+// 1.0.0 send none, so a request without it is taken to come from 0.4.0.
+const OLD_CLIENT = "0.4.0";
+let minClientCache = null; // { at, version }
+
+/** The oldest version that may still connect: min_version of the published update manifest. */
+async function minClient(env) {
+  if (minClientCache && now() - minClientCache.at < 60) return minClientCache.version;
+  let version = "";
+  try {
+    const obj = env.FILES && (await env.FILES.get("list/main/update.json"));
+    if (obj) version = String((await obj.json()).min_version || "");
+  } catch {}
+  minClientCache = { at: now(), version };
+  return version;
+}
+
+/**
+ * Refuses copies of the app older than the update manifest's min_version,
+ * so a version cut off by a forced update cannot sign in or go on even if
+ * it ignores the manifest. The website's own pages (X-Albatross-Client:
+ * web) are not apps and are always served.
+ */
+async function requireCurrentClient(request, env) {
+  if (request.headers.get("X-Albatross-Client") === "web") return;
+  const min = await minClient(env);
+  if (!min) return;
+  const version = request.headers.get("X-Albatross-Version") || OLD_CLIENT;
+  if (versionLess(version, min)) {
+    throw new HttpError(426, "This version of Albatross no longer works. Install the new version from https://albatrossvpn.online");
+  }
+}
+
 /** The administrator (CI) publishes one of the app's own files into the project's own storage. */
 async function adminPutList(request, env, path) {
   await authAdmin(request, env);
@@ -375,7 +413,9 @@ async function adminPutList(request, env, path) {
   if (!LIST_PATH.test(path)) throw new HttpError(404, "Not one of the app's files.");
   if (Number(request.headers.get("Content-Length") || 0) > MAX_LIST) throw new HttpError(413, "File too large.");
   try {
-    return json(await putList(env.FILES, path, await request.arrayBuffer()));
+    const stored = await putList(env.FILES, path, await request.arrayBuffer());
+    if (path === "main/update.json") minClientCache = null;
+    return json(stored);
   } catch (e) {
     throw new HttpError(400, e.message);
   }

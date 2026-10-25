@@ -121,3 +121,13 @@ test("the app's own files: names and types", async () => {
   assert.equal(listType("rules/ads.srs"), "application/octet-stream");
   assert.equal(listType("servers/hot.txt"), "text/plain; charset=utf-8");
 });
+
+test("versions compare by number", async () => {
+  const { versionLess } = await import("../src/lib.js");
+  assert.equal(versionLess("0.4.0", "1.0.0"), true);
+  assert.equal(versionLess("1.0.0", "1.0.0"), false);
+  assert.equal(versionLess("1.0.10", "1.0.9"), false);
+  assert.equal(versionLess("v0.9.9", "1.0.0"), true);
+  assert.equal(versionLess("1.2.0-dev.4", "1.2.0"), false);
+  assert.equal(versionLess("", "0.0.1"), true);
+});
