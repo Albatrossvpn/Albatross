@@ -928,6 +928,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	e.net.record(protoCodes[n.Proto], n.Style(), true)
 	e.net.recordHello(c.helloCode(), true)
 	e.net.recordNet(n.NetID(), true)
+	e.net.recordServer(c.key, true)
 	e.pool.Update(c.key, func(p *pool.Entry) {
 		p.State = pool.StateOK
 		p.Fails = 0
@@ -977,6 +978,7 @@ func (e *Engine) recordFail(c candidate, reason string) {
 	if en, ok := e.pool.Get(c.key); ok {
 		e.net.record(en.Proto, en.Style, false)
 		e.net.recordNet(en.Net, false)
+		e.net.recordServer(c.key, false)
 	}
 	e.pool.Update(c.key, func(p *pool.Entry) {
 		p.State = pool.StateDead

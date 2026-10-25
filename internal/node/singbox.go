@@ -55,6 +55,9 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 		out["password"] = n.Password
 		if n.Plugin == "shadow-tls" {
 			out["detour"] = tag + "-stls"
+			// The ShadowTLS detour carries TCP only; UDP (QUIC, games,
+			// calls) rides inside it as sing-box servers allow.
+			out["udp_over_tcp"] = true
 		} else if n.Plugin != "" {
 			out["plugin"] = n.Plugin
 			if n.PluginOpts != "" {
