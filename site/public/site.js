@@ -5,8 +5,8 @@
   "use strict";
   document.querySelectorAll("[data-year]").forEach(function (e) { e.textContent = String(new Date().getFullYear()); });
   var urls = [
-    "https://raw.githubusercontent.com/cezomagoanlace29861-jpg/Albatross/main/update.json",
-    "https://cdn.jsdelivr.net/gh/cezomagoanlace29861-jpg/Albatross@main/update.json"
+    "https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json",
+    "https://cdn.jsdelivr.net/gh/Albatrossvpn/Albatross@main/update.json"
   ];
   function tryNext(i) {
     if (i >= urls.length) return;

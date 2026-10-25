@@ -1,6 +1,6 @@
 package engine
 
-import "github.com/cezomagoanlace29861-jpg/vp/internal/node"
+import "github.com/Albatrossvpn/vp/internal/node"
 
 // helloFPs are the browser ClientHellos tried on TLS and Reality servers
 // whose link names none. Filtering tells them apart: Chrome's current hello

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/account"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/account"
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 // AccountURL is the account service, set at build time with

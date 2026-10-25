@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 func poked(c *connection) bool {

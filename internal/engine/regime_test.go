@@ -3,8 +3,8 @@ package engine
 import (
 	"testing"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/pool"
+	"github.com/Albatrossvpn/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/pool"
 )
 
 func TestRegimeClassify(t *testing.T) {

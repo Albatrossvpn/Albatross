@@ -3,7 +3,7 @@ package engine
 import (
 	"testing"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 func TestHelloLearning(t *testing.T) {

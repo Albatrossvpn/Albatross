@@ -20,11 +20,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/engine"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/roots"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/ui"
+	"github.com/Albatrossvpn/vp/internal/engine"
+	"github.com/Albatrossvpn/vp/internal/geo"
+	"github.com/Albatrossvpn/vp/internal/roots"
+	"github.com/Albatrossvpn/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/ui"
 )
 
 // Platform is implemented by the Android app.

@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/pool"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/tester"
+	"github.com/Albatrossvpn/vp/internal/pool"
+	"github.com/Albatrossvpn/vp/internal/tester"
 )
 
 // Servers that read HTTPS. Whoever runs a free server can try to decrypt

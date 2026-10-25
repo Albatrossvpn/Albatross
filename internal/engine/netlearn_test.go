@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 // A kind of server that keeps passing moves ahead of one that keeps
