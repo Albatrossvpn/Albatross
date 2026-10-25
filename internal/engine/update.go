@@ -16,12 +16,19 @@ import (
 	"time"
 
 	"github.com/Albatrossvpn/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/updatesig"
 )
 
 // UpdateURL is the manifest that says which versions may still connect.
 // Editing update.json on the main branch reaches every installed copy
 // within hours (GitHub's CDN mirrors cache it); see the README.
 var UpdateURL = "https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json"
+
+// UpdateKey is the hex Ed25519 public key the update manifest must be
+// signed with (internal/updatesig), set at build time with
+// -X .../internal/engine.UpdateKey=<hex>. Empty (development builds and
+// tests) accepts unsigned manifests.
+var UpdateKey = ""
 
 const releasesURL = "https://github.com/Albatrossvpn/Albatross/releases/latest"
 
@@ -48,6 +55,30 @@ type UpdateManifest struct {
 	// Files are the new version's installers by platform (updateKey), which
 	// the app downloads and opens itself.
 	Files map[string]UpdateFile `json:"files,omitempty"`
+	// Signed is the manifest as signed (base64 of its JSON) and Sig the
+	// signature (updatesig). A build with UpdateKey trusts only those
+	// contents; the plain fields above serve copies before 1.0.0.
+	Signed string `json:"signed,omitempty"`
+	Sig    string `json:"sig,omitempty"`
+}
+
+// verifyManifest returns the manifest to trust. With UpdateKey set, that is
+// the signed payload's contents (and false when the signature is missing or
+// wrong); without a key, the manifest as given.
+func verifyManifest(m UpdateManifest) (UpdateManifest, bool) {
+	if UpdateKey == "" {
+		return m, true
+	}
+	payload, err := updatesig.Verify(UpdateKey, m.Signed, m.Sig)
+	if err != nil {
+		return UpdateManifest{}, false
+	}
+	var inner UpdateManifest
+	if json.Unmarshal(payload, &inner) != nil {
+		return UpdateManifest{}, false
+	}
+	inner.Signed, inner.Sig = m.Signed, m.Sig
+	return inner, true
 }
 
 // UpdateFile is one platform's installer: where to get it, in order, and
@@ -83,6 +114,13 @@ func (e *Engine) checkUpdate() {
 	if res.Text == "" || json.Unmarshal([]byte(res.Text), &m) != nil {
 		return
 	}
+	m, ok := verifyManifest(m)
+	if !ok {
+		// A forged or damaged manifest changes nothing: the last good one
+		// stays in force.
+		e.logf("warn", "The update manifest is not signed by the project's key; ignored.")
+		return
+	}
 	saveJSON(filepath.Join(e.dir, "update.json"), m)
 	e.applyUpdate(m)
 }
@@ -91,6 +129,9 @@ func (e *Engine) loadUpdate() {
 	b, err := os.ReadFile(filepath.Join(e.dir, "update.json"))
 	var m UpdateManifest
 	ok := err == nil && json.Unmarshal(b, &m) == nil
+	if ok {
+		m, ok = verifyManifest(m)
+	}
 	if !ok {
 		m = UpdateManifest{}
 	}
