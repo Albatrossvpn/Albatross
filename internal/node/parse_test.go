@@ -298,3 +298,35 @@ func TestVMessICMPCarrier(t *testing.T) {
 		t.Fatalf("xicmp mask: %v", mask)
 	}
 }
+
+func TestShadowTLS(t *testing.T) {
+	key := base64.RawURLEncoding.EncodeToString([]byte("2022-blake3-aes-128-gcm:" + base64.StdEncoding.EncodeToString(make([]byte, 16))))
+	n := mustParse(t, "ss://"+key+"@203.0.113.9:8445?plugin=shadow-tls%3Bhost%3Dwww.microsoft.com%3Bpassword%3Dpw1%3Bversion%3D3#STLS")
+	if n.Plugin != "shadow-tls" || n.pluginOpt("host") != "www.microsoft.com" || n.pluginOpt("password") != "pw1" {
+		t.Fatalf("plugin not kept: %+v", n)
+	}
+	if n.Engine() != EngineSingBox {
+		t.Fatalf("shadow-tls runs on sing-box, got %v", n.Engine())
+	}
+	out, _ := n.SingBox("n1", SingBoxOptions{})
+	if out["detour"] != "n1-stls" || out["plugin"] != nil {
+		t.Fatalf("the Shadowsocks outbound must detour, not use a plugin: %v", out)
+	}
+	h := n.SingBoxHelpers("n1")
+	if len(h) != 1 || h[0]["type"] != "shadowtls" || h[0]["tag"] != "n1-stls" || h[0]["version"] != 3 || h[0]["password"] != "pw1" {
+		t.Fatalf("helper: %v", h)
+	}
+	tls := h[0]["tls"].(map[string]any)
+	if tls["server_name"] != "www.microsoft.com" {
+		t.Fatalf("helper tls: %v", tls)
+	}
+	plain := mustParse(t, "ss://"+key+"@203.0.113.9:8388#SS")
+	if plain.SingBoxHelpers("n2") != nil {
+		t.Fatal("plain Shadowsocks needs no helper")
+	}
+	if _, err := ParseLink("ss://" + key + "@203.0.113.9:8445?plugin=shadow-tls%3Bhost%3Dx"); err == nil {
+		if nn, _ := ParseLink("ss://" + key + "@203.0.113.9:8445?plugin=shadow-tls%3Bhost%3Dx"); nn.Engine() != EngineNone {
+			t.Fatal("shadow-tls without a password must not run")
+		}
+	}
+}
