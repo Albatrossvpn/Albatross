@@ -107,5 +107,22 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      - name: Clear hand-made records on the website's names
+        # A Worker custom domain cannot be created while the name has an
+        # ordinary A/AAAA/CNAME record (error 100117), so such records are
+        # removed first. Records Cloudflare manages itself are left alone.
+        run: |
+          api="https://api.cloudflare.com/client/v4"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          zone="$(curl -sS -H "$auth" "$api/zones?name=albatrossvpn.online" | jq -r '.result[0].id // empty')"
+          if [ -z "$zone" ]; then echo "::warning::The token cannot read the zone; delete the A/CNAME records of albatrossvpn.online and www by hand if the deploy fails."; exit 0; fi
+          for host in albatrossvpn.online www.albatrossvpn.online; do
+            curl -sS -H "$auth" "$api/zones/$zone/dns_records?name=$host&per_page=100" \
+              | jq -r '.result[] | select((.type=="A" or .type=="AAAA" or .type=="CNAME") and ((.meta.read_only // false) | not)) | .id + " " + .type + " " + .content' \
+              | while read -r id type content; do
+                  echo "removing $type $host -> $content"
+                  curl -sS -o /dev/null -w "  delete: %{http_code}\n" -X DELETE -H "$auth" "$api/zones/$zone/dns_records/$id" || true
+                done
+          done
       - name: Deploy the website
         run: npx wrangler deploy --config ../site/wrangler.toml
