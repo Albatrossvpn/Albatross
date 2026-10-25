@@ -348,16 +348,12 @@ func (e *Engine) race(ctx context.Context, c *connection, list []*member, timeou
 		return nil
 	}
 	first := make(chan *member, len(list))
-	// The tests outlive the caller's answer (a connect cancels its own
-	// context once connected): their results are the backups' first check.
-	// Each ends by its timeout, or at once when the core is gone.
-	tctx := context.WithoutCancel(ctx)
 	var wg sync.WaitGroup
 	for _, m := range list {
 		wg.Add(1)
 		go func(m *member) {
 			defer wg.Done()
-			d, ok, reached := c.test(tctx, m, timeout)
+			d, ok, reached := c.test(ctx, m, timeout)
 			if !reached {
 				return
 			}

@@ -22,7 +22,6 @@ import (
 
 	"github.com/cezomagoanlace29861-jpg/vp/internal/engine"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/roots"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
 	"github.com/cezomagoanlace29861-jpg/vp/internal/ui"
 )
@@ -87,9 +86,6 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return "", err
 	}
-	// Before anything verifies a certificate, since Go reads the roots
-	// once. If the file cannot be written, the phone's own roots remain.
-	roots.Use(dataDir)
 	vpn.platform = p
 	// ALBATROSS_SOURCES replaces the built-in sources, as on the desktop.
 	var only []sources.Source
