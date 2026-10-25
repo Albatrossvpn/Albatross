@@ -33,6 +33,9 @@ func methodNodes(warpPlus, usque bool) []*node.Node {
 			out = append(out, node.WarpPlus("psiphon", c))
 		}
 	}
+	// No server at all, with the TLS hello fragmented: the last resort when
+	// nothing else connects (see Engine.lastResort).
+	out = append(out, node.Direct())
 	return out
 }
 
@@ -43,9 +46,6 @@ var methodsTested = map[string]time.Time{}
 // start, so only a few run at a time, and the user's chosen country goes
 // first.
 func (e *Engine) refreshWarp() {
-	if e.bin.WarpPlus == "" && e.bin.Usque == "" && e.bin.Tor == "" {
-		return
-	}
 	e.mu.Lock()
 	target := e.target
 	searching := e.wantConnect && e.conn == nil
@@ -110,6 +110,8 @@ func (e *Engine) refreshWarp() {
 					s.Source = "tor"
 				} else if r.Node.Usque() {
 					s.Source = "usque"
+				} else if r.Node.Proto == "direct" {
+					s.Source = "direct"
 				}
 			}
 			e.mu.Unlock()

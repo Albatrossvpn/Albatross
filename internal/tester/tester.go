@@ -79,7 +79,7 @@ func (t *Tester) TCPProbe(ctx context.Context, nodes []*node.Node) []time.Durati
 	byEndpoint := map[string][]int{}
 	var order []string
 	for i, n := range nodes {
-		if n.UDPBased() {
+		if n.UDPBased() || n.NoEndpoint() {
 			continue
 		}
 		ep := n.Endpoint()
