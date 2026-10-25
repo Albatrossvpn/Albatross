@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 // Set is a group of nodes laid out for the cores. Nodes Xray must run are

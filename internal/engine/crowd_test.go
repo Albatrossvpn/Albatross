@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 func TestCrowdLearning(t *testing.T) {

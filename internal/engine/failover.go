@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/tester"
+	"github.com/Albatrossvpn/vp/internal/tester"
 )
 
 // How a live connection is watched. The server in use is checked often,

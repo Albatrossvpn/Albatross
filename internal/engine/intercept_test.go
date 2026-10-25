@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/pool"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/pool"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 func TestDistrust(t *testing.T) {

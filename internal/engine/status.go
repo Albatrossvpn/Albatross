@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
+	"github.com/Albatrossvpn/vp/internal/geo"
 )
 
 // Snapshot is everything the main screen shows.

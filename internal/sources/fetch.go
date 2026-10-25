@@ -17,7 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 const (
@@ -319,7 +319,7 @@ func IsWorker(u string) bool {
 }
 
 // ownRepo is the app's own repository, where the collector publishes.
-const ownRepo = "cezomagoanlace29861-jpg/Albatross"
+const ownRepo = "Albatrossvpn/Albatross"
 
 // githubAPI is the prefix of api.github.com contents URLs, which return
 // the raw file when asked for it.

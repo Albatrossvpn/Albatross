@@ -1,24 +1,24 @@
 {
   "min_version": "0.4.0",
   "latest_version": "0.4.0",
-  "message": "Albatross 0.4.0 is required and this version no longer connects. If the app does not update by itself: 1) Uninstall Albatross. 2) Download the new version with Get the update, or open https://github.com/cezomagoanlace29861-jpg/Albatross/releases/download/v0.4.0/Albatross-0.4.0-android.apk in your browser (Windows: Albatross-Setup-0.4.0.exe from https://github.com/cezomagoanlace29861-jpg/Albatross/releases/latest). 3) Install it and sign in with the username and password you were given. Later updates install from inside the app.",
-  "download_url": "https://github.com/cezomagoanlace29861-jpg/Albatross/releases/latest",
+  "message": "Albatross 0.4.0 is required and this version no longer connects. If the app does not update by itself: 1) Uninstall Albatross. 2) Download the new version with Get the update, or open https://github.com/Albatrossvpn/Albatross/releases/download/v0.4.0/Albatross-0.4.0-android.apk in your browser (Windows: Albatross-Setup-0.4.0.exe from https://github.com/Albatrossvpn/Albatross/releases/latest). 3) Install it and sign in with the username and password you were given. Later updates install from inside the app.",
+  "download_url": "https://github.com/Albatrossvpn/Albatross/releases/latest",
   "files": {
     "android-arm64-v8a": {
       "urls": [
-        "https://github.com/cezomagoanlace29861-jpg/Albatross/releases/download/v0.4.0/Albatross-0.4.0-android.apk"
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v0.4.0/Albatross-0.4.0-android.apk"
       ],
       "sha256": "07796a156cf33f57aafd8ae918b1eb506b94b18d98f511fc11055e6b99ba6954"
     },
     "android-armeabi-v7a": {
       "urls": [
-        "https://github.com/cezomagoanlace29861-jpg/Albatross/releases/download/v0.4.0/Albatross-0.4.0-android.apk"
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v0.4.0/Albatross-0.4.0-android.apk"
       ],
       "sha256": "07796a156cf33f57aafd8ae918b1eb506b94b18d98f511fc11055e6b99ba6954"
     },
     "windows": {
       "urls": [
-        "https://github.com/cezomagoanlace29861-jpg/Albatross/releases/download/v0.4.0/Albatross-Setup-0.4.0.exe"
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v0.4.0/Albatross-Setup-0.4.0.exe"
       ],
       "sha256": "3cd7bd3003d076a323aa9db9395059d0f854349f7fe409e60e385b323dd8daac"
     }
