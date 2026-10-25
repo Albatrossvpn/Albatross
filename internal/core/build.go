@@ -84,6 +84,14 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 			s.outIdx = append(s.outIdx, i)
 		}
 	}
+	for k, i := range s.outIdx {
+		// Helper outbounds (ShadowTLS) come last, so the node outbounds keep
+		// their indexes; an error in a helper still names its node.
+		for _, h := range nodes[i].SingBoxHelpers(s.Tags[i]) {
+			s.Outbounds = append(s.Outbounds, h)
+			s.outIdx = append(s.outIdx, s.outIdx[k])
+		}
+	}
 	for _, i := range wpNodes {
 		port := o.warpPorts[nodes[i]]
 		if port == 0 {

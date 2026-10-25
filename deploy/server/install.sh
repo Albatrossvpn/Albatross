@@ -30,6 +30,7 @@ P_GRPC=2087          # VLESS + gRPC + TLS
 P_UPGRADE=2096       # VMess + HTTPUpgrade + TLS
 P_ANYTLS=8880        # AnyTLS
 P_SS=8388            # Shadowsocks 2022 (TCP and UDP)
+P_STLS=8445          # Shadowsocks 2022 behind ShadowTLS v3 (TCP): a real TLS handshake with REALITY_DEST
 P_HY2=443            # Hysteria 2 + Salamander (UDP), hops over HOP_RANGE
 HOP_RANGE="20000:40000"
 P_TUIC=8444          # TUIC v5 (UDP)
@@ -96,11 +97,13 @@ secrets() {
       echo "GRPC_NAME=$("$SB" generate rand --hex 6)"
       echo "XHTTP_PATH=/$("$SB" generate rand --hex 6)"
       echo "KCP_SEED=$("$SB" generate rand --hex 8)"
+      echo "STLS_PASS=$("$SB" generate rand --hex 16)"
     } >"$f"
     chmod 600 "$f"
   fi
   # Servers set up before the ICMP carrier get its seed added.
   grep -q "^KCP_SEED=" "$f" || echo "KCP_SEED=$("$SB" generate rand --hex 8)" >>"$f"
+  grep -q "^STLS_PASS=" "$f" || echo "STLS_PASS=$("$SB" generate rand --hex 16)" >>"$f"
   # shellcheck disable=SC1090
   . "$f"
 }
@@ -156,6 +159,11 @@ singbox_config() {
     {"type": "anytls", "tag": "anytls", "listen": "::", "listen_port": $P_ANYTLS,
      "users": [{"password": "$PASS"}], $tls},
     {"type": "shadowsocks", "tag": "ss", "listen": "::", "listen_port": $P_SS,
+     "method": "2022-blake3-aes-256-gcm", "password": "$SS_KEY"},
+    {"type": "shadowtls", "tag": "stls", "listen": "::", "listen_port": $P_STLS, "version": 3,
+     "users": [{"password": "$STLS_PASS"}],
+     "handshake": {"server": "$REALITY_DEST", "server_port": 443}, "detour": "ss-stls"},
+    {"type": "shadowsocks", "tag": "ss-stls", "listen": "127.0.0.1", "listen_port": 18445,
      "method": "2022-blake3-aes-256-gcm", "password": "$SS_KEY"},
     {"type": "hysteria2", "tag": "hy2", "listen": "::", "listen_port": $P_HY2,
      "users": [{"password": "$PASS"}],
@@ -247,7 +255,7 @@ EOF
 firewall() {
   # Oracle's Ubuntu images reject everything but SSH in iptables; the
   # cloud's own security list must allow the same ports (see README).
-  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS 80; do
+  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS 80; do
     iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$p" -j ACCEPT
   done
   for p in $P_SS $P_HY2 $P_TUIC $HOP_RANGE; do
@@ -288,6 +296,7 @@ $(vmess_link "$h" "$P_HTTP" "" Albatross-HTTP80)
 $(vmess_link "$h" "$P_ICMP" "" Albatross-ICMP icmp)
 anytls://$PASS@$DOMAIN:$P_ANYTLS?sni=$DOMAIN#$n-AnyTLS
 ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_SS#$n-SS2022
+ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_STLS?plugin=$(urlenc "shadow-tls;host=$REALITY_DEST;password=$STLS_PASS;version=3")#$n-ShadowTLS
 hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS&mport=$P_HY2_DNS,$hop#$n-Hysteria2
 tuic://$UUID:$PASS@$DOMAIN:$P_TUIC?sni=$DOMAIN&alpn=h3&congestion_control=bbr#$n-TUIC
 EOF

@@ -317,8 +317,11 @@ func (n *Node) Validate() error {
 		if strings.HasPrefix(n.Method, "2022-") && !validSS2022Key(n.Method, n.Password) {
 			return fmt.Errorf("bad 2022 key")
 		}
-		if n.Plugin != "" && n.Plugin != "obfs-local" && n.Plugin != "v2ray-plugin" {
+		if n.Plugin != "" && n.Plugin != "obfs-local" && n.Plugin != "v2ray-plugin" && n.Plugin != "shadow-tls" {
 			return fmt.Errorf("unsupported plugin %q", n.Plugin)
+		}
+		if n.Plugin == "shadow-tls" && n.pluginOpt("password") == "" {
+			return fmt.Errorf("shadow-tls needs a password")
 		}
 	case "hysteria":
 		if n.ObfsPassword == "" && n.Password == "" {
@@ -519,4 +522,14 @@ func (n *Node) fp() string {
 		return n.Fingerprint
 	}
 	return n.HelloFP
+}
+
+// pluginOpt reads one key of PluginOpts ("host=a;password=b;version=3").
+func (n *Node) pluginOpt(key string) string {
+	for _, kv := range strings.Split(n.PluginOpts, ";") {
+		if k, v, ok := strings.Cut(kv, "="); ok && strings.TrimSpace(k) == key {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
