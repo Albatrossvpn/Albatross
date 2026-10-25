@@ -90,7 +90,7 @@ func Start(name, bin string, args []string, env []string, onLine func(string)) (
 	if err != nil {
 		return nil, err
 	}
-	c, err := spawn(bin, args, append(os.Environ(), env...), filepath.Dir(bin), pw)
+	c, err := spawn(bin, args, mergeEnv(os.Environ(), env), filepath.Dir(bin), pw)
 	pw.Close()
 	if err != nil {
 		pr.Close()
@@ -239,4 +239,25 @@ func FreePorts(n int) ([]int, error) {
 		ports = append(ports, l.Addr().(*net.TCPAddr).Port)
 	}
 	return ports, nil
+}
+
+// mergeEnv returns base with the variables in extra set, one entry per
+// name. The C library takes the first entry of a repeated name, so a plain
+// append would leave the parent's value in charge.
+func mergeEnv(base, extra []string) []string {
+	out := make([]string, 0, len(base)+len(extra))
+	seen := map[string]int{}
+	for _, kv := range append(append([]string{}, base...), extra...) {
+		name := kv
+		if i := strings.IndexByte(kv, '='); i >= 0 {
+			name = kv[:i]
+		}
+		if j, ok := seen[name]; ok {
+			out[j] = kv
+			continue
+		}
+		seen[name] = len(out)
+		out = append(out, kv)
+	}
+	return out
 }

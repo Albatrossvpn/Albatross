@@ -124,6 +124,9 @@ func (l *lists) read(r io.Reader, lists bool) {
 			into[n] = true
 		}
 	}
+	if err := sc.Err(); err != nil {
+		log.Fatalf("reading a list: %v", err)
+	}
 }
 
 // entry returns the name a list line names, or "" when it names none (a
