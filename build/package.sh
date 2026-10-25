@@ -65,8 +65,6 @@ Bundled components (see the licenses folder):
   Twemoji country flags     https://github.com/talkjs/country-flag-emoji-polyfill (CC-BY 4.0 graphics by Twitter)
   Site rule sets            https://github.com/SagerNet/sing-geoip, https://github.com/SagerNet/sing-geosite (GPL-3.0-or-later),
                             https://github.com/Chocolate4U/Iran-sing-box-rules
-  Ad list (updated daily)   HaGeZi, OISD, AdGuard DNS filter (GPL-3.0), PersianBlocker (AGPL-3.0);
-                            https://github.com/cezomagoanlace29861-jpg/Albatross/tree/rules
 TXT
 sed -i 's/$/\r/' "$out/README.txt"
 

@@ -33,9 +33,6 @@ final class Bridge implements Platform {
 
     Bridge(App app) {
         this.app = app;
-        // Runs off the main thread (App.engine), before the engine can make
-        // a new copy.
-        ApkProvider.removeSpentCopy(app);
     }
 
     @Override
@@ -109,11 +106,14 @@ final class Bridge implements Platform {
         // Kept on disk, not only in memory: allowing "Install unknown apps"
         // restarts the app's process before the installer reads the file.
         ApkProvider.setUpdate(app, f);
-        // A failure shows on the update banner, worded by the engine; a toast
-        // would come again with each background try of a forced update.
-        app.startActivity(new Intent(Intent.ACTION_VIEW)
-                .setDataAndType(ApkProvider.updateUri(app, f), ApkProvider.TYPE)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        try {
+            app.startActivity(new Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(ApkProvider.UPDATE_URI, ApkProvider.TYPE)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        } catch (Exception e) {
+            main.post(() -> Toast.makeText(app, R.string.update_failed, Toast.LENGTH_LONG).show());
+            throw e;
+        }
     }
 
     // Go cannot list the network interfaces on Android 11 and later; Java

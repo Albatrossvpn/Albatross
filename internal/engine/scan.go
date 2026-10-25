@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"math/rand"
 	"net"
+	"path/filepath"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -72,7 +73,7 @@ func (e *Engine) refreshLoop() {
 	for {
 		if time.Since(ruleCheck) > 6*time.Hour {
 			ruleCheck = time.Now()
-			e.refreshRules()
+			go updateRules(e.ctx, filepath.Join(e.dir, "rules"), e.anyClient, e.accountHTTP)
 			go e.checkUpdate()
 		}
 		e.refreshDue()
