@@ -15,6 +15,8 @@ package account
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,6 +106,12 @@ type stored struct {
 	// Counts not yet confirmed by the service.
 	PendingBytes   int64 `json:"pending_bytes"`
 	PendingSeconds int64 `json:"pending_seconds"`
+	// ReportID names the report of the pending counts, so a report the
+	// service applied but whose answer was lost is not applied twice when
+	// it is sent again; it changes with the counts.
+	ReportID      string `json:"report_id,omitempty"`
+	ReportBytes   int64  `json:"report_bytes,omitempty"`
+	ReportSeconds int64  `json:"report_seconds,omitempty"`
 	// Base is the address that answered last, tried first after a restart.
 	Base string `json:"base,omitempty"`
 }
@@ -112,6 +120,8 @@ type stored struct {
 type Client struct {
 	// URLs are the service's addresses, tried in order.
 	URLs []string
+	// syncMu lets one usage report run at a time.
+	syncMu sync.Mutex
 	// HTTP returns the client to use now (through the VPN when it is up).
 	HTTP func() *http.Client
 	// Path is where the session is saved.
@@ -223,8 +233,15 @@ func (c *Client) Add(bytes, seconds int64) {
 // the service cannot be reached the use stays pending and the last answer
 // stands (until Grace passes).
 func (c *Client) Sync(ctx context.Context) (Info, error) {
+	// One report at a time: two at once would both send the same counts.
+	c.syncMu.Lock()
+	defer c.syncMu.Unlock()
 	c.mu.Lock()
 	token, b, s := c.st.Token, c.st.PendingBytes, c.st.PendingSeconds
+	if c.st.ReportID == "" || c.st.ReportBytes != b || c.st.ReportSeconds != s {
+		c.st.ReportID, c.st.ReportBytes, c.st.ReportSeconds = reportID(), b, s
+	}
+	id := c.st.ReportID
 	c.mu.Unlock()
 	if token == "" {
 		return Info{}, ErrSignedOut
@@ -233,19 +250,26 @@ func (c *Client) Sync(ctx context.Context) (Info, error) {
 		Token   string `json:"token"`
 		Account Info   `json:"account"`
 	}
-	err := c.call(ctx, http.MethodPost, "usage", token, map[string]int64{"bytes": b, "seconds": s}, &out)
+	err := c.call(ctx, http.MethodPost, "usage", token, map[string]any{"bytes": b, "seconds": s, "id": id}, &out)
 	var he *Error
 	if errors.As(err, &he) && he.Status == http.StatusUnauthorized {
-		c.Logout()
+		c.logoutIf(token)
 		return Info{}, ErrSignedOut
 	}
 	if err != nil {
 		return Info{}, err
 	}
 	c.mu.Lock()
+	if c.st.Token != token {
+		// Signed out, or in as someone else, while the report was on its
+		// way: the answer is about a session that is gone.
+		c.mu.Unlock()
+		return Info{}, ErrSignedOut
+	}
 	// Use added while the request was in flight stays pending.
 	c.st.PendingBytes = max(c.st.PendingBytes-b, 0)
 	c.st.PendingSeconds = max(c.st.PendingSeconds-s, 0)
+	c.st.ReportID, c.st.ReportBytes, c.st.ReportSeconds = "", 0, 0
 	c.st.Info, c.st.SyncedAt = out.Account, c.Now().Unix()
 	if out.Token != "" {
 		c.st.Token = out.Token
@@ -253,6 +277,27 @@ func (c *Client) Sync(ctx context.Context) (Info, error) {
 	err = c.saveLocked()
 	c.mu.Unlock()
 	return out.Account, err
+}
+
+// logoutIf forgets the session only while it is still the one the
+// refused request was made with; a newer sign-in stays.
+func (c *Client) logoutIf(token string) {
+	c.mu.Lock()
+	same := c.st.Token == token
+	if same {
+		c.st = stored{}
+	}
+	c.mu.Unlock()
+	if same {
+		os.Remove(c.Path)
+	}
+}
+
+// reportID names one report: random, so two devices never share one.
+func reportID() string {
+	var b [12]byte
+	rand.Read(b[:])
+	return hex.EncodeToString(b[:])
 }
 
 func (c *Client) saveLocked() error {
@@ -375,7 +420,7 @@ func (c *Client) Edge(ctx context.Context) ([]string, error) {
 	err := c.call(ctx, http.MethodGet, "edge", token, nil, &out)
 	var he *Error
 	if errors.As(err, &he) && he.Status == http.StatusUnauthorized {
-		c.Logout()
+		c.logoutIf(token)
 		return nil, ErrSignedOut
 	}
 	if err != nil {

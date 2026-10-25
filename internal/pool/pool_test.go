@@ -83,3 +83,34 @@ func TestCompactKeepsRejected(t *testing.T) {
 		t.Fatal("a rejected server came back as new")
 	}
 }
+
+func TestCompactKeepsHistoryOfDropped(t *testing.T) {
+	p, err := Open(filepath.Join(t.TempDir(), "pool.dat"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	score := func(uint16) float64 { return 1 }
+	// An old dead entry, to be dropped, and a fresh one that stays.
+	old := Entry{Key: 1, SeenAt: Minutes(time.Now().Add(-48 * time.Hour)), State: StateDead, Fails: 4, LastTest: Minutes(time.Now().Add(-time.Hour))}
+	p.Add(old, "vless://a", score)
+	p.Update(1, func(e *Entry) { e.SeenAt = Minutes(time.Now().Add(-48 * time.Hour)) })
+	p.Add(Entry{Key: 2}, "vless://b", score)
+	if err := p.Compact(24*time.Hour, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.Get(1); ok {
+		t.Fatal("the old dead entry should have been dropped")
+	}
+	// A list brings it back: its history comes with it.
+	if !p.Add(Entry{Key: 1}, "vless://a", score) {
+		t.Fatal("re-adding a dropped key must be new")
+	}
+	e, _ := p.Get(1)
+	if e.State != StateDead || e.Fails != 4 || e.LastTest != old.LastTest {
+		t.Fatalf("history lost: %+v", e)
+	}
+	if l, ok := p.Link(1); !ok || l != "vless://a" {
+		t.Fatalf("link %q %v", l, ok)
+	}
+}

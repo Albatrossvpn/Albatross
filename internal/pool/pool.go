@@ -67,7 +67,20 @@ type Pool struct {
 	entries []Entry
 	index   map[uint64]int32
 	cycle   uint32
+	// dropped remembers the test history of candidates Compact removed,
+	// so one a list brings back is not retested as if it were new.
+	dropped map[uint64]history
 }
+
+// history is what is kept of a dropped candidate.
+type history struct {
+	LastTest uint32
+	State    uint8
+	Fails    uint8
+}
+
+// maxDropped bounds the memory the histories take.
+const maxDropped = 50000
 
 // Open creates a fresh pool file at path, replacing any old one.
 func Open(path string) (*Pool, error) {
@@ -125,6 +138,10 @@ func (p *Pool) Add(e Entry, link string, sourceScore func(uint16) float64) bool 
 		}
 		return false
 	}
+	if h, ok := p.dropped[e.Key]; ok {
+		e.LastTest, e.State, e.Fails = h.LastTest, h.State, h.Fails
+		delete(p.dropped, e.Key)
+	}
 	n, err := p.w.WriteString(link)
 	if err != nil {
 		return false
@@ -151,14 +168,15 @@ func (p *Pool) Len() int {
 // Link reads a candidate's link from disk.
 func (p *Pool) Link(key uint64) (string, bool) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	i, ok := p.index[key]
 	if !ok {
-		p.mu.Unlock()
 		return "", false
 	}
 	e := p.entries[i]
 	p.w.Flush()
-	p.mu.Unlock()
+	// Read under the lock: a Compact meanwhile would swap the file and
+	// move every offset.
 	buf := make([]byte, e.size)
 	if _, err := p.f.ReadAt(buf, e.off); err != nil && err != io.EOF {
 		return "", false
@@ -296,16 +314,38 @@ func (p *Pool) Compact(keep time.Duration, limit int) error {
 	}
 	if err := w.Flush(); err != nil {
 		tmp.Close()
+		os.Remove(tmpPath)
 		return err
 	}
-	p.f.Close()
 	tmp.Close()
-	if err := os.Rename(tmpPath, p.path); err != nil {
+	old := p.f
+	old.Close()
+	f, err := os.OpenFile(tmpPath, os.O_RDWR, 0o644)
+	if err == nil {
+		err = os.Rename(tmpPath, p.path)
+		if err != nil {
+			f.Close()
+		}
+	}
+	if err != nil {
+		// The old file is intact where it was: keep it, the entries and
+		// the index as they were, so the pool goes on working.
+		os.Remove(tmpPath)
+		if of, oerr := os.OpenFile(p.path, os.O_RDWR, 0o644); oerr == nil {
+			of.Seek(0, io.SeekEnd)
+			p.f, p.w = of, bufio.NewWriterSize(of, 1<<16)
+		}
 		return err
 	}
-	f, err := os.OpenFile(p.path, os.O_RDWR, 0o644)
-	if err != nil {
-		return err
+	// The history of what was dropped (tested entries only) outlives the
+	// drop, so a list bringing one back does not make it new again.
+	if p.dropped == nil {
+		p.dropped = map[uint64]history{}
+	}
+	for i := range p.entries {
+		if e := &p.entries[i]; drop[i] && e.State != StateNew && len(p.dropped) < maxDropped {
+			p.dropped[e.Key] = history{LastTest: e.LastTest, State: e.State, Fails: e.Fails}
+		}
 	}
 	f.Seek(0, io.SeekEnd)
 	p.f, p.w, p.size, p.entries, p.index = f, bufio.NewWriterSize(f, 1<<16), size, kept, index

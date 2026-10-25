@@ -66,6 +66,20 @@ func (e *Engine) refreshWarp() {
 	sort.SliceStable(due, func(i, j int) bool {
 		return due[i].WPCountry == target && due[j].WPCountry != target
 	})
+	// A method in use is not started a second time: another warp-plus
+	// with the same identity (or another WireGuard session with the same
+	// key) would take the tunnel from the live connection.
+	e.mu.Lock()
+	if c := e.conn; c != nil {
+		kept := due[:0]
+		for _, n := range due {
+			if !c.uses(n.Key()) {
+				kept = append(kept, n)
+			}
+		}
+		due = kept
+	}
+	e.mu.Unlock()
 	if len(due) > 4 {
 		due = due[:4]
 	}

@@ -107,7 +107,11 @@ type Engine struct {
 	target       string // country the user wants ("" = fastest anywhere)
 	wantConnect  bool   // keep trying to connect until a server is found
 	updating     bool   // GetUpdate is downloading
-	connGen      int    // bumped by every user connect/disconnect; stale loops exit
+	forcing      bool   // forceUpdate's retry loop is running
+	// badDownloads counts installers of a version that did not match
+	// their checksum, so a broken file is not fetched again and again.
+	badDownloads map[string]int
+	connGen      int // bumped by every user connect/disconnect; stale loops exit
 	// startMu lets one connection attempt run at a time: two at once each
 	// start a core on the proxy port and the second finds it taken.
 	startMu     sync.Mutex

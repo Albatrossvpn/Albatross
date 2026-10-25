@@ -86,6 +86,12 @@ func (e *Engine) refreshEdge() {
 			}
 		case errors.Is(err, account.ErrSignedOut), e.ctx.Err() != nil:
 			return
+		default:
+			// Not again on the next pass: the attempt starts cores and may
+			// end in a direct call. Ten minutes between tries.
+			methodsMu.Lock()
+			edgeFetched = now.Add(-edgeRefresh + 10*time.Minute)
+			methodsMu.Unlock()
 		}
 	}
 	var nodes []*node.Node

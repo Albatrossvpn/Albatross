@@ -344,6 +344,7 @@ func (e *Engine) updateRegime() {
 	}
 	e.mu.Lock()
 	prev := e.reg
+	sameNet := e.regNet == netKey
 	e.mu.Unlock()
 	// One probe on a weak mobile signal can miss the foreign download or
 	// the CDN edge and read as a much harder regime (or one lucky request
@@ -379,8 +380,16 @@ func (e *Engine) updateRegime() {
 	}
 	// Filtering tightens for days before a large shutdown. When it gets
 	// harder, fetch everything a shutdown would cut off while it still can.
-	if prev.Regime.severity() >= 0 && prev.Regime.severity() <= regimeFiltered.severity() && r.severity() > prev.Regime.severity() && r != regimeOffline {
+	// Another network reads differently without anything having changed,
+	// so only a reading from the same network counts as tightening.
+	if sameNet && prev.Regime.severity() >= 0 && prev.Regime.severity() <= regimeFiltered.severity() && r.severity() > prev.Regime.severity() && r != regimeOffline {
 		go e.prepareForShutdown()
+	} else if !sameNet || r.severity() <= regimeFiltered.severity() {
+		e.mu.Lock()
+		if strings.HasPrefix(e.notice, "Filtering is getting much harder") {
+			e.notice = ""
+		}
+		e.mu.Unlock()
 	}
 }
 
@@ -439,7 +448,7 @@ func (r regime) bonus(p regimeProbe, en *pool.Entry) float64 {
 			b -= 80
 		}
 	}
-	if r.severity() >= regimeFiltered.severity() && !p.UDP && en.Flags&pool.FlagUDP != 0 && !node.StyleICMP(en.Style) && !node.StyleDNSTunnel(en.Style) {
+	if r.severity() >= regimeFiltered.severity() && !p.UDP && en.Flags&pool.FlagUDP != 0 && !node.StyleICMP(en.Style) && !node.StyleDNSTunnel(en.Style) && !node.StyleDNSPort(en.Style) {
 		b -= 60
 	}
 	return b

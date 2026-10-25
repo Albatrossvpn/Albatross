@@ -497,6 +497,12 @@ func (e *Engine) pickBatch(size int) []candidate {
 			limit = 10 * time.Minute
 		}
 		if e.conn != nil && e.conn.uses(s.Key) {
+			if s.Proto == "wireguard" || s.Proto == "warpplus" {
+				// A second session with the same key would take the
+				// peer's session away from the live tunnel; the
+				// connection's own checks cover it.
+				continue
+			}
 			limit = 5 * time.Minute
 		}
 		if age > limit && now.Sub(s.LastOK) < 7*24*time.Hour {
@@ -692,11 +698,24 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 		n, err := node.ParseLink(c.link)
 		if err != nil || n.Engine() == node.EngineNone {
 			e.pool.Update(c.key, func(p *pool.Entry) { p.State = pool.StateRejected })
+			e.forget(c.key)
 			continue
 		}
 		c.node = n
-		if c.good != nil && c.good.PinIP != "" {
-			c.node, c.pin, c.pinReason = antiblock.Pin(n, c.good.PinIP), c.good.PinIP, c.good.PinReason
+		if c.good != nil {
+			// As it last worked: ECH, the pinned address and the split edge.
+			if c.good.ECH {
+				nn := *n
+				nn.TryECH = true
+				c.node, c.ech = &nn, true
+			}
+			if c.good.PinIP != "" {
+				c.node, c.pin, c.pinReason = antiblock.Pin(c.node, c.good.PinIP), c.good.PinIP, c.good.PinReason
+				if c.good.SplitIP != "" {
+					c.split = c.good.SplitIP
+					c.node.SplitDownload = c.split
+				}
+			}
 		}
 		cands = append(cands, c)
 	}
@@ -719,6 +738,9 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 		nodes[i] = cands[i].node
 	}
 	probes := e.tester.TCPProbe(e.ctx, nodes)
+	if e.ctx.Err() != nil {
+		return // probes cut off by shutdown say nothing about the servers
+	}
 	var live []candidate
 	for i, c := range cands {
 		if probes[i] < 0 && !(cleanOn && antiblock.CDNFrontable(c.node)) {
@@ -742,7 +764,7 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 			continue
 		}
 		c.setHello(learned.pickHello(c.frag, rand.Float64))
-		if frag == "auto" && !c.frag && c.node.Security == "tls" && learned.fragHelps(c.fp()) {
+		if frag == "auto" && !c.frag && c.node.Security == "tls" && c.node.Engine() == node.EngineSingBox && learned.fragHelps(c.fp()) {
 			c.frag = true
 		}
 	}
@@ -764,14 +786,17 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 		r := c
 		changed := false
 		// The second try changes the ClientHello: fragmented, unless that
-		// clearly does worse on this network, else another browser's.
+		// clearly does worse on this network, else another browser's. ECH
+		// and fragmentation are sing-box's; Xray nodes get another
+		// browser's hello, which Xray does honour.
+		sb := r.node.Engine() == node.EngineSingBox
 		switch {
-		case !r.ech && r.node.Security == "tls" && r.node.ECH == "" && antiblock.CDNFrontable(r.node):
+		case sb && !r.ech && r.node.Security == "tls" && r.node.ECH == "" && antiblock.CDNFrontable(r.node):
 			// Behind a CDN, ECH hides the name SNI filtering looks for.
 			n := *r.node
 			n.TryECH = true
 			r.node, r.ech, changed = &n, true, true
-		case frag == "auto" && !r.frag && r.node.Security == "tls" && !r.node.UDPBased() && (r.hello == 0 || !learned.fragHurts(r.fp())):
+		case sb && frag == "auto" && !r.frag && r.node.Security == "tls" && !r.node.UDPBased() && (r.hello == 0 || !learned.fragHurts(r.fp())):
 			r.frag, changed = true, true
 		case r.hello != 0:
 			r.setHello(learned.nextHello(r.fp(), r.frag))
@@ -877,6 +902,7 @@ func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidat
 			switch {
 			case r.Rejected:
 				e.pool.Update(c.key, func(p *pool.Entry) { p.State = pool.StateRejected; p.LastTest = pool.Minutes(time.Now()) })
+				e.forget(c.key)
 			case r.OK:
 				e.recordOK(c, r)
 			case r.Tampered && e.distrust(c.key, c.node.Name):
@@ -1001,6 +1027,17 @@ func (e *Engine) recordFail(c candidate, reason string) {
 	}
 	e.scan.Tested++
 	e.scan.recent = append(e.scan.recent, now)
+}
+
+// forget drops a known server the core refuses for good (or whose link
+// no longer parses), so it is neither offered nor rechecked again.
+func (e *Engine) forget(key uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if s := e.good[key]; s != nil {
+		delete(e.good, key)
+		e.logf("info", "Server %s is no longer usable here and was removed.", s.Name)
+	}
 }
 
 // statsLoop keeps derived numbers fresh and saves state regularly.
