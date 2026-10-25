@@ -75,8 +75,9 @@ jobs:
         continue-on-error: true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.Cloudflare_API_edit || secrets.CLOUDFLARE_API_TOKEN }}
-          # The zone's id, when the token may not list zones (Zone: Read).
-          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          # The zone's id, for a token that may not list zones (Zone: Read):
+          # the variable, else albatrossvpn.online's id (an id is not a secret).
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID || '10cb31d048a94862c5080fbd33c551bd' }}
         run: |
           rc=0
           api="https://api.cloudflare.com/client/v4"
