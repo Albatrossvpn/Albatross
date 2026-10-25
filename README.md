@@ -65,7 +65,9 @@ Builds ask users to sign in only when the account service address is set: `ACCOU
 
 ### Forcing an update
 
-Every copy reads `update.json` from the `main` branch (directly, through GitHub's CDN mirrors, or through its own VPN) at start and every 6 hours, and keeps the last copy so it also holds offline. Raise `min_version` to stop older versions from connecting: they show an "update required" screen with `download_url`. A `latest_version` newer than the running one only shows an "update available" banner. Mirrors cache the file, so a change can take a few hours to reach everyone.
+Every copy reads `update.json` (from the project's own storage first, then the `main` branch and GitHub's CDN mirrors, directly or through its own VPN) at start and every 6 hours, and keeps the last copy so it also holds offline. Raise `min_version` to stop older versions from connecting: they show an "update required" screen with `download_url`. A `latest_version` newer than the running one only shows an "update available" banner. Mirrors cache the file, so a change can take a few hours to reach everyone.
+
+Release builds trust only a signed manifest: the release workflow signs `update.json` with `go run ./cmd/signupdate sign update.json` (the key is derived from the `TOKEN_SECRET` secret, `internal/updatesig`), and the build carries the matching public key (`signupdate pubkey`). A manifest without a valid `signed`/`sig` pair, or one edited by hand after signing, is ignored by those builds, so a forged copy on a mirror can never make them download or stop anything. The account service also refuses copies older than `min_version` (HTTP 426) by the version each copy sends.
 
 CI (`.github/workflows/build.yml`) runs the tests including end-to-end runs against real local servers, builds the app, bundles the cores, smoke-tests it on Windows, builds and installs the installer, and publishes a release for `v*` tags or for a manual run with a `release` version.
 

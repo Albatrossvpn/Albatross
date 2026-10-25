@@ -158,6 +158,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           # Opens the list of the project's own servers (deploy/server).
           OWN_KEY: ${{ secrets.OWN_KEY }}
+          # Signs the update manifest; the build carries its public key.
+          TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           RELEASE: ${{ inputs.release }}
           SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
         run: |
@@ -168,9 +170,14 @@ jobs:
             # (the sealed list stays closed); everything else works, so the
             # release goes on with a warning.
             [ -n "$OWN_KEY" ] || echo "::warning::The OWN_KEY secret is not set: this release cannot open the project's own servers."
+            # A release trusts only a signed update manifest, so a forged
+            # one (a CDN mirror, a taken-over account) can never make it
+            # download or stop anything.
+            [ ${#TOKEN_SECRET} -ge 32 ] || { echo "::error::A release needs the TOKEN_SECRET secret (32+ characters) to sign the update manifest."; exit 1; }
+            UPDATE_KEY="$(go run ./cmd/signupdate pubkey)"
             ACCOUNT_URL="$(bash build/account-url.sh)"
             MIRROR_URL="$(bash build/mirror-urls.sh)"
-            export ACCOUNT_URL MIRROR_URL
+            export ACCOUNT_URL MIRROR_URL UPDATE_KEY
           fi
           bash build/package.sh
       - uses: actions/upload-artifact@v4
@@ -207,6 +214,7 @@ jobs:
       - name: Build APKs
         env:
           OWN_KEY: ${{ secrets.OWN_KEY }}
+          TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ALBATROSS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -222,11 +230,14 @@ jobs:
             echo "::error::A release needs the ANDROID_KEYSTORE_BASE64 secret, or users must uninstall to update."
             exit 1
           fi
-          # Releases ask users to sign in; see the Windows build.
+          # Releases ask users to sign in and trust only a signed update
+          # manifest; see the Windows build.
           if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            [ ${#TOKEN_SECRET} -ge 32 ] || { echo "::error::A release needs the TOKEN_SECRET secret (32+ characters) to sign the update manifest."; exit 1; }
+            UPDATE_KEY="$(go run ./cmd/signupdate pubkey)"
             ACCOUNT_URL="$(bash build/account-url.sh)"
             MIRROR_URL="$(bash build/mirror-urls.sh)"
-            export ACCOUNT_URL MIRROR_URL
+            export ACCOUNT_URL MIRROR_URL UPDATE_KEY
           fi
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/albatross.jks"
@@ -464,6 +475,19 @@ jobs:
         with:
           ref: main
           path: repo
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: repo/go.mod
+          cache-dependency-path: repo/go.sum
+      # wrangler, to put the files straight into the project's own storage
+      # (deploy/files/lib.sh).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: repo/backend/package-lock.json
+      - run: npm ci
+        working-directory: repo/backend
       # Installed copies learn of the new version from update.json, with
       # each platform's installer and SHA-256 so they update in place.
       - name: Tell installed copies
@@ -471,6 +495,9 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           VERSION: ${{ needs.build.outputs.version }}
           FORCE: ${{ github.event_name != 'workflow_dispatch' || inputs.force_update }}
           MESSAGE: ${{ inputs.update_message }}
@@ -568,6 +595,10 @@ jobs:
           print(json.dumps(m, indent=2))
           PY
           cd repo
+          # Copies from 1.0.0 on trust only the signed contents (signed,
+          # sig); the plain fields serve the older copies.
+          go run ./cmd/signupdate sign update.json
+          go run ./cmd/signupdate verify update.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "Tell installed copies about $VERSION" && git push origin HEAD:main

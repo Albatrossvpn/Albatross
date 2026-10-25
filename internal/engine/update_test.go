@@ -3,7 +3,9 @@ package engine
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Albatrossvpn/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/updatesig"
 )
 
 func TestUpdateManifest(t *testing.T) {
@@ -453,5 +456,40 @@ func TestInstallerFile(t *testing.T) {
 	}
 	if got, _ := os.ReadFile(path); string(got) != string(body) || filepath.Base(path) != "Albatross-0.4.1.exe" {
 		t.Fatalf("got %q at %s", got, path)
+	}
+}
+
+func TestSignedManifest(t *testing.T) {
+	priv := updatesig.KeyFromSecret("test-secret-that-is-at-least-32-chars-long")
+	was := UpdateKey
+	UpdateKey = updatesig.PublicHex(priv)
+	defer func() { UpdateKey = was }()
+
+	inner := UpdateManifest{MinVersion: "1.0.0", LatestVersion: "1.0.0"}
+	payload, _ := json.Marshal(inner)
+	signed, sig := updatesig.Sign(priv, payload)
+
+	// The signed contents win over the plain fields, which serve old copies.
+	m, ok := verifyManifest(UpdateManifest{MinVersion: "0.1.0", LatestVersion: "0.1.0", Signed: signed, Sig: sig})
+	if !ok || m.MinVersion != "1.0.0" || m.LatestVersion != "1.0.0" || m.Signed != signed {
+		t.Fatalf("signed: ok=%v %+v", ok, m)
+	}
+	// Unsigned, or signed by another key, or tampered: not trusted.
+	if _, ok := verifyManifest(UpdateManifest{MinVersion: "9.9.9"}); ok {
+		t.Fatal("an unsigned manifest was trusted")
+	}
+	other := updatesig.KeyFromSecret("another-secret-that-is-also-32-chars-long")
+	s2, g2 := updatesig.Sign(other, payload)
+	if _, ok := verifyManifest(UpdateManifest{Signed: s2, Sig: g2}); ok {
+		t.Fatal("a manifest signed by another key was trusted")
+	}
+	tampered, _ := json.Marshal(UpdateManifest{MinVersion: "9.9.9"})
+	if _, ok := verifyManifest(UpdateManifest{Signed: base64.StdEncoding.EncodeToString(tampered), Sig: sig}); ok {
+		t.Fatal("a tampered manifest was trusted")
+	}
+	// Without a key (development builds) the plain manifest is used.
+	UpdateKey = ""
+	if m, ok := verifyManifest(UpdateManifest{MinVersion: "0.1.0"}); !ok || m.MinVersion != "0.1.0" {
+		t.Fatalf("no key: ok=%v %+v", ok, m)
 	}
 }
