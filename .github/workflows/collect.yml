@@ -60,7 +60,7 @@ jobs:
           if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
             npx wrangler r2 object get albatross-files/list/servers/crowd.json --file "$RUNNER_TEMP/crowd.json" --remote || echo "::warning::no crowd.json yet"
             npx wrangler r2 object get albatross-files/list/servers/iran.json --file "$RUNNER_TEMP/iran.json" --remote || echo "::warning::no report from a tester inside the country yet (deploy/tester)"
-            # Sources found by the weekly discovery (discover.yml).
+            # Sources found by the hourly discovery (discover.yml).
             for f in sources.txt channels.txt; do
               npx wrangler r2 object get "albatross-files/list/servers/$f" --file "$RUNNER_TEMP/$f" --remote || echo "::warning::no discovered $f yet"
             done

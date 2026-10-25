@@ -31,6 +31,11 @@ import (
 //   - GitHub code search for every link scheme ("vless://", "hysteria2://",
 //     "tuic://" ... and OpenVPN profiles), and repository search for the
 //     usual words, whose files are listed through the Git tree API;
+//   - the web at large (websearch.go): search engines that need no key,
+//     Reddit, GitLab and Codeberg, a slice of the queries each hour;
+//   - what the previous run found (-discover-prev): checked again, and
+//     dropped only after a day of not answering, so a source that is down
+//     for an hour is not lost;
 //   - every address and channel mentioned inside the lists and channels
 //     already known (aggregators list their own sources), and the channels
 //     those channels mention, two steps out;
@@ -60,6 +65,10 @@ const minSourceLinks, minChannelLinks = 5, 3
 // Caps that keep a run within the hour.
 const maxCandidates, maxChannelPages = 20000, 6000
 
+// dropAfterMisses is how many runs in a row a previously found source may
+// fail to answer before it is dropped: hourly runs, so a day.
+const dropAfterMisses = 24
+
 var (
 	// Mentions of channels: t.me/name, @name.
 	tgMentionRe = regexp.MustCompile(`(?i)(?:t\.me/(?:s/)?|@)([A-Za-z][A-Za-z0-9_]{4,31})\b`)
@@ -88,20 +97,101 @@ type discoverer struct {
 	subs     []string
 	channels []string
 	stats    map[string]int
+	// prev are the sources the previous run published, and misses how many
+	// runs in a row each has failed to answer (carried in discover.json).
+	prev    map[string]bool
+	misses  map[string]int
+	checked map[string]bool
 }
 
 func newDiscoverer(token string, f *sources.Fetcher) *discoverer {
 	return &discoverer{
 		token: token, client: &http.Client{Timeout: 60 * time.Second}, f: f,
 		seenSub: map[string]bool{}, seenTG: map[string]bool{}, contents: map[uint64]string{}, stats: map[string]int{},
+		prev: map[string]bool{}, misses: map[string]int{}, checked: map[string]bool{},
 	}
 }
 
-// runDiscover finds sources and writes them to dir.
-func runDiscover(ctx context.Context, dir, token string) {
+// loadPrev reads the previous run's sources.txt, channels.txt and
+// discover.json from dir (missing files are empty) and returns the sources
+// and channels to check again.
+func (d *discoverer) loadPrev(dir string) (subs, tgs []string) {
+	if dir == "" {
+		return nil, nil
+	}
+	read := func(name string) []string {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil
+		}
+		var out []string
+		for _, l := range strings.Split(string(b), "\n") {
+			if l = strings.TrimSpace(l); l != "" && !strings.HasPrefix(l, "#") {
+				out = append(out, l)
+			}
+		}
+		return out
+	}
+	subs, tgs = read("sources.txt"), read("channels.txt")
+	for _, u := range subs {
+		d.prev[u] = true
+	}
+	for _, c := range tgs {
+		d.prev[strings.ToLower(c)] = true
+	}
+	var meta struct {
+		Misses map[string]int `json:"misses"`
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "discover.json")); err == nil && json.Unmarshal(b, &meta) == nil && meta.Misses != nil {
+		d.misses = meta.Misses
+	}
+	return subs, tgs
+}
+
+// carry keeps a previously found source that could not be checked this
+// run (time ran out) or failed fewer than dropAfterMisses runs in a row.
+// It returns whether the source stays.
+func (d *discoverer) carry(s sources.Source, miss bool) bool {
+	key := s.URL
+	if s.Kind == sources.KindTelegram {
+		key = strings.ToLower(key)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !d.prev[key] {
+		return false
+	}
+	if miss {
+		d.misses[key]++
+		if d.misses[key] >= dropAfterMisses {
+			d.stats["dropped"]++
+			return false
+		}
+		d.stats["carried_missing"]++
+	} else {
+		d.stats["carried_unchecked"]++
+	}
+	if s.Kind == sources.KindSubscription {
+		d.subs = append(d.subs, s.URL)
+	} else {
+		d.channels = append(d.channels, key)
+	}
+	return true
+}
+
+// runDiscover finds sources and writes them to dir. prevDir holds the
+// previous run's output (checked again, see loadPrev); the run stops
+// looking after minutes and writes what it has.
+func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		log.Fatal(err)
 	}
+	if minutes > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(minutes)*time.Minute)
+		defer cancel()
+	}
+	hour := time.Now().UTC().Hour()
 	cache, err := os.MkdirTemp("", "discover")
 	if err != nil {
 		log.Fatal(err)
@@ -125,6 +215,16 @@ func runDiscover(ctx context.Context, dir, token string) {
 
 	var candSubs []string
 	var candTG []string
+	addPages := func(pages []string) {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		for _, u := range pages {
+			if c := canonicalPage(u); c != "" && !d.seenSub[c] {
+				d.seenSub[c] = true
+				candSubs = append(candSubs, c)
+			}
+		}
+	}
 	add := func(subs, tgs []string) {
 		d.mu.Lock()
 		defer d.mu.Unlock()
@@ -142,6 +242,13 @@ func runDiscover(ctx context.Context, dir, token string) {
 		}
 	}
 
+	// 0. What the previous run found goes first: checked again, as it is.
+	prevSubs, prevTG := d.loadPrev(prevDir)
+	addPages(prevSubs)
+	add(nil, prevTG)
+	d.stats["from_previous"] = len(candSubs) + len(candTG)
+	log.Printf("discover: %d sources and %d channels from the previous run", len(prevSubs), len(prevTG))
+
 	// 1. Mentions inside the known lists and channels.
 	texts := d.fetchAll(ctx, knownSubs, knownTG)
 	for _, t := range texts {
@@ -153,7 +260,7 @@ func runDiscover(ctx context.Context, dir, token string) {
 
 	// 2. GitHub: code search per scheme, repository search by words.
 	if token != "" {
-		gh := d.githubCode(ctx)
+		gh := d.githubCode(ctx, hour)
 		gh = append(gh, d.githubRepos(ctx)...)
 		before := len(candSubs)
 		add(gh, nil)
@@ -162,6 +269,17 @@ func runDiscover(ctx context.Context, dir, token string) {
 	} else {
 		log.Print("discover: no GITHUB_TOKEN; GitHub search skipped")
 	}
+
+	// 2b. The web at large: this hour's slice of the queries through the
+	// engines, Reddit and the other code hosts; every result page read.
+	pages, files := d.webSearch(ctx, hour)
+	before := len(candSubs) + len(candTG)
+	add(files, nil)
+	ps, pc, withServers := d.readPages(ctx, pages)
+	add(ps, pc)
+	addPages(withServers)
+	d.stats["from_web"] = len(candSubs) + len(candTG) - before
+	log.Printf("discover: %d result pages and %d files from the web, %d new candidates", len(pages), len(files), len(candSubs)+len(candTG)-before)
 
 	// 3. Fetch the candidates; keep the ones with servers; read their
 	// mentions too (one more step), then the channels' mentions once more.
@@ -184,8 +302,18 @@ func runDiscover(ctx context.Context, dir, token string) {
 		add(ns, nc)
 	}
 
-	sort.Strings(d.subs)
-	sort.Strings(d.channels)
+	// Previously found sources the clock ran out on stay as they were.
+	for _, u := range prevSubs {
+		if !d.tried(u) {
+			d.carry(sources.Source{Kind: sources.KindSubscription, URL: u}, false)
+		}
+	}
+	for _, c := range prevTG {
+		if !d.tried(strings.ToLower(c)) {
+			d.carry(sources.Source{Kind: sources.KindTelegram, URL: strings.ToLower(c)}, false)
+		}
+	}
+	d.subs, d.channels = uniq(d.subs), uniq(d.channels)
 	write := func(name string, lines []string, comment string) {
 		b := comment + "\n" + strings.Join(lines, "\n") + "\n"
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(b), 0o644); err != nil {
@@ -195,7 +323,13 @@ func runDiscover(ctx context.Context, dir, token string) {
 	write("sources.txt", d.subs, "# Subscription addresses found by cmd/collect -discover; each held servers when found.")
 	write("channels.txt", d.channels, "# Telegram channels found by cmd/collect -discover; each posted servers when found.")
 	d.stats["sources"], d.stats["channels"] = len(d.subs), len(d.channels)
-	meta := map[string]any{"updated": time.Now().UTC(), "stats": d.stats}
+	for k := range d.misses {
+		// Only sources still carried keep a count.
+		if !d.prev[k] || d.misses[k] >= dropAfterMisses {
+			delete(d.misses, k)
+		}
+	}
+	meta := map[string]any{"updated": time.Now().UTC(), "stats": d.stats, "misses": d.misses}
 	b, _ := json.MarshalIndent(meta, "", "  ")
 	os.WriteFile(filepath.Join(dir, "discover.json"), append(b, '\n'), 0o644)
 	log.Printf("discover: kept %d subscriptions and %d channels", len(d.subs), len(d.channels))
@@ -230,8 +364,28 @@ func (d *discoverer) fetchAll(ctx context.Context, subs, tgs []string) []string 
 	return out
 }
 
+// uniq sorts lines and drops repeats.
+func uniq(list []string) []string {
+	sort.Strings(list)
+	out := list[:0]
+	for i, s := range list {
+		if i == 0 || s != list[i-1] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// tried reports whether keep got to check a candidate this run.
+func (d *discoverer) tried(key string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.checked[key]
+}
+
 // keep fetches candidates and keeps those with servers; it returns the
-// texts of the kept ones.
+// texts of the kept ones. A source from the previous run that fails is
+// carried a while (see carry).
 func (d *discoverer) keep(ctx context.Context, subs, tgs []string) []string {
 	var texts []string
 	var mu sync.Mutex
@@ -239,15 +393,32 @@ func (d *discoverer) keep(ctx context.Context, subs, tgs []string) []string {
 	var wg sync.WaitGroup
 	try := func(s sources.Source, min int) {
 		defer func() { <-sem; wg.Done() }()
+		if ctx.Err() != nil {
+			return
+		}
 		res := d.f.Fetch(ctx, s)
-		if res.Err != nil || res.Text == "" {
+		if ctx.Err() != nil {
+			// Time ran out mid-fetch: not the source's fault.
 			return
 		}
+		key := s.URL
+		if s.Kind == sources.KindTelegram {
+			key = strings.ToLower(key)
+		}
+		d.mu.Lock()
+		d.checked[key] = true
+		d.mu.Unlock()
 		n := 0
-		node.EachText(res.Text, func(*node.Node) { n++ })
+		if res.Err == nil && res.Text != "" {
+			node.EachText(res.Text, func(*node.Node) { n++ })
+		}
 		if n < min {
+			d.carry(s, true)
 			return
 		}
+		d.mu.Lock()
+		delete(d.misses, key)
+		d.mu.Unlock()
 		h := fnv.New64a()
 		io.WriteString(h, res.Text)
 		sum := h.Sum64()
@@ -341,8 +512,15 @@ func isHex(s string) bool {
 
 // githubCode searches GitHub's code for files holding each scheme and
 // OpenVPN profiles, and returns their raw addresses on the default branch.
-func (d *discoverer) githubCode(ctx context.Context) []string {
+func (d *discoverer) githubCode(ctx context.Context, hour int) []string {
 	var out []string
+	// Code search has no order by date: the first pages carry the same
+	// files hour after hour, so the hourly runs read three and one run a
+	// day reads them all.
+	pages := 3
+	if hour == 2 {
+		pages = 10
+	}
 	queries := make([]string, 0, len(discoverSchemes)+2)
 	for _, s := range discoverSchemes {
 		queries = append(queries, fmt.Sprintf(`"%s://"`, s))
@@ -350,7 +528,7 @@ func (d *discoverer) githubCode(ctx context.Context) []string {
 	queries = append(queries, `path:*.ovpn "remote "`, `"proxies:" "server:" path:*.yaml`)
 	for _, q := range queries {
 		n := 0
-		for page := 1; page <= 10; page++ {
+		for page := 1; page <= pages; page++ {
 			var res struct {
 				Items []struct {
 					Path       string `json:"path"`
