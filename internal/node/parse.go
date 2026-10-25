@@ -1124,3 +1124,11 @@ func parseSSH(link string) (*Node, error) {
 	n.HostKey = firstNonEmpty(u.query["hk"], u.query["host_key"], u.query["hostkey"])
 	return n, nil
 }
+
+// Direct makes the serverless method: no server at all, the device's own
+// connection with the TLS ClientHello fragmented, which opens sites that
+// are blocked only by name (SNI) at full speed. It hides nothing from the
+// network's operator, so the engine uses it only when no server works.
+func Direct() *Node {
+	return &Node{Proto: "direct", Name: "No server (TLS fragment)"}
+}

@@ -275,12 +275,15 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 // into other countries only when that country runs short.
 func (e *Engine) pickGroup(country, home string, exclude map[string]bool, size int) []*Server {
 	if country != "" {
-		return e.bestServers(country, size, exclude)
+		if g := e.bestServers(country, size, exclude); len(g) > 0 {
+			return g
+		}
+		return e.lastResort(exclude)
 	}
 	if home == "" {
 		best := e.bestServers("", 1, exclude)
 		if len(best) == 0 {
-			return nil
+			return e.lastResort(exclude)
 		}
 		home = best[0].Country
 	}
@@ -353,7 +356,7 @@ func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Se
 	var wg sync.WaitGroup
 	for i, s := range list {
 		nd := s.Node()
-		if nd == nil || nd.UDPBased() {
+		if nd == nil || nd.UDPBased() || nd.NoEndpoint() {
 			ok[i] = nd != nil
 			continue
 		}
@@ -670,7 +673,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	for i, n := range run.Set.Nodes {
 		if s := byNode[n]; s != nil {
 			m := &member{tag: run.Set.Tags[i], server: s, country: s.Country}
-			if !n.UDPBased() && n.Proto != "warpplus" {
+			if !n.UDPBased() && !n.NoEndpoint() {
 				m.endpoint = n.Endpoint()
 			}
 			c.members = append(c.members, m)
@@ -1229,4 +1232,20 @@ var stickyDomains = []string{
 	"chatgpt.com", "openai.com", "claude.ai", "anthropic.com", "gemini.google.com",
 	"instagram.com", "facebook.com", "x.com", "twitter.com", "linkedin.com",
 	"github.com", "steampowered.com", "steamcommunity.com", "web.telegram.org",
+}
+
+// lastResort is the serverless method (node.Direct), offered only when no
+// server at all is usable: connecting through the device's own line with
+// the TLS hello fragmented beats not connecting, and the app says so in
+// the method's name. Exits in the home country are otherwise never used.
+func (e *Engine) lastResort(exclude map[string]bool) []*Server {
+	now := time.Now()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for _, s := range e.good {
+		if s.Proto == "direct" && !exclude[s.Key] && s.usable(now) {
+			return []*Server{s}
+		}
+	}
+	return nil
 }

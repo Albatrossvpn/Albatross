@@ -287,6 +287,9 @@ func (n *Node) Validate() error {
 		}
 		return fmt.Errorf("bad warp-plus method")
 	}
+	if n.Proto == "direct" {
+		return nil // no server: the device's own connection
+	}
 	if n.Server == "" || strings.ContainsAny(n.Server, " \t/\\?#@,\"'") {
 		return fmt.Errorf("bad server %q", n.Server)
 	}
@@ -343,7 +346,7 @@ func (n *Node) Validate() error {
 		if len(n.LocalAddress) == 0 {
 			return fmt.Errorf("wireguard needs an address")
 		}
-	case "socks", "http":
+	case "socks", "http", "direct":
 	case "ssh":
 		if n.Username == "" || n.Password == "" {
 			return fmt.Errorf("ssh needs a user and a password")
@@ -547,3 +550,7 @@ func (n *Node) pluginOpt(key string) string {
 	}
 	return ""
 }
+
+// NoEndpoint reports whether the node has no server address to probe: the
+// sidecar methods (warp-plus, usque, Tor) and the serverless method.
+func (n *Node) NoEndpoint() bool { return n.Proto == "warpplus" || n.Proto == "direct" }
