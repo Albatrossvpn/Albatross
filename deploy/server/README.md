@@ -45,7 +45,9 @@ session travels inside echo packets, slowly, but it connects.
    echo requests (type 8) from everywhere, which carry the ICMP protocol.
 3. On the machine, as root:
    ```sh
-   curl -fsSL https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/deploy/server/install.sh | bash
+   # Copy deploy/server/install.sh to the machine (the repository may be
+   # private), then:
+   sudo bash install.sh
    ```
    To add the DNS tunnel, which gets out through the network's own resolver
    when every foreign address is cut, you need a domain: add an `A` record
@@ -62,3 +64,28 @@ session travels inside echo packets, slowly, but it connects.
    `OWN_SERVERS`, one per line. The collector then publishes them for the
    apps, encrypted, so public collectors do not pick them up and overload
    them.
+
+## A relay inside the country
+
+When only domestic addresses can be reached (the national-network state,
+where foreign sites are cut and only local services work), a server abroad
+is out of reach however well it is disguised. What still works is a
+machine *inside* the country that has its own way out: a server at a
+domestic hosting company, whose international link stays up for business
+customers. The app connects to that machine; the machine forwards every
+Albatross port (TCP, UDP and ICMP) on to the server abroad.
+
+On an Ubuntu machine inside the country, as root:
+
+```sh
+# install.sh copied from deploy/server in the repository
+RELAY_TO=<server's address> LINKS=/root/albatross-links.txt bash install.sh
+```
+
+`LINKS` is the server's links file (copy it over, or give an https
+address). The relay installs no core, only forwarding rules that come back
+at every boot, and prints the server's links rewritten to its own address
+(the TLS names stay the server's). Add those links to the app's own list
+next to the server's: the app tests both and uses whichever answers, so
+the relay is only used when the server itself cannot be reached. The
+relay sees only encrypted traffic to the server.

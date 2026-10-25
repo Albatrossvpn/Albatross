@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -339,5 +340,46 @@ func TestBusy(t *testing.T) {
 	}
 	if Busy(ErrUnreachable) || Busy(&Error{Status: http.StatusUnauthorized}) {
 		t.Fatal("other errors are busy")
+	}
+}
+
+func TestEdge(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/login":
+			fmt.Fprint(w, `{"token":"t1","account":{"username":"u"}}`)
+		case "/api/v1/edge":
+			gotAuth = r.Header.Get("Authorization")
+			if gotAuth != "Bearer t1" {
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprint(w, `{"error":"Sign in again."}`)
+				return
+			}
+			fmt.Fprint(w, `{"links":["vless://x@edge.example:443?type=ws#e"],"reason":""}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":"Not found."}`)
+		}
+	}))
+	defer srv.Close()
+	c := New([]string{srv.URL}, filepath.Join(t.TempDir(), "a.json"), nil)
+	if _, err := c.Edge(context.Background()); !errors.Is(err, ErrSignedOut) {
+		t.Fatalf("signed out: got %v", err)
+	}
+	if _, err := c.Login(context.Background(), "u", "p"); err != nil {
+		t.Fatal(err)
+	}
+	links, err := c.Edge(context.Background())
+	if err != nil || len(links) != 1 || gotAuth != "Bearer t1" {
+		t.Fatalf("links %v err %v auth %q", links, err, gotAuth)
+	}
+	// A session the service no longer accepts is forgotten.
+	c.mu.Lock()
+	c.st.Token = "stale"
+	c.mu.Unlock()
+	if _, err := c.Edge(context.Background()); !errors.Is(err, ErrSignedOut) || c.View().SignedIn {
+		t.Fatalf("stale session: err %v signed in %v", err, c.View().SignedIn)
 	}
 }

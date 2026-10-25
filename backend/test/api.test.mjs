@@ -288,6 +288,54 @@ test("pages are served; unknown API paths are 404", async () => {
   assert.equal((await call("GET", "nope")).status, 404);
 });
 
+test("the app's own files: only the administrator publishes them; anyone reads them", async () => {
+  const body = "vless://a@b:443#one\nvless://c@d:443#two\n";
+  const put = (path, token, data = body) => fetch(BASE + "/api/v1/admin/list/" + path, {
+    method: "PUT", headers: { ...(token ? { Authorization: "Bearer " + token } : {}), "Content-Type": "text/plain" }, body: data,
+  });
+  assert.equal((await put("servers/hot.txt")).status, 401, "no token");
+  assert.equal((await put("servers/hot.txt", "x.y")).status, 401, "bad token");
+  assert.equal((await put("servers/secret.txt", admin)).status, 404, "not one of the app's files");
+  assert.equal((await put("servers/hot.txt", admin, "")).status, 400, "empty");
+  const ok = await put("servers/hot.txt", admin);
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { path: "servers/hot.txt", size: body.length });
+  const got = await fetch(BASE + "/list/servers/hot.txt");
+  assert.equal(got.status, 200);
+  assert.equal(await got.text(), body);
+  assert.match(got.headers.get("content-type"), /^text\/plain/);
+  const etag = got.headers.get("etag");
+  assert.ok(etag);
+  assert.equal((await fetch(BASE + "/list/servers/hot.txt", { headers: { "If-None-Match": etag } })).status, 304);
+  const part = await fetch(BASE + "/list/servers/hot.txt", { headers: { Range: "bytes=0-4" } });
+  assert.equal(part.status, 206);
+  assert.equal(await part.text(), "vless");
+  assert.equal((await fetch(BASE + "/list/servers/secret.txt")).status, 404);
+  const manifest = JSON.stringify({ latest_version: "9.9.9" });
+  assert.equal((await put("main/update.json", admin, manifest)).status, 200);
+  const m = await fetch(BASE + "/list/main/update.json");
+  assert.match(m.headers.get("content-type"), /^application\/json/);
+  assert.equal((await m.json()).latest_version, "9.9.9");
+});
+
+test("copies older than the manifest's min_version are refused; the website never is", async () => {
+  const put = (data) => fetch(BASE + "/api/v1/admin/list/main/update.json", {
+    method: "PUT", headers: { Authorization: "Bearer " + admin, "Content-Type": "application/json" }, body: JSON.stringify(data),
+  });
+  const login = (headers) => fetch(BASE + "/api/v1/login", {
+    method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ username: "nobody-here", password: "whatever-1" }),
+  });
+  assert.equal((await put({ min_version: "1.0.0" })).status, 200);
+  const old = await login({});
+  assert.equal(old.status, 426, "a copy that sends no version is 0.4.0");
+  assert.match((await old.json()).error, /no longer works/);
+  assert.equal((await login({ "X-Albatross-Version": "0.9.9" })).status, 426);
+  assert.equal((await login({ "X-Albatross-Version": "1.0.0" })).status, 401, "current copies get the usual answer");
+  assert.equal((await login({ "X-Albatross-Client": "web" })).status, 401, "the website is never refused");
+  assert.equal((await put({ min_version: "" })).status, 200);
+  assert.equal((await login({})).status, 401, "no minimum, no refusal");
+});
+
 test("too many failed administrator logins lock the sign-in for a while", async () => {
   let last;
   for (let i = 0; i < 11; i++) last = await call("POST", "admin/login", { body: { username: "root", password: "wrong" + i } });

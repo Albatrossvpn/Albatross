@@ -419,3 +419,39 @@ func TestForcedUpdateNeverStrands(t *testing.T) {
 		t.Fatalf("installed %v, required %v", installed.Load(), e.updateRequired())
 	}
 }
+
+func TestInstallerFile(t *testing.T) {
+	body := []byte("MZ installer bytes")
+	sum := sha256.Sum256(body)
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/dead" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Write(body)
+	}))
+	defer srv.Close()
+	was := directUpdateClient
+	directUpdateClient = srv.Client
+	defer func() { directUpdateClient = was }()
+	dir := t.TempDir()
+	e, err := New(Options{DataDir: dir, Sources: []sources.Source{}, Version: "0.4.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	if _, err := e.InstallerFile(); err == nil {
+		t.Fatal("no manifest yet: expected an error")
+	}
+	m := UpdateManifest{LatestVersion: "0.4.1", Files: map[string]UpdateFile{
+		"windows": {URLs: []string{srv.URL + "/dead", srv.URL + "/Albatross-Setup-0.4.1.exe"}, SHA256: hex.EncodeToString(sum[:])},
+	}}
+	saveJSON(filepath.Join(dir, "update.json"), m)
+	path, err := e.InstallerFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != string(body) || filepath.Base(path) != "Albatross-0.4.1.exe" {
+		t.Fatalf("got %q at %s", got, path)
+	}
+}

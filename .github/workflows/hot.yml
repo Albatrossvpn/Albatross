@@ -3,30 +3,21 @@ name: Hot servers
 # Between full collections, re-test the servers the apps try first, so
 # hot.txt never lists servers that stopped working an hour ago.
 on:
+  # Every six hours: a private repository has 2,000 free Actions minutes a
+  # month, and one run takes about four.
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "41 */6 * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: hot
+  cancel-in-progress: false
+
 jobs:
-  due:
-    runs-on: ubuntu-latest
-    outputs:
-      run: ${{ steps.busy.outputs.run }}
-    steps:
-      - id: busy
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # A run stops when an older one is still going (see collect.yml).
-          busy=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/hot.yml/runs?status=in_progress" \
-            --jq "[.workflow_runs[] | select(.id < $GITHUB_RUN_ID)] | length")
-          if [ "$busy" -gt 0 ]; then echo "run=false" >> "$GITHUB_OUTPUT"; else echo "run=true" >> "$GITHUB_OUTPUT"; fi
   hot:
-    needs: due
-    if: needs.due.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -76,3 +67,8 @@ jobs:
             git commit -qm "Hot servers $(date -u +%Y-%m-%dT%H:%MZ)"
           done
           exit 1
+      - name: Publish to the project's own storage
+        env:
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        run: bash deploy/files/publish-lists.sh "$(bash build/account-url.sh | cut -d, -f1)" servers published/hot.txt

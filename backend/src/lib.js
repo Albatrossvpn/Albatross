@@ -144,3 +144,27 @@ export function checkUsername(name) {
 export function checkPassword(pw) {
   return typeof pw === "string" && pw.length >= 8 && pw.length <= 200;
 }
+
+/**
+ * The edge's share links for a signed-in user: VLESS over WebSocket with
+ * TLS, on the ports Cloudflare proxies that the app's edge scan also uses.
+ * The path carries early data in the WebSocket upgrade (`?ed=`), which
+ * saves a round trip. Empty when the edge is not deployed.
+ */
+export function edgeLinks(host, uuid) {
+  if (!host || !/^[0-9a-f-]{36}$/i.test(uuid || "")) return [];
+  const path = encodeURIComponent("/" + uuid.replace(/-/g, "").slice(0, 12) + "?ed=2560");
+  return [443, 2053, 8443].map((port) =>
+    `vless://${uuid}@${host}:${port}?encryption=none&security=tls&sni=${host}&fp=chrome&alpn=http%2F1.1&type=ws&host=${host}&path=${path}#Albatross%20edge%20${port}`);
+}
+
+/** True when version a (x.y.z, anything after "-" ignored) is older than b. */
+export function versionLess(a, b) {
+  const parse = (v) => String(v || "").replace(/^v/, "").split("-")[0].split(".").map((n) => Number.parseInt(n, 10));
+  const x = parse(a), y = parse(b);
+  for (let i = 0; i < 3; i++) {
+    const p = Number.isFinite(x[i]) ? x[i] : 0, q = Number.isFinite(y[i]) ? y[i] : 0;
+    if (p !== q) return p < q;
+  }
+  return false;
+}

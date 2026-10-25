@@ -99,3 +99,23 @@ func TestWorkerNotDirect(t *testing.T) {
 		t.Fatalf("private calls: %v", private)
 	}
 }
+
+// The app's own files come from the project's own storage first, so they
+// keep working once the repository is private; other files start at their
+// own address.
+func TestAddressesOwnStorageFirst(t *testing.T) {
+	defer func(old string) { WorkerMirror = old }(WorkerMirror)
+	WorkerMirror = "https://accounts.example.org,https://www.example.org/"
+	got := Addresses(CentralBase + "hot.txt")
+	want := []string{"https://accounts.example.org/list/servers/hot.txt", "https://www.example.org/list/servers/hot.txt", CentralBase + "hot.txt"}
+	if len(got) < 4 || !slices.Equal(got[:3], want) {
+		t.Fatalf("own file: %v", got)
+	}
+	other := "https://raw.githubusercontent.com/someone/lists/main/sub.txt"
+	if got := Addresses(other); got[0] != other || slices.ContainsFunc(got, IsWorker) {
+		t.Fatalf("other file: %v", got)
+	}
+	if got := Addresses("https://example.net/sub.txt"); !slices.Equal(got, []string{"https://example.net/sub.txt"}) {
+		t.Fatalf("plain file: %v", got)
+	}
+}

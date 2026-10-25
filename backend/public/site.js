@@ -9,7 +9,8 @@ export async function api(method, path, { token, body } = {}) {
   try {
     res = await fetch("/api/v1/" + path, {
       method,
-      headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
+      // These pages are not an app copy: the service never refuses them for an old version.
+      headers: { "Content-Type": "application/json", "X-Albatross-Client": "web", ...(token ? { Authorization: "Bearer " + token } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {

@@ -194,6 +194,7 @@ func New(opt Options) (*Engine, error) {
 	e.fetcher = &sources.Fetcher{Direct: direct, Proxy: e.proxyClient, Private: e.privateDirect, CacheDir: filepath.Join(e.dir, "cache")}
 	if urls := accountURLs(opt); len(urls) > 0 {
 		e.acct = account.New(urls, account.SessionPath(e.dir), e.accountHTTP)
+		e.acct.Version = opt.Version
 		e.crowdURLs = urls
 	}
 	e.tester = &tester.Tester{Runtime: e.rt}

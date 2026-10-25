@@ -1,8 +1,9 @@
 // The account service: the apps sign in and report use here, users see and
 // change their account on the website, the administrator manages everyone.
 import {
-  DAY, accountOf, checkPassword, checkUsername, hashPassword, randomPassword, rollPeriod, safeEqual, sign, tag, verify, verifyPassword,
+  DAY, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, verify, verifyPassword,
 } from "./lib.js";
+import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -46,7 +47,8 @@ function randomUsernameSuffix() {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/list/")) return mirror(url);
+    if (url.pathname.startsWith("/list/")) return mirror(request, url, env);
+    if (url.pathname.startsWith("/dl/")) return download(request, url, env);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
     try {
       if (!env.TOKEN_SECRET || env.TOKEN_SECRET.length < 24) throw new HttpError(503, "The service is not configured yet.");
@@ -69,6 +71,7 @@ async function route(request, env, url) {
     case "POST login": return login(request, env);
     case "POST signup": return signup(request, env);
     case "GET me": return me(request, env);
+    case "GET edge": return edge(request, env);
     case "POST usage": return usage(request, env);
     case "POST password": return changePassword(request, env);
     case "POST admin/login": return adminLogin(request, env);
@@ -78,9 +81,12 @@ async function route(request, env, url) {
     case "POST admin/users/bulk": return adminBulk(request, env);
     case "GET admin/settings": return adminSettings(request, env);
     case "PUT admin/settings": return adminSaveSettings(request, env);
+    case "POST admin/files": return adminPullFile(request, env);
     case "POST stats": return crowdReport(request, env);
     case "GET stats": return crowdSummary(request, env, url);
   }
+  const list = path.match(/^admin\/list\/(.+)$/);
+  if (list && request.method === "PUT") return adminPutList(request, env, list[1]);
   if (admin) {
     const id = Number(admin[1]);
     if (request.method === "PATCH" && !admin[2]) return adminUpdate(request, env, id);
@@ -216,6 +222,7 @@ async function publicInfo(env) {
 // ---------- Users ----------
 
 async function login(request, env) {
+  await requireCurrentClient(request, env);
   const { username, password } = await body(request);
   if (typeof username !== "string" || typeof password !== "string" || password.length > 200 || username.length > 64) {
     throw new HttpError(400, "Enter your username and password.");
@@ -275,8 +282,17 @@ async function signup(request, env) {
 }
 
 async function me(request, env) {
+  await requireCurrentClient(request, env);
   const { user } = await authUser(request, env);
   return json({ account: accountOf(user, now()), created_at: user.created_at, total_bytes: user.total_bytes, total_seconds: user.total_seconds });
+}
+
+/** The edge's links for the signed-in user (edge/README.md); none while the account may not connect. */
+async function edge(request, env) {
+  await requireCurrentClient(request, env);
+  const { user } = await authUser(request, env);
+  const a = accountOf(user, now());
+  return json({ links: a.allowed ? edgeLinks(env.EDGE_HOST, env.EDGE_UUID) : [], reason: a.reason });
 }
 
 const MAX_BYTES_PER_REPORT = 100 * 1024 ** 3;
@@ -284,6 +300,7 @@ const MAX_SECONDS_PER_REPORT = 7 * DAY;
 
 /** The app reports data and time used since its last report and learns whether the user may go on. */
 async function usage(request, env) {
+  await requireCurrentClient(request, env);
   const { user, token, payload } = await authUser(request, env);
   const b = await body(request);
   const bytes = b.bytes ?? 0;
@@ -310,6 +327,7 @@ async function usage(request, env) {
 }
 
 async function changePassword(request, env) {
+  await requireCurrentClient(request, env);
   const { user } = await authUser(request, env);
   const { old_password, new_password } = await body(request);
   const k = await passwordKeys(request, env, user.username.toLowerCase());
@@ -341,6 +359,66 @@ async function adminLogin(request, env) {
   }
   await forget(env, ip);
   return json({ token: await sign({ adm: 1, exp: now() + ADMIN_SESSION }, env.TOKEN_SECRET) });
+}
+
+/** The administrator (the release workflow) stores a release file from GitHub in the project's own storage. */
+async function adminPullFile(request, env) {
+  await authAdmin(request, env);
+  if (!env.FILES) throw new HttpError(503, "No file storage is bound.");
+  const { name, url, force } = await body(request);
+  try {
+    return json(await pullFile(env.FILES, String(name || ""), String(url || ""), { force: !!force }));
+  } catch (e) {
+    throw new HttpError(400, e.message);
+  }
+}
+
+// Copies of the app send their version (X-Albatross-Version); those before
+// 1.0.0 send none, so a request without it is taken to come from 0.4.0.
+const OLD_CLIENT = "0.4.0";
+let minClientCache = null; // { at, version }
+
+/** The oldest version that may still connect: min_version of the published update manifest. */
+async function minClient(env) {
+  if (minClientCache && now() - minClientCache.at < 60) return minClientCache.version;
+  let version = "";
+  try {
+    const obj = env.FILES && (await env.FILES.get("list/main/update.json"));
+    if (obj) version = String((await obj.json()).min_version || "");
+  } catch {}
+  minClientCache = { at: now(), version };
+  return version;
+}
+
+/**
+ * Refuses copies of the app older than the update manifest's min_version,
+ * so a version cut off by a forced update cannot sign in or go on even if
+ * it ignores the manifest. The website's own pages (X-Albatross-Client:
+ * web) are not apps and are always served.
+ */
+async function requireCurrentClient(request, env) {
+  if (request.headers.get("X-Albatross-Client") === "web") return;
+  const min = await minClient(env);
+  if (!min) return;
+  const version = request.headers.get("X-Albatross-Version") || OLD_CLIENT;
+  if (versionLess(version, min)) {
+    throw new HttpError(426, "This version of Albatross no longer works. Install the new version from https://albatrossvpn.online");
+  }
+}
+
+/** The administrator (CI) publishes one of the app's own files into the project's own storage. */
+async function adminPutList(request, env, path) {
+  await authAdmin(request, env);
+  if (!env.FILES) throw new HttpError(503, "No file storage is bound.");
+  if (!LIST_PATH.test(path)) throw new HttpError(404, "Not one of the app's files.");
+  if (Number(request.headers.get("Content-Length") || 0) > MAX_LIST) throw new HttpError(413, "File too large.");
+  try {
+    const stored = await putList(env.FILES, path, await request.arrayBuffer());
+    if (path === "main/update.json") minClientCache = null;
+    return json(stored);
+  } catch (e) {
+    throw new HttpError(400, e.message);
+  }
 }
 
 /** A user as the administrator sees them. */
@@ -578,16 +656,55 @@ async function crowdSummary(request, env, url) {
   return json({ asn: self, asns: out });
 }
 
-// mirror serves the app's own server lists and update file from GitHub, one
-// more way to reach them when GitHub and its CDNs are filtered. Only those
-// files, cached at the edge for ten minutes.
-const MIRRORED = /^\/list\/(servers\/(hot\.txt|new\.txt|fresh\.txt|all-[1-8]\.txt|tor\.json|meta\.json)|main\/update\.json|rules\/ads\.srs)$/;
-async function mirror(url) {
-  const m = MIRRORED.exec(url.pathname);
+// download serves the release files (the APK and the Windows installer)
+// from GitHub's releases through Cloudflare, for networks where GitHub's
+// downloads break off or are filtered: /dl/v0.4.1/Albatross-0.4.1-android.apk.
+// Only those files; ranges pass through so interrupted downloads resume,
+// and the edge keeps a copy for a day.
+const DOWNLOADS = /^\/dl\/(v\d+\.\d+\.\d+)\/(Albatross-\d+\.\d+\.\d+-android\.apk|Albatross-Setup-\d+\.\d+\.\d+\.exe)$/;
+async function download(request, url, env) {
+  const m = DOWNLOADS.exec(url.pathname);
   if (!m) return new Response("Not found", { status: 404 });
-  const up = await fetch("https://raw.githubusercontent.com/Albatrossvpn/Albatross/" + m[1], { cf: { cacheTtl: 600, cacheEverything: true } });
+  if (env.FILES) {
+    const r = await serveFile(request, env.FILES, m[2]);
+    if (r) return r;
+  }
+  const headers = {};
+  const range = request.headers.get("Range");
+  if (range) headers.Range = range;
+  const up = await fetch(`https://github.com/Albatrossvpn/Albatross/releases/download/${m[1]}/${m[2]}`, {
+    headers,
+    redirect: "follow",
+    cf: { cacheTtl: 86400, cacheEverything: true },
+  });
+  if (!up.ok && up.status !== 206) return new Response("Not found", { status: 404 });
+  const out = new Headers();
+  for (const h of ["Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"]) {
+    const v = up.headers.get(h);
+    if (v) out.set(h, v);
+  }
+  out.set("Content-Type", m[2].endsWith(".apk") ? "application/vnd.android.package-archive" : "application/octet-stream");
+  out.set("Content-Disposition", `attachment; filename="${m[2]}"`);
+  out.set("Cache-Control", "public, max-age=86400");
+  out.set("X-Content-Type-Options", "nosniff");
+  return new Response(up.body, { status: up.status, headers: out });
+}
+
+// mirror serves the app's own files (lists, update manifest, ad list) from
+// the project's own storage, which CI fills (deploy/files/publish-lists.sh),
+// or from GitHub while a file is not there yet and the repository is public.
+// Only those files.
+async function mirror(request, url, env) {
+  const path = url.pathname.slice("/list/".length);
+  if (!LIST_PATH.test(path)) return new Response("Not found", { status: 404 });
+  if (env.FILES) {
+    const r = await serveList(request, env.FILES, path);
+    if (r) return r;
+  }
+  const up = await fetch("https://raw.githubusercontent.com/Albatrossvpn/Albatross/" + path, { cf: { cacheTtl: 600, cacheEverything: true } });
+  if (!up.ok) return new Response("Not found", { status: 404 });
   return new Response(up.body, {
-    status: up.status,
+    status: 200,
     headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=600" },
   });
 }
