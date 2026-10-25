@@ -24,7 +24,28 @@ const (
 	KindSubscription Kind = "sub"      // a URL serving links, base64 or Clash YAML
 	KindTelegram     Kind = "telegram" // a public channel read via t.me/s/
 	KindVPNGate      Kind = "vpngate"  // the VPN Gate OpenVPN server list
+	KindLEAP         Kind = "leap"     // a LEAP provider (Riseup, Calyx): OpenVPN with an anonymous certificate
 )
+
+// leapProviders are the LEAP providers the app knows, by API address: the
+// address of their CA certificate (provider.json's ca_cert_uri).
+var leapProviders = map[string]string{
+	"https://api.black.riseup.net": "https://black.riseup.net/ca.crt",
+	"https://api.calyx.net:4430":   "https://calyx.net/ca.crt",
+}
+
+// LEAPName is the provider's short name ("riseup") for an API address.
+func LEAPName(api string) string {
+	h := strings.TrimPrefix(api, "https://")
+	if i := strings.IndexByte(h, ':'); i >= 0 {
+		h = h[:i]
+	}
+	parts := strings.Split(h, ".")
+	if len(parts) >= 2 {
+		return parts[len(parts)-2]
+	}
+	return h
+}
 
 // Tier orders sources by how often they are refreshed.
 const (
@@ -59,6 +80,9 @@ func (s Source) Label() string {
 		return "@" + s.URL
 	case KindVPNGate:
 		return "VPN Gate"
+	case KindLEAP:
+		n := LEAPName(s.URL)
+		return strings.ToUpper(n[:1]) + n[1:] + " VPN"
 	}
 	u := strings.TrimPrefix(strings.TrimPrefix(s.URL, "https://"), "http://")
 	u = strings.TrimPrefix(u, "raw.githubusercontent.com/")
@@ -238,6 +262,9 @@ func Builtin() []Source {
 		out = append(out, Source{ID: ID(kind, url), Kind: kind, URL: url, Tier: tier, Builtin: true, Enabled: true})
 	}
 	add(KindVPNGate, vpnGateURL, TierPriority)
+	for _, api := range []string{"https://api.black.riseup.net", "https://api.calyx.net:4430"} {
+		add(KindLEAP, api, TierPriority)
+	}
 	for _, u := range lines(priorityList) {
 		add(KindSubscription, u, TierPriority)
 	}
