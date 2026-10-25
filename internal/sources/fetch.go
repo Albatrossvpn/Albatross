@@ -30,6 +30,9 @@ const (
 // direct connection and public CDN mirrors of GitHub in turn; the app's own
 // files start at the project's own storage (Addresses).
 type Fetcher struct {
+	// Mode, when set, says how to reach sources now (ModeDomestic while
+	// foreign addresses are cut).
+	Mode   func() Mode
 	Direct *http.Client
 	Proxy  func() *http.Client // returns nil while disconnected
 	// Private reaches the Worker while disconnected without showing its
@@ -60,10 +63,20 @@ type cacheMeta struct {
 }
 
 type attempt struct {
-	via    string
-	url    string
-	client *http.Client
+	via     string
+	url     string
+	client  *http.Client
+	timeout time.Duration // 0: the usual
 }
+
+// Mode is how the fetcher reaches sources: as usual, or as a network
+// where only domestic addresses answer allows.
+type Mode int
+
+const (
+	ModeNormal   Mode = iota
+	ModeDomestic      // foreign addresses are cut: domestic mirrors first, short tries elsewhere
+)
 
 // Fetch downloads one source. When every path fails it falls back to the
 // last copy on disk and reports the error alongside it.
@@ -74,13 +87,21 @@ func (f *Fetcher) Fetch(ctx context.Context, s Source) Result {
 	if f.Proxy != nil {
 		proxy = f.Proxy()
 	}
+	mode := ModeNormal
+	if f.Mode != nil {
+		mode = f.Mode()
+	}
 	switch s.Kind {
 	case KindTelegram:
 		u := "https://t.me/s/" + s.URL
-		if proxy != nil {
-			attempts = append(attempts, attempt{"proxy", u, proxy})
+		if mode == ModeDomestic && proxy == nil {
+			// A foreign site on a network that cuts them: the cache.
+			return f.fallback(res, errors.New("foreign addresses are cut"))
 		}
-		attempts = append(attempts, attempt{"direct", u, f.Direct})
+		if proxy != nil {
+			attempts = append(attempts, attempt{"proxy", u, proxy, 0})
+		}
+		attempts = append(attempts, attempt{"direct", u, f.Direct, 0})
 		text, via, err := f.fetchTelegram(ctx, attempts)
 		if err == nil {
 			res.Text, res.Via = text, via
@@ -89,6 +110,9 @@ func (f *Fetcher) Fetch(ctx context.Context, s Source) Result {
 		}
 		return f.fallback(res, err)
 	case KindLEAP:
+		if mode == ModeDomestic && proxy == nil {
+			return f.fallback(res, errors.New("foreign addresses are cut"))
+		}
 		var clients []*http.Client
 		if proxy != nil {
 			clients = append(clients, proxy)
@@ -113,6 +137,16 @@ func (f *Fetcher) Fetch(ctx context.Context, s Source) Result {
 		n := 0
 		for _, u := range Addresses(url) {
 			switch {
+			case IsDomestic(u):
+				// A mirror inside the country: first when foreign addresses
+				// are cut, last otherwise; plain and direct.
+				n++
+				a := attempt{"domestic" + strconv.Itoa(n), u, f.Direct, 20 * time.Second}
+				if mode == ModeDomestic {
+					attempts = append([]attempt{a}, attempts...)
+				} else {
+					attempts = append(attempts, a)
+				}
 			case IsWorker(u):
 				// The project's own storage: through the VPN, or the
 				// private client, never a plain direct call (IsWorker).
@@ -120,18 +154,38 @@ func (f *Fetcher) Fetch(ctx context.Context, s Source) Result {
 				if c == nil {
 					c = f.Private
 				}
-				if c != nil {
+				if c != nil && mode != ModeDomestic {
 					n++
-					attempts = append(attempts, attempt{"mirror" + strconv.Itoa(n), u, c})
+					attempts = append(attempts, attempt{"mirror" + strconv.Itoa(n), u, c, 0})
 				}
 			case u == url:
 				if proxy != nil {
-					attempts = append(attempts, attempt{"proxy", url, proxy})
+					attempts = append(attempts, attempt{"proxy", url, proxy, 0})
 				}
-				attempts = append(attempts, attempt{"direct", url, f.Direct})
+				t := time.Duration(0)
+				if mode == ModeDomestic {
+					t = 8 * time.Second
+				}
+				attempts = append(attempts, attempt{"direct", url, f.Direct, t})
 			default:
+				// Foreign CDN copies: pointless where foreign addresses
+				// are cut, except GitHub's API, which stayed open.
+				if mode == ModeDomestic && !strings.HasPrefix(u, githubAPI) {
+					continue
+				}
 				n++
-				attempts = append(attempts, attempt{"mirror" + strconv.Itoa(n), u, f.Direct})
+				t := time.Duration(0)
+				if mode == ModeDomestic {
+					t = 8 * time.Second
+				}
+				attempts = append(attempts, attempt{"mirror" + strconv.Itoa(n), u, f.Direct, t})
+			}
+		}
+		// The proxy attempt belongs first whatever the mode.
+		for i, a := range attempts {
+			if a.via == "proxy" && i > 0 {
+				attempts = append([]attempt{a}, append(attempts[:i:i], attempts[i+1:]...)...)
+				break
 			}
 		}
 	}
@@ -187,6 +241,9 @@ func (f *Fetcher) get(ctx context.Context, a attempt, etag, lastMod string) (str
 	timeout := 45 * time.Second
 	if a.via != "proxy" && a.via != "direct" {
 		timeout = 60 * time.Second
+	}
+	if a.timeout > 0 {
+		timeout = a.timeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -289,6 +346,46 @@ var rawGitHubRe = regexp.MustCompile(`^https?://raw\.githubusercontent\.com/([^/
 // app's own files at /list/<branch>/<path>.
 var WorkerMirror = ""
 
+// DomesticMirror lists mirrors inside the country (deploy/server MIRROR
+// mode), comma separated, set at build time: plain http bases such as
+// http://5.6.7.8:8081/<token>, which serve the app's own files at
+// /list/<branch>/<path> and the installers at /dl/<name>. Only these bases
+// may be plain http: the lists they serve are sealed or checked, and the
+// installers are checked against their SHA-256.
+var DomesticMirror = ""
+
+// ExtraMirrors, when set, returns domestic mirror bases learned later (a
+// share code, a setting).
+var ExtraMirrors func() []string
+
+// DomesticBases returns every domestic mirror base, trimmed.
+func DomesticBases() []string {
+	var out []string
+	add := func(list []string) {
+		for _, b := range list {
+			b = strings.TrimRight(strings.TrimSpace(b), "/")
+			if b != "" && (strings.HasPrefix(b, "http://") || strings.HasPrefix(b, "https://")) {
+				out = append(out, b)
+			}
+		}
+	}
+	add(strings.Split(DomesticMirror, ","))
+	if ExtraMirrors != nil {
+		add(ExtraMirrors())
+	}
+	return out
+}
+
+// IsDomestic says whether u is on a domestic mirror.
+func IsDomestic(u string) bool {
+	for _, b := range DomesticBases() {
+		if strings.HasPrefix(u, b+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // Mirrors returns CDN copies of a raw GitHub URL, which often stay
 // reachable when raw.githubusercontent.com is filtered.
 func Mirrors(u string) []string {
@@ -313,6 +410,9 @@ func Mirrors(u string) []string {
 				out = append(out, w+"/list/"+branch+"/"+path)
 			}
 		}
+		for _, b := range DomesticBases() {
+			out = append(out, b+"/list/"+branch+"/"+path)
+		}
 	}
 	return out
 }
@@ -324,15 +424,18 @@ func Mirrors(u string) []string {
 // CDN mirrors follow while the repository is public. Any other file starts
 // at u itself.
 func Addresses(u string) []string {
-	var own, rest []string
+	var own, rest, dom []string
 	for _, m := range Mirrors(u) {
-		if IsWorker(m) {
+		switch {
+		case IsWorker(m):
 			own = append(own, m)
-		} else {
+		case IsDomestic(m):
+			dom = append(dom, m)
+		default:
 			rest = append(rest, m)
 		}
 	}
-	return append(append(own, u), rest...)
+	return append(append(append(own, u), rest...), dom...)
 }
 
 // IsWorker says whether u is on the Worker, whose name is also the account

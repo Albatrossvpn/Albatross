@@ -71,6 +71,8 @@ type Source struct {
 	Delta bool `json:"delta,omitempty"`
 	// Sealed lists are encrypted with OwnKey (see Open).
 	Sealed bool `json:"sealed,omitempty"`
+	// Relay marks the sealed list of the relays inside the country (own-0.bin).
+	Relay bool `json:"relay,omitempty"`
 }
 
 // Label is a short human-readable name.
@@ -108,6 +110,27 @@ var telegramExtraList string
 //go:embed lists/snapshot.txt.gz
 var snapshotGz []byte
 
+// ownSnapshot is the sealed relay list (own-0.bin) as it was when the app
+// was built, so a fresh install during a shutdown knows the in-country
+// relays. Sealed bytes are safe to carry.
+//
+//go:embed lists/own-0.bin
+var ownSnapshot []byte
+
+// SnapshotFor is what the app carries for a source when nothing was ever
+// downloaded: the relay list for the relay source, the collector's list
+// for the plain central ones, nothing for the other sealed buckets (a
+// plaintext snapshot would not open).
+func SnapshotFor(s Source) string {
+	switch {
+	case s.Relay:
+		return string(ownSnapshot)
+	case s.Sealed:
+		return ""
+	}
+	return Snapshot()
+}
+
 // Snapshot returns the servers bundled with the app, or "".
 func Snapshot() string {
 	zr, err := gzip.NewReader(bytes.NewReader(snapshotGz))
@@ -142,6 +165,11 @@ func Central(install uint32) []Source {
 		out = append(out, Source{ID: ID(KindSubscription, u), Kind: KindSubscription, URL: u, Tier: tier, Builtin: true, Enabled: true, Central: true})
 	}
 	if ownKey() != nil {
+		// own-0.bin holds the relays inside the country (deploy/server
+		// relay mode), which every install must know: in a shutdown they
+		// are the only way out.
+		add("own-0.bin", TierPriority)
+		out[len(out)-1].Sealed, out[len(out)-1].Relay = true, true
 		// Each install reads two of the OwnBuckets parts of the project's
 		// own servers, so whoever unpacks one app learns only those, and
 		// which part gets blocked shows which part leaked.

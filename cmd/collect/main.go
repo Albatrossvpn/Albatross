@@ -375,6 +375,18 @@ func main() {
 		if err != nil || len(k) != 32 {
 			log.Fatal("OWN_KEY must be 64 hex digits")
 		}
+		// own-0.bin: the relays inside the country (OWN_RELAYS, one link
+		// per line), unsharded, so every install knows them. Written even
+		// when empty, so the fetch never fails.
+		relays := strings.Fields(os.Getenv("OWN_RELAYS"))
+		sealed, err := sources.Seal(k, strings.Join(relays, "\n")+"\n")
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(*out, "own-0.bin"), sealed, 0o644); err != nil {
+			log.Fatal(err)
+		}
+		m.Files["own-0.bin"] = len(relays)
 		// Split into sources.OwnBuckets parts; each app reads two. With
 		// fewer servers than parts, each part gets one of them.
 		links := strings.Fields(own)

@@ -24,3 +24,15 @@ else
   echo "no server list to bundle; keeping $(basename "$out")"
 fi
 rm -f "$tmp"
+
+# The relay list (own-0.bin, sealed), so a fresh install during a shutdown
+# knows the relays inside the country. Kept as it was when unreachable.
+ownout="$root/internal/sources/lists/own-0.bin"
+for url in "${urls[@]/fresh.txt/own-0.bin}"; do
+  if curl -fsSL --retry 3 --retry-delay 3 --max-time 60 "$url" -o "$tmp.own" && [ -s "$tmp.own" ]; then
+    mv "$tmp.own" "$ownout"
+    echo "bundled the relay list ($(stat -c%s "$ownout") bytes)"
+    break
+  fi
+done
+rm -f "$tmp.own"

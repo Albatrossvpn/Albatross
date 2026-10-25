@@ -49,7 +49,11 @@ func (e *Engine) refreshWarp() {
 	e.mu.Lock()
 	target := e.target
 	searching := e.wantConnect && e.conn == nil
+	national := e.reg.Regime == regimeNational
 	e.mu.Unlock()
+	if national {
+		return // WARP, Psiphon and Tor need foreign addresses
+	}
 	now := time.Now()
 	var due []*node.Node
 	methodsMu.Lock()

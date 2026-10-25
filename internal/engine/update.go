@@ -358,11 +358,26 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 	direct := directUpdateClient()
 	clients = append(clients, direct)
 	err := errors.New("no address")
+	// Mirrors inside the country serve the installers too, by name: last
+	// as usual, first where foreign addresses are cut. Plain http is fine
+	// for them alone: the file is checked against its SHA-256.
+	urls := append([]string(nil), f.URLs...)
+	var dom []string
+	for _, u := range f.URLs {
+		for _, b := range sources.DomesticBases() {
+			dom = append(dom, b+"/dl/"+filepath.Base(u))
+		}
+	}
+	if e.fetchMode() == sources.ModeDomestic {
+		urls = append(dom, urls...)
+	} else {
+		urls = append(urls, dom...)
+	}
 	for _, c := range clients {
 		isDirect := c == direct
 		c = withHeaderTimeout(c)
-		for _, u := range f.URLs {
-			if !strings.HasPrefix(u, "https://") {
+		for _, u := range urls {
+			if !strings.HasPrefix(u, "https://") && !sources.IsDomestic(u) {
 				continue
 			}
 			uc := c

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Albatrossvpn/vp/internal/sources"
 )
@@ -68,6 +69,9 @@ type Settings struct {
 	DisabledSources []string `json:"disabled_sources"`
 	// UserSources are subscriptions and channels the user added.
 	UserSources []sources.Source `json:"user_sources"`
+	// DomesticMirrors are mirror bases inside the country learned from
+	// share codes (sources.DomesticBases), beside the built-in ones.
+	DomesticMirrors []string `json:"domestic_mirrors,omitempty"`
 	// Warp also tries Cloudflare WARP, WARP in WARP and Psiphon.
 	Warp bool `json:"warp"`
 	// SpoofSNI, when set and running as administrator, sends a forged
@@ -192,4 +196,11 @@ func (s *Settings) normalize() {
 	if !known {
 		s.Protocol = ""
 	}
+	var mirrors []string
+	for _, m := range s.DomesticMirrors {
+		if m = strings.TrimRight(strings.TrimSpace(m), "/"); validMirror(m) && len(mirrors) < shareMirrorMax {
+			mirrors = append(mirrors, m)
+		}
+	}
+	s.DomesticMirrors = mirrors
 }

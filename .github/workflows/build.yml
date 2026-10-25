@@ -162,6 +162,8 @@ jobs:
           TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           RELEASE: ${{ inputs.release }}
           SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
+          # Mirrors inside the country (deploy/server MIRROR mode), comma separated.
+          DOMESTIC_MIRROR: ${{ vars.DOMESTIC_MIRROR }}
         run: |
           # Releases ask users to sign in (backend/); test builds connect
           # without an account.
@@ -216,6 +218,8 @@ jobs:
           OWN_KEY: ${{ secrets.OWN_KEY }}
           TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           SITE_DOMAIN: ${{ vars.SITE_DOMAIN }}
+          # Mirrors inside the country (deploy/server MIRROR mode), comma separated.
+          DOMESTIC_MIRROR: ${{ vars.DOMESTIC_MIRROR }}
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ALBATROSS_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ALBATROSS_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}

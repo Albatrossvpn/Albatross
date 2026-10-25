@@ -43,10 +43,12 @@ type Entry struct {
 
 // Entry flags.
 const (
-	FlagUDP   uint8 = 1 << iota // a TCP probe says nothing about it
-	FlagFresh                   // listed by a tested or Telegram source
-	FlagPlain                   // no transport encryption
-	FlagHot                     // listed in the collector's hot.txt
+	FlagUDP      uint8 = 1 << iota // a TCP probe says nothing about it
+	FlagFresh                      // listed by a tested or Telegram source
+	FlagPlain                      // no transport encryption
+	FlagHot                        // listed in the collector's hot.txt
+	FlagDomestic                   // its address is inside the country (a relay)
+	FlagOwn                        // from the project's own sealed lists
 )
 
 // HintCode returns the country hint as a string.
@@ -132,7 +134,7 @@ func (p *Pool) Add(e Entry, link string, sourceScore func(uint16) float64) bool 
 		if sourceScore != nil && sourceScore(e.Source) > sourceScore(cur.Source) {
 			cur.Source = e.Source
 		}
-		cur.Flags |= e.Flags & (FlagFresh | FlagHot)
+		cur.Flags |= e.Flags & (FlagFresh | FlagHot | FlagDomestic | FlagOwn)
 		if cur.Hint[0] == 0 {
 			cur.Hint = e.Hint
 		}
@@ -350,6 +352,31 @@ func (p *Pool) Compact(keep time.Duration, limit int) error {
 	f.Seek(0, io.SeekEnd)
 	p.f, p.w, p.size, p.entries, p.index = f, bufio.NewWriterSize(f, 1<<16), size, kept, index
 	return nil
+}
+
+// ResetDeadSince clears the backoff of candidates that failed at or after
+// min: when a shutdown lifts, their failures said nothing about them.
+func (p *Pool) ResetDeadSince(min uint32) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := 0
+	for i := range p.entries {
+		if e := &p.entries[i]; e.State == StateDead && e.LastTest >= min {
+			e.Fails, e.LastTest = 0, 0
+			n++
+		}
+	}
+	return n
+}
+
+// ClearFlag drops a flag from every candidate (a list about to be read
+// again sets it on its current members).
+func (p *Pool) ClearFlag(f uint8) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := range p.entries {
+		p.entries[i].Flags &^= f
+	}
 }
 
 // Minutes converts a time to the pool's compact timestamp.

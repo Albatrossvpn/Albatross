@@ -588,7 +588,19 @@ func (e *Engine) failover(ctx context.Context, c *connection, dead *member) bool
 		return false
 	}
 	e.logf("warn", "No ready server answered; preparing a new group in %s…", countryName(c.home))
-	e.refreshHotNow()
+	e.mu.Lock()
+	shut := e.reg.Regime.severity() >= regimeAllowlist.severity()
+	e.mu.Unlock()
+	if !shut && e.domesticAnswers() {
+		// Every foreign server dead while domestic sites answer: the
+		// signature of a national-internet shutdown. The regime is probed
+		// and the new group is built from what can still get out.
+		e.setStatus(StatusReconnecting, "Foreign servers stopped answering while domestic sites still do; checking whether this is a national-internet shutdown…")
+		e.reprobeRegime("the whole group stopped answering")
+	}
+	if !shut {
+		e.refreshHotNow() // a foreign fetch, pointless under a shutdown
+	}
 	e.rebuild(c, c.members)
 	return false
 }

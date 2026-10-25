@@ -19,7 +19,18 @@
 # (TCP, UDP, ICMP) on to the server abroad, and rewrites the server's
 # links (LINKS=<file or https address>) to this machine's address. When
 # only domestic addresses can be reached, the app connects here and this
-# machine's own link to the outside carries the traffic.
+# machine's own link to the outside carries the traffic. RELAY_TO2 names
+# a second server: a watchdog moves the forwarding over when the first
+# stops answering, and back when it returns.
+#
+# Mirror mode (MIRROR=1 MIRROR_SOURCE=https://accounts.example.com), on
+# a machine inside the country, alone or next to the relay: serves copies
+# of the app's lists, update manifest and installers on port 8081 under a
+# secret path, refreshed every ten minutes while the machine's own way out
+# lasts (and kept as they were when it does not). The address it prints
+# goes into the repository variable DOMESTIC_MIRROR (comma-separated when
+# there are several) so the apps are built knowing it; apps also pass
+# it on to each other in share codes.
 set -euo pipefail
 
 SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
@@ -31,7 +42,13 @@ REALITY_DEST="${REALITY_DEST:-www.microsoft.com}"
 # points at this server: the app then tunnels through DNS queries to any
 # resolver (Xray xdns), which is what still works when every foreign
 # address is cut. UDP 53 then serves the tunnel instead of Hysteria 2.
+# Several names are separated by commas (a foreign one and one under .ir,
+# whose delegation the domestic resolvers keep answering in a shutdown);
+# the server answers all of them and prints one link per name.
 DNS_TUNNEL="${DNS_TUNNEL:-}"
+# MIRROR_PORT is where mirror mode serves; it is not among the relay's
+# forwarded ports, so both can run on one machine.
+MIRROR_PORT="${MIRROR_PORT:-8081}"
 
 # Ports. Each protocol has its own so one being blocked leaves the rest.
 P_REALITY=443        # VLESS + Reality + Vision (TCP)
@@ -216,6 +233,9 @@ PY
 # when DNS_TUNNEL is set: VMess over mKCP inside DNS queries for the
 # tunnel name, on UDP 53. The small mKCP MTU is Xray's recommendation for
 # TXT answers.
+# dns_names prints the tunnel names as a JSON array.
+dns_names() { python3 -c 'import json,sys; print(json.dumps([n.strip() for n in sys.argv[1].split(",") if n.strip()]))' "$DNS_TUNNEL"; }
+
 dns_tunnel_inbound() {
   [ -n "$DNS_TUNNEL" ] || return 0
   cat <<EOF
@@ -225,7 +245,7 @@ dns_tunnel_inbound() {
     "streamSettings": {
       "network": "kcp",
       "kcpSettings": {"seed": "$KCP_SEED", "mtu": 900, "tti": 200, "header": {"type": "none"}},
-      "finalmask": {"udp": [{"type": "xdns", "settings": {"domains": [{"names": ["$DNS_TUNNEL"]}]}}]}
+      "finalmask": {"udp": [{"type": "xdns", "settings": {"domains": [{"names": $(dns_names)}]}}]}
     }
   }
 EOF
@@ -353,13 +373,23 @@ $(vmess_link "$DOMAIN" "$P_UPGRADE" tls Albatross-HTTPUpgrade)
 $(vmess_link "$h" "$P_HTTP" "" Albatross-HTTP80)
 $(vmess_link "$h" "$P_TCP53" "" Albatross-TCP53)
 $(vmess_link "$h" "$P_ICMP" "" Albatross-ICMP icmp)
-$([ -z "$DNS_TUNNEL" ] || vmess_link "$h" 53 "" Albatross-DNS "dns:$DNS_TUNNEL")
+$(dns_links "$h")
 anytls://$PASS@$DOMAIN:$P_ANYTLS?sni=$DOMAIN#$n-AnyTLS
 ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_SS#$n-SS2022
 ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_STLS?plugin=$(urlenc "shadow-tls;host=$REALITY_DEST;password=$STLS_PASS;version=3")#$n-ShadowTLS
 hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS&mport=$([ -n "$DNS_TUNNEL" ] || printf '%s,' "$P_HY2_DNS")$hop#$n-Hysteria2
 tuic://$UUID:$PASS@$DOMAIN:$P_TUIC?sni=$DOMAIN&alpn=h3&congestion_control=bbr#$n-TUIC
 EOF
+}
+
+# dns_links prints one DNS tunnel link per tunnel name.
+dns_links() {
+  [ -n "$DNS_TUNNEL" ] || return 0
+  local n i=0
+  for n in ${DNS_TUNNEL//,/ }; do
+    i=$((i + 1))
+    vmess_link "$1" 53 "" "Albatross-DNS$([ "$i" = 1 ] || echo "$i")" "dns:$n"
+  done
 }
 
 urlenc() { python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "$1"; }
@@ -386,32 +416,42 @@ PY
 }
 
 # relay_rules writes the forwarding rules for the relay as a script that
-# runs now and at every boot.
+# runs now and at every boot. The rules live in chains of their own, so
+# the script can be run again with a new target (the watchdog does, when
+# a server stops answering): it empties the chains and fills them for the
+# target in $OUT/relay.target.
 relay_rules() {
-  local to="$1" f="$OUT/relay.sh" p
+  local f="$OUT/relay.sh" p
   mkdir -p "$OUT"
   {
     echo '#!/bin/sh'
+    echo "to=\$(cat $OUT/relay.target)"
     echo 'sysctl -qw net.ipv4.ip_forward=1'
-    echo "iptables -t nat -C POSTROUTING -d $to -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -d $to -j MASQUERADE"
+    echo 'for t in "nat PREROUTING" "nat POSTROUTING" "filter FORWARD"; do'
+    echo '  set -- $t'
+    echo '  iptables -t "$1" -N "ALBATROSS_$2" 2>/dev/null || iptables -t "$1" -F "ALBATROSS_$2"'
+    echo '  iptables -t "$1" -C "$2" -j "ALBATROSS_$2" 2>/dev/null || iptables -t "$1" -I "$2" -j "ALBATROSS_$2"'
+    echo 'done'
+    echo 'iptables -t nat -A ALBATROSS_POSTROUTING -d "$to" -j MASQUERADE'
+    echo 'iptables -A ALBATROSS_FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT'
     for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_HTTP; do
-      echo "iptables -t nat -C PREROUTING -p tcp --dport $p -j DNAT --to-destination $to 2>/dev/null || iptables -t nat -A PREROUTING -p tcp --dport $p -j DNAT --to-destination $to"
-      echo "iptables -C FORWARD -p tcp -d $to --dport $p -j ACCEPT 2>/dev/null || iptables -I FORWARD -p tcp -d $to --dport $p -j ACCEPT"
+      echo "iptables -t nat -A ALBATROSS_PREROUTING -p tcp --dport $p -j DNAT --to-destination \"\$to\""
+      echo "iptables -A ALBATROSS_FORWARD -p tcp -d \"\$to\" --dport $p -j ACCEPT"
     done
     for p in $P_SS $P_HY2 $P_TUIC 53 $HOP_RANGE; do
-      echo "iptables -t nat -C PREROUTING -p udp --dport $p -j DNAT --to-destination $to 2>/dev/null || iptables -t nat -A PREROUTING -p udp --dport $p -j DNAT --to-destination $to"
-      echo "iptables -C FORWARD -p udp -d $to --dport $p -j ACCEPT 2>/dev/null || iptables -I FORWARD -p udp -d $to --dport $p -j ACCEPT"
+      echo "iptables -t nat -A ALBATROSS_PREROUTING -p udp --dport $p -j DNAT --to-destination \"\$to\""
+      echo "iptables -A ALBATROSS_FORWARD -p udp -d \"\$to\" --dport $p -j ACCEPT"
     done
     # The ICMP carrier: echo requests go on to the server, its replies come back.
-    echo "iptables -t nat -C PREROUTING -p icmp --icmp-type echo-request -j DNAT --to-destination $to 2>/dev/null || iptables -t nat -A PREROUTING -p icmp --icmp-type echo-request -j DNAT --to-destination $to"
-    echo "iptables -C FORWARD -p icmp -d $to -j ACCEPT 2>/dev/null || iptables -I FORWARD -p icmp -d $to -j ACCEPT"
-    echo "iptables -C FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -I FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
+    echo 'iptables -t nat -A ALBATROSS_PREROUTING -p icmp --icmp-type echo-request -j DNAT --to-destination "$to"'
+    echo 'iptables -A ALBATROSS_FORWARD -p icmp -d "$to" -j ACCEPT'
   } > "$f"
   chmod 755 "$f"
+  relay_watchdog
   if [ "$DRY_RUN" != 1 ]; then
     cat > /etc/systemd/system/albatross-relay.service <<EOF2
 [Unit]
-Description=Albatross relay: forwards every Albatross port to $to
+Description=Albatross relay: forwards every Albatross port to the server in $OUT/relay.target
 After=network-online.target
 Wants=network-online.target
 
@@ -423,9 +463,70 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 EOF2
+    cat > /etc/systemd/system/albatross-relay-watch.service <<EOF2
+[Unit]
+Description=Albatross relay watchdog: moves the forwarding to the server that answers
+
+[Service]
+Type=oneshot
+ExecStart=$OUT/relay-watch.sh
+EOF2
+    cat > /etc/systemd/system/albatross-relay-watch.timer <<EOF2
+[Unit]
+Description=Albatross relay watchdog, every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+EOF2
     systemctl daemon-reload
     systemctl enable --now albatross-relay.service
+    systemctl restart albatross-relay.service
+    systemctl enable --now albatross-relay-watch.timer
   fi
+}
+
+# relay_watchdog writes the script the timer runs: it checks that the
+# current server answers on its Reality port (three misses in a row count)
+# and, when it does not and another listed server does, points the rules
+# at that one. The first server listed is preferred and taken back as soon
+# as it answers again.
+relay_watchdog() {
+  cat > "$OUT/relay-watch.sh" <<EOF
+#!/bin/bash
+# Albatross relay watchdog (written by install.sh).
+out="$OUT"
+servers="$RELAY_TO${RELAY_TO2:+ $RELAY_TO2}"
+port=$P_REALITY
+EOF
+  cat >> "$OUT/relay-watch.sh" <<'EOF'
+cur=$(cat "$out/relay.target")
+alive() { timeout 4 bash -c "exec 3<>/dev/tcp/$1/$port" 2>/dev/null; }
+miss="$out/relay.miss"
+if alive "$cur"; then
+  echo 0 >"$miss"
+else
+  n=$(($(cat "$miss" 2>/dev/null || echo 0) + 1)); echo "$n" >"$miss"
+fi
+down=$([ "$(cat "$miss")" -ge 3 ] && echo 1 || echo 0)
+for s in $servers; do
+  if [ "$s" = "$cur" ]; then
+    # The current server is the preferred one still answering, or the
+    # best of the rest: stay.
+    [ "$down" = 1 ] || exit 0
+    continue
+  fi
+  if alive "$s"; then
+    echo "$s" >"$out/relay.target"; echo 0 >"$miss"
+    "$out/relay.sh" && logger -t albatross-relay "forwarding moved to $s"
+    exit 0
+  fi
+done
+EOF
+  chmod 755 "$OUT/relay-watch.sh"
 }
 
 # relay_links rewrites the server's links to point at this machine: the
@@ -444,6 +545,10 @@ for line in sys.stdin:
         v = json.loads(base64.b64decode(line[8:] + "=" * (-len(line[8:]) % 4)))
         if v.get("tls") and not v.get("sni"):
             v["sni"] = v["add"]
+        if not v.get("tls") and v.get("host") == v["add"]:
+            # Plain HTTP carries the address as its Host header: a foreign
+            # one would give the relay away.
+            v["host"] = here
         v["add"] = here
         v["ps"] = v.get("ps", "") + "-relay"
         print("vmess://" + base64.b64encode(json.dumps(v, separators=(",", ":")).encode()).decode())
@@ -467,8 +572,14 @@ PY
 relay_main() {
   need_root
   IP="${IP:-$(public_ip)}"
-  log "Relay $IP -> $RELAY_TO"
-  relay_rules "$RELAY_TO"
+  log "Relay $IP -> $RELAY_TO${RELAY_TO2:+ (then $RELAY_TO2)}"
+  mkdir -p "$OUT"
+  # A rerun keeps the server the watchdog settled on when it is still listed.
+  if [ ! -s "$OUT/relay.target" ] || ! printf '%s\n%s\n' "$RELAY_TO" "${RELAY_TO2:-}" | grep -qx "$(cat "$OUT/relay.target")"; then
+    echo "$RELAY_TO" >"$OUT/relay.target"
+  fi
+  relay_rules
+  [ "$DRY_RUN" = 1 ] || "$OUT/relay.sh"
   if [ -n "${LINKS:-}" ]; then
     relay_links "$IP" "$LINKS" | tee "$OUT/links.txt"
     [ "$DRY_RUN" = 1 ] || cp "$OUT/links.txt" /root/albatross-links.txt
@@ -478,7 +589,126 @@ relay_main() {
   fi
 }
 
+# mirror_main sets up the mirror: nginx serving $OUT/mirror under a secret
+# path, and a timer that refreshes the copies from the account service.
+mirror_main() {
+  need_root
+  : "${MIRROR_SOURCE:?set MIRROR_SOURCE to the account service, e.g. https://accounts.example.com}"
+  MIRROR_SOURCE="${MIRROR_SOURCE%/}"
+  IP="${IP:-$(public_ip)}"
+  mkdir -p "$OUT/mirror/list/servers" "$OUT/mirror/list/main" "$OUT/mirror/list/rules" "$OUT/mirror/dl"
+  local tf="$OUT/mirror.token"
+  [ -s "$tf" ] || { head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n' >"$tf"; chmod 600 "$tf"; }
+  local token; token="$(cat "$tf")"
+  cat >"$OUT/mirror-sync.sh" <<EOF
+#!/bin/sh
+# Albatross mirror refresh (written by install.sh): copies the lists, the
+# update manifest and the installers it names. A file that cannot be
+# fetched is kept as it was.
+src="$MIRROR_SOURCE"; out="$OUT/mirror"
+EOF
+  cat >>"$OUT/mirror-sync.sh" <<'EOF'
+get() { curl -fsSL --retry 2 --max-time 120 "$src/$1" -o "$out/$1.tmp" && mv "$out/$1.tmp" "$out/$1" || rm -f "$out/$1.tmp"; }
+for f in hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt \
+         tor.json meta.json crowd.json iran.json own-0.bin own-1.bin own-2.bin own-3.bin own-4.bin; do
+  get "list/servers/$f"
+done
+get list/rules/ads.srs
+get list/main/update.json
+# The installers the manifest names, by file name, fetched when their
+# checksum changed.
+python3 - "$out" <<'PY'
+import hashlib, json, os, subprocess, sys
+out = sys.argv[1]
+try:
+    m = json.load(open(os.path.join(out, "list/main/update.json")))
+except Exception:
+    sys.exit(0)
+def digest(p):
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+for f in (m.get("files") or {}).values():
+    urls = f.get("urls") or []
+    want = (f.get("sha256") or "").lower()
+    if not urls or not want:
+        continue
+    name = os.path.basename(urls[0].split("?")[0])
+    if not name or name.startswith("."):
+        continue
+    dst = os.path.join(out, "dl", name)
+    if os.path.exists(dst) and digest(dst) == want:
+        continue
+    for u in urls:
+        if subprocess.call(["curl", "-fsSL", "--retry", "2", "--max-time", "900", u, "-o", dst + ".tmp"]) == 0 and digest(dst + ".tmp") == want:
+            os.replace(dst + ".tmp", dst)
+            break
+    try:
+        os.remove(dst + ".tmp")
+    except OSError:
+        pass
+PY
+EOF
+  chmod 755 "$OUT/mirror-sync.sh"
+  cat >"$OUT/mirror-nginx.conf" <<EOF
+server {
+    listen $MIRROR_PORT default_server;
+    server_name _;
+    access_log off;
+    # Everything but the secret path is nothing.
+    location / { return 404; }
+    location /$token/ {
+        alias $OUT/mirror/;
+        autoindex off;
+        types { application/octet-stream bin srs apk exe; application/json json; text/plain txt; }
+        default_type application/octet-stream;
+        add_header Cache-Control "no-cache";
+    }
+}
+EOF
+  if [ "$DRY_RUN" != 1 ]; then
+    apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nginx curl python3 iptables-persistent >/dev/null
+    rm -f /etc/nginx/sites-enabled/default
+    cp "$OUT/mirror-nginx.conf" /etc/nginx/sites-enabled/albatross-mirror.conf
+    nginx -t && systemctl enable --now nginx && systemctl reload nginx
+    iptables -C INPUT -p tcp --dport "$MIRROR_PORT" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$MIRROR_PORT" -j ACCEPT
+    netfilter-persistent save >/dev/null 2>&1 || true
+    cat >/etc/systemd/system/albatross-mirror.service <<EOF2
+[Unit]
+Description=Albatross mirror refresh
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$OUT/mirror-sync.sh
+EOF2
+    cat >/etc/systemd/system/albatross-mirror.timer <<EOF2
+[Unit]
+Description=Albatross mirror refresh, every ten minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=10min
+
+[Install]
+WantedBy=timers.target
+EOF2
+    systemctl daemon-reload
+    systemctl enable --now albatross-mirror.timer
+    systemctl start albatross-mirror.service || true
+  fi
+  echo "http://$IP:$MIRROR_PORT/$token" | tee "$OUT/mirror.txt"
+  log "Done. Mirror address above (also in $OUT/mirror.txt): put it in the repository variable DOMESTIC_MIRROR."
+}
+
 main() {
+  if [ "${MIRROR:-0}" = 1 ]; then
+    mirror_main
+    [ -n "${RELAY_TO:-}" ] || return
+  fi
   if [ -n "${RELAY_TO:-}" ]; then
     relay_main
     return

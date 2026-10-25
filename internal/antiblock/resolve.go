@@ -67,6 +67,9 @@ type Resolver struct {
 	// Client returns the HTTP client for DoH (through the VPN when
 	// connected).
 	Client func() *http.Client
+	// DoH, when set, says whether the foreign DoH resolvers are worth
+	// asking now (false while the network cuts foreign addresses).
+	DoH func() bool
 
 	mu     sync.Mutex
 	cache  map[string]cached
@@ -171,7 +174,7 @@ func (r *Resolver) lookup(ctx context.Context, host string) Result {
 }
 
 func (r *Resolver) doh(ctx context.Context, host string) string {
-	if r.Client == nil {
+	if r.Client == nil || (r.DoH != nil && !r.DoH()) {
 		return ""
 	}
 	c := r.Client()

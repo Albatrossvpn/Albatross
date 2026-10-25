@@ -54,7 +54,10 @@ session travels inside echo packets, slowly, but it connects.
    `ns1.<domain>` pointing at the machine's IP (in Cloudflare: DNS only, grey
    cloud) and an `NS` record `t.<domain>` pointing at `ns1.<domain>`, then
    run the script with `DNS_TUNNEL=t.<domain>` (it is remembered). UDP 53
-   then serves the tunnel instead of Hysteria 2.
+   then serves the tunnel instead of Hysteria 2. Several names go in one
+   comma-separated list: a name under `.ir` next to the foreign one keeps
+   the tunnel reachable when the domestic resolvers only answer for
+   domestic delegations; the script prints one link per name.
    It installs sing-box and Xray, makes the keys (kept in
    `/etc/albatross/secrets.env`, so running it again keeps the links),
    gets the certificate, opens the machine's own firewall, turns on BBR and
@@ -89,3 +92,34 @@ at every boot, and prints the server's links rewritten to its own address
 next to the server's: the app tests both and uses whichever answers, so
 the relay is only used when the server itself cannot be reached. The
 relay sees only encrypted traffic to the server.
+
+The relay's links go into the repository secret `OWN_RELAYS` (one per
+line): the collector publishes them unsharded in `own-0.bin`, which every
+install reads and the build bundles, so a phone installed during a
+shutdown already knows the relays. `RELAY_TO2=<second server>` adds a
+watchdog: every minute it checks that the current server answers on port
+443 and, after three misses, moves the forwarding to the other one (and
+back to the first when it answers again). Running the script again keeps
+the settled choice.
+
+## A mirror inside the country
+
+The lists, the update manifest and the installers normally come from the
+account service and GitHub's CDN mirrors, all foreign. A mirror on a
+domestic machine (the relay's, or another) keeps the apps supplied during
+a shutdown:
+
+```sh
+MIRROR=1 MIRROR_SOURCE=https://<account service> bash install.sh
+```
+
+It installs nginx on port 8081 serving the copies under a secret path,
+refreshed every ten minutes while the machine's own way out lasts (a file
+that cannot be fetched stays as it was), and prints the mirror's address
+(`http://<ip>:8081/<token>`, also in `/etc/albatross/mirror.txt`). Put
+that address in the repository variable `DOMESTIC_MIRROR` (several,
+comma-separated) and build: the apps then try it first whenever foreign
+addresses are cut, and pass it on in share codes. Plain http is enough:
+the lists are sealed and the installers are checked against the signed
+manifest's SHA-256. `MIRROR=1` combines with `RELAY_TO` on one machine;
+8081 is not among the forwarded ports.
