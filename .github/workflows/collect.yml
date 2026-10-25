@@ -60,6 +60,10 @@ jobs:
           if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
             npx wrangler r2 object get albatross-files/list/servers/crowd.json --file "$RUNNER_TEMP/crowd.json" --remote || echo "::warning::no crowd.json yet"
             npx wrangler r2 object get albatross-files/list/servers/iran.json --file "$RUNNER_TEMP/iran.json" --remote || echo "::warning::no report from a tester inside the country yet (deploy/tester)"
+            # Sources found by the weekly discovery (discover.yml).
+            for f in sources.txt channels.txt; do
+              npx wrangler r2 object get "albatross-files/list/servers/$f" --file "$RUNNER_TEMP/$f" --remote || echo "::warning::no discovered $f yet"
+            done
           fi
       - name: Cores
         env:
@@ -81,7 +85,11 @@ jobs:
           # Raises globalping's quota for the check from inside Iran.
           GLOBALPING_TOKEN: ${{ secrets.GLOBALPING_TOKEN }}
         # 5,000 real tests keep a run near ten minutes.
-        run: go run ./cmd/collect -prev prev -real 5000 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" -out "$RUNNER_TEMP/servers"
+        run: |
+          go run ./cmd/collect -prev prev -real 5000 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" \
+            -sources "$RUNNER_TEMP/sources.txt" -channels "$RUNNER_TEMP/channels.txt" -out "$RUNNER_TEMP/servers"
+          # The discovered lists travel with the servers branch too.
+          for f in sources.txt channels.txt; do [ -f "$RUNNER_TEMP/$f" ] && cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/servers/$f"; done; true
       # The collector itself, for a tester inside the country (deploy/tester).
       - name: Build the collector for the tester
         run: |
