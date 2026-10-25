@@ -71,10 +71,10 @@ jobs:
         # it negotiates ECH per server where it works (internal/engine/ech.go
         # falls back to a plain handshake) and reaches the edge over TCP.
         # Zone settings need a token with Zone Settings: Edit; the secret
-        # CLOUDFLARE_ZONE_TOKEN holds one when the deploy token has not.
+        # CLOUDFLARE_API_TOKEN_2 holds one when the deploy token has not.
         continue-on-error: true
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_ZONE_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_2 || secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           rc=0
           api="https://api.cloudflare.com/client/v4/zones"
