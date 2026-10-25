@@ -244,3 +244,30 @@ func TestParseOutlineJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSSH(t *testing.T) {
+	n := mustParse(t, "ssh://alice:s3cret@ssh.example.net:2222?hk=ssh-ed25519%20AAAAC3#Free%20SSH")
+	if n.Proto != "ssh" || n.Username != "alice" || n.Password != "s3cret" || n.Server != "ssh.example.net" || n.Port != 2222 || n.HostKey != "ssh-ed25519 AAAAC3" || n.Name != "Free SSH" {
+		t.Fatalf("bad node: %+v", n)
+	}
+	if n.Engine() != EngineSingBox {
+		t.Fatalf("ssh runs on sing-box, got %v", n.Engine())
+	}
+	out, _ := n.SingBox("out", SingBoxOptions{})
+	if out["type"] != "ssh" || out["user"] != "alice" || out["password"] != "s3cret" || out["server_port"] != 2222 {
+		t.Fatalf("bad outbound: %v", out)
+	}
+	if hk, _ := out["host_key"].([]string); len(hk) != 1 {
+		t.Fatalf("host key missing: %v", out)
+	}
+	d := mustParse(t, "ssh://bob:pw@1.2.3.4")
+	if d.Port != 22 {
+		t.Fatalf("default port 22, got %d", d.Port)
+	}
+	if _, err := ParseLink("ssh://nouser@1.2.3.4:22"); err == nil {
+		t.Fatal("a link without a password must not parse")
+	}
+	if _, err := ParseLink("ssh://1.2.3.4:22"); err == nil {
+		t.Fatal("a link without a user must not parse")
+	}
+}

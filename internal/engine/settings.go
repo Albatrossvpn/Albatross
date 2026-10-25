@@ -94,7 +94,7 @@ func ProtocolChoices() []ProtocolChoice {
 	return []ProtocolChoice{
 		{"", "Automatic"}, {"vless", "VLESS"}, {"vmess", "VMess"}, {"trojan", "Trojan"},
 		{"shadowsocks", "Shadowsocks"}, {"hysteria2", "Hysteria 2"}, {"tuic", "TUIC"},
-		{"anytls", "AnyTLS"}, {"wireguard", "WireGuard"}, {"openvpn", "OpenVPN"},
+		{"anytls", "AnyTLS"}, {"wireguard", "WireGuard"}, {"openvpn", "OpenVPN"}, {"ssh", "SSH"},
 	}
 }
 
