@@ -1,13 +1,12 @@
 // Fills the download buttons from the release manifest the apps read, so the
 // links always point at the newest version and show its checksum. Without it
-// (or while it loads) the buttons lead to the releases page.
+// (or while it loads) the buttons lead to the list of all downloads on this
+// site. Visitors are never sent to GitHub.
 (function () {
   "use strict";
   document.querySelectorAll("[data-year]").forEach(function (e) { e.textContent = String(new Date().getFullYear()); });
   var urls = [
-    "/update.json",
-    "https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json",
-    "https://cdn.jsdelivr.net/gh/Albatrossvpn/Albatross@main/update.json"
+    "/update.json"
   ];
   function tryNext(i) {
     if (i >= urls.length) return;
@@ -18,7 +17,9 @@
     Object.keys(m.files || {}).forEach(function (key) {
       var f = m.files[key];
       var a = document.querySelector('[data-dl="' + key + '"]');
-      if (a && f.urls && f.urls[0]) a.href = f.urls[0];
+      // The site's own copy (or the account service's); never a GitHub address.
+      var own = (f.urls || []).filter(function (u) { return u.indexOf("https://github.com/") !== 0; })[0];
+      if (a && own) a.href = own;
       var s = document.querySelector('[data-sha="' + key + '"]');
       if (s && f.sha256) s.textContent = "SHA-256 " + f.sha256;
     });
