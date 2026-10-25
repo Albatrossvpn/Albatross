@@ -394,11 +394,30 @@ func TestDirectMethod(t *testing.T) {
 		t.Fatalf("direct runs on sing-box, got %v", n.Engine())
 	}
 	out, ep := n.SingBox("d", SingBoxOptions{})
-	if ep || out["type"] != "direct" || out["tls_fragment"] != true || out["tls_record_fragment"] != true {
+	// sing-box refuses fragment fields on a direct outbound; they are
+	// route options (core.FragmentRules).
+	if _, bad := out["tls_fragment"]; ep || out["type"] != "direct" || bad || out["tls_record_fragment"] != nil {
 		t.Fatalf("bad outbound: %v", out)
 	}
 	back, err := ParseLink(n.Link())
 	if err != nil || back.Proto != "direct" || back.Key() != n.Key() {
 		t.Fatalf("round trip: %v %+v", err, back)
+	}
+}
+
+// 3x-ui writes genuine Shadowsocks links with type=tcp: they stay
+// Shadowsocks; a userinfo that is no Shadowsocks credential is Trojan.
+func TestSSWithTypeStaysShadowsocks(t *testing.T) {
+	n, err := ParseLink("ss://Y2hhY2hhMjAtaWV0Zi1wb2x5MTMwNTpTZWM0ZXRQYXNz@1.2.3.4:443?type=tcp#name")
+	if err != nil || n.Proto != "shadowsocks" || n.Method != "chacha20-ietf-poly1305" || n.Password != "Sec4etPass" {
+		t.Fatalf("3x-ui link: %v %+v", err, n)
+	}
+	n, err = ParseLink("ss://2022-blake3-aes-128-gcm:YWJjZGVmZ2hpamtsbW5vcA%3D%3D@1.2.3.4:8443?type=tcp&security=none#m")
+	if err != nil || n.Proto != "shadowsocks" {
+		t.Fatalf("plain 2022 link: %v %+v", err, n)
+	}
+	n, err = ParseLink("ss://secretpass@example.com:443?type=ws&security=tls&sni=example.com#t")
+	if err != nil || n.Proto != "trojan" || n.Password != "secretpass" {
+		t.Fatalf("mislabelled trojan: %v %+v", err, n)
 	}
 }

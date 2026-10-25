@@ -120,6 +120,15 @@ jobs:
           git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" rules
         env:
           GH_TOKEN: ${{ github.token }}
+      # wrangler, to put the files straight into the project's own storage
+      # (deploy/files/lib.sh).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
       - name: Publish to the project's own storage
         # The apps read the list from there first; its source form and
         # licences go with it, as its licence asks.
@@ -127,4 +136,6 @@ jobs:
         env:
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: bash deploy/files/publish-lists.sh "$(bash build/account-url.sh | cut -d, -f1)" rules out/ads.srs out/ads.json out/README.md out/LICENSE-GPL-3.0.txt out/LICENSE-AGPL-3.0.txt

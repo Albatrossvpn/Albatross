@@ -325,12 +325,19 @@ func TestLastResortOnlyWhenNothingElse(t *testing.T) {
 	now := time.Now()
 	d := node.Direct()
 	e.good[node.Key64(d.Key())] = &Server{Key: d.Key(), Link: d.Link(), Name: d.Name, Proto: "direct", Country: "IR", Delay: 5, LastOK: now, TestedAt: now}
-	g := e.pickGroup("", "", nil, groupSize)
-	if len(g) != 1 || g[0].Proto != "direct" {
-		t.Fatalf("with nothing else the serverless method must be offered, got %v", g)
+	// pickGroup never hands out the serverless method itself: connectLoop
+	// offers it only after fresh and recent servers have been tried.
+	if g := e.pickGroup("", "", nil, groupSize); len(g) != 0 {
+		t.Fatalf("with nothing else pickGroup must be empty, got %v", g)
 	}
-	if g := e.pickGroup("US", "", nil, groupSize); len(g) != 1 || g[0].Proto != "direct" {
-		t.Fatalf("a location with no server falls back to it too, got %v", g)
+	if g := e.pickGroup("US", "", nil, groupSize); len(g) != 0 {
+		t.Fatalf("a location with no server is empty too, got %v", g)
+	}
+	if g := e.lastResort(nil); len(g) != 1 || g[0].Proto != "direct" {
+		t.Fatalf("the last resort must offer the serverless method, got %v", g)
+	}
+	if g := e.lastResort(map[string]bool{d.Key(): true}); len(g) != 0 {
+		t.Fatalf("an excluded last resort must not come back, got %v", g)
 	}
 	link := "vless://b831381d-6324-4d53-ad4f-8cda48b30811@de.example:443?security=tls&type=tcp#de"
 	n, _ := node.ParseLink(link)

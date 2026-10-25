@@ -38,6 +38,10 @@ type Server struct {
 	PinReason string    `json:"pin_reason,omitempty"` // "dns" (poisoned) or "clean" (Cloudflare edge)
 	Plain     bool      `json:"plain,omitempty"`
 	Source    string    `json:"source,omitempty"`
+	// Domestic says the server's address is inside the country (a relay);
+	// Own that it came from the project's own sealed lists.
+	Domestic bool `json:"domestic,omitempty"`
+	Own      bool `json:"own,omitempty"`
 
 	key64 uint64
 	node  *node.Node
@@ -99,6 +103,43 @@ func (s *Server) rank(now time.Time) float64 {
 		r += 150
 	}
 	return r
+}
+
+// nationalCapable reports whether the server can work where only domestic
+// addresses answer, by what the regime probe measured: a relay inside the
+// country, the DNS tunnel through a resolver that still recurses, the ping
+// carrier while ping gets out, UDP 53 while it does.
+func (s *Server) nationalCapable(p regimeProbe) bool {
+	if s.Domestic {
+		return true
+	}
+	n := s.Node()
+	if n == nil {
+		return false
+	}
+	switch {
+	case n.DNSTunnel():
+		return p.Recursion
+	case n.ICMP():
+		return p.ICMP != "no"
+	case n.Port == 53 && n.UDPBased():
+		return p.UDP53
+	}
+	return false
+}
+
+// rankIn is rank with the regime in mind: where foreign addresses are cut
+// or nearly so, the servers that can still get out come far ahead.
+func (s *Server) rankIn(now time.Time, r regime, p regimeProbe) float64 {
+	v := s.rank(now)
+	if r.severity() >= regimeAllowlist.severity() {
+		if s.nationalCapable(p) {
+			v -= 3000
+		} else if r == regimeNational {
+			v += 2000
+		}
+	}
+	return v
 }
 
 func (e *Engine) loadServers() {
@@ -208,7 +249,8 @@ func (e *Engine) loadStates() map[uint64][2]uint32 {
 			break
 		}
 		last := binary.LittleEndian.Uint32(rec[8:])
-		if last < cutoff {
+		// Rejected servers are remembered for good (pool.StateRejected).
+		if last < cutoff && rec[12] != pool.StateRejected {
 			continue
 		}
 		out[binary.LittleEndian.Uint64(rec[0:])] = [2]uint32{last, uint32(rec[12]) | uint32(rec[13])<<8}

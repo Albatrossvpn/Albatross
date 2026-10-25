@@ -116,6 +116,25 @@ public final class TunnelService extends VpnService {
             b.addDisallowedApplication(getPackageName());
         } catch (PackageManager.NameNotFoundException ignored) {
         }
+        // The country's own apps (banks, payments, taxis, shops) refuse a
+        // foreign address or stop when a VPN is on: they keep their direct
+        // line ("Local apps outside the VPN").
+        String prefixes = Mobile.bypassApps();
+        if (!prefixes.isEmpty()) {
+            String[] ps = prefixes.split(",");
+            for (android.content.pm.ApplicationInfo ai : getPackageManager().getInstalledApplications(0)) {
+                if (ai.packageName.equals(getPackageName())) continue;
+                for (String p : ps) {
+                    if (ai.packageName.startsWith(p)) {
+                        try {
+                            b.addDisallowedApplication(ai.packageName);
+                        } catch (PackageManager.NameNotFoundException ignored) {
+                        }
+                        break;
+                    }
+                }
+            }
+        }
         if (lan && Build.VERSION.SDK_INT >= 33) {
             // The local network stays outside the tunnel, so casting to a TV
             // and finding devices (mDNS, SSDP) keep working.

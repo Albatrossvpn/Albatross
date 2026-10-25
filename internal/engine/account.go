@@ -168,10 +168,17 @@ func (e *Engine) viaServer(ctx context.Context, call func(context.Context) error
 			list = e.recentServers("", 6, tried)
 		}
 		var nodes []*node.Node
+		// Each server runs as it was tested: with a fragmented ClientHello
+		// where it needs one.
+		frag := map[*node.Node]bool{}
+		e.mu.Lock()
+		fragOn := e.settings.Fragment == "on"
+		e.mu.Unlock()
 		for _, s := range list {
 			tried[s.Key] = true
 			if n := s.runNode(); n != nil {
 				nodes = append(nodes, n)
+				frag[n] = s.Fragment || fragOn
 			}
 		}
 		if len(nodes) == 0 {
@@ -183,11 +190,17 @@ func (e *Engine) viaServer(ctx context.Context, call func(context.Context) error
 			continue
 		}
 		e.logf("info", "Signing in through a server.")
-		e.tester.Through(ctx, "signin", nodes, func(proxy *url.URL) bool {
+		// A copy set up for this device (the shared tester lacks the
+		// phone's settings, without which sing-box exits at once there).
+		t := e.newTester()
+		t.FragmentFor = func(n *node.Node) bool { return frag[n] }
+		if terr := t.Through(ctx, "signin", nodes, func(proxy *url.URL) bool {
 			hc := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy), TLSHandshakeTimeout: 15 * time.Second}}
 			err = call(account.WithClient(ctx, hc))
 			return !errors.Is(err, account.ErrUnreachable) && !account.Busy(err)
-		})
+		}); terr != nil && ctx.Err() == nil {
+			e.logf("warn", "Servers for signing in did not start: %v", terr)
+		}
 		if !errors.Is(err, account.ErrUnreachable) && !account.Busy(err) {
 			return err
 		}
@@ -337,4 +350,18 @@ func (e *Engine) stopForAccount(message string) {
 		e.Disconnect()
 		e.setStatus(StatusIdle, message)
 	}()
+}
+
+// applyGrace lengthens the account's grace while the network cuts foreign
+// addresses: the service cannot be reached by anyone then.
+func (e *Engine) applyGrace(shut bool) {
+	if e.acct == nil {
+		return
+	}
+	if shut {
+		e.acct.SetGrace(account.GraceCut)
+		e.logf("info", "The account service cannot be reached from this network; the account stays usable for 14 days.")
+	} else {
+		e.acct.SetGrace(account.Grace)
+	}
 }

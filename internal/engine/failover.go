@@ -65,8 +65,11 @@ func speedPlan(mobile bool) (every time.Duration, size int) {
 	return 3 * time.Minute, 2 << 20
 }
 
-// healthURL is what the core fetches through a member to check it.
-const healthURL = "https://www.gstatic.com/generate_204"
+// healthURL is what the core fetches through a member to check it: plain
+// HTTP, so the time measured is the server's handshake and one round trip,
+// not a TLS handshake with the site on top; its answer carries nothing to
+// read. Reading the user's traffic is caught by tester.Intercepted instead.
+const healthURL = "http://www.gstatic.com/generate_204"
 
 // clashClient talks to the cores' local Clash API. It never uses a proxy.
 var clashClient = &http.Client{Transport: &http.Transport{
@@ -314,7 +317,8 @@ func (e *Engine) noteResult(c *connection, m *member, delay int, ok bool) {
 		if m.delay > 0 && m.alive {
 			delay = (m.delay + delay) / 2
 		}
-		m.alive, m.delay, m.fails = true, delay, 0
+		// A member caught forging certificates stays out, whatever its delay.
+		m.alive, m.delay, m.fails = !m.forged, delay, 0
 	} else {
 		m.alive = false
 		m.fails++
@@ -584,7 +588,19 @@ func (e *Engine) failover(ctx context.Context, c *connection, dead *member) bool
 		return false
 	}
 	e.logf("warn", "No ready server answered; preparing a new group in %s…", countryName(c.home))
-	e.refreshHotNow()
+	e.mu.Lock()
+	shut := e.reg.Regime.severity() >= regimeAllowlist.severity()
+	e.mu.Unlock()
+	if !shut && e.domesticAnswers() {
+		// Every foreign server dead while domestic sites answer: the
+		// signature of a national-internet shutdown. The regime is probed
+		// and the new group is built from what can still get out.
+		e.setStatus(StatusReconnecting, "Foreign servers stopped answering while domestic sites still do; checking whether this is a national-internet shutdown…")
+		e.reprobeRegime("the whole group stopped answering")
+	}
+	if !shut {
+		e.refreshHotNow() // a foreign fetch, pointless under a shutdown
+	}
 	e.rebuild(c, c.members)
 	return false
 }
@@ -677,6 +693,13 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 	// servers keep failing does not restart the core over and over. The
 	// restart drops connections that apps keep open while quiet (messaging,
 	// notifications), so it waits for a longer quiet spell than "idle".
+	// The serverless last resort gives way as soon as a real server works:
+	// no waiting for a quiet spell or the group to age.
+	if c.lastResort() && len(e.bestServers(c.country, 1, nil)) > 0 {
+		e.logf("info", "A server works again; leaving the serverless fallback.")
+		e.rebuild(c, nil)
+		return false
+	}
 	if c.idleFor(quietFor) && time.Since(c.started) > refreshAfter && e.groupStale(c) {
 		e.logf("info", "Refreshing backup servers in %s…", countryName(c.home))
 		e.rebuild(c, nil)
@@ -710,7 +733,7 @@ func (c *connection) faster() *member {
 	}
 	var best *member
 	for _, m := range c.members {
-		if m == c.active || !m.alive || m.country != c.active.country {
+		if m == c.active || !m.alive || m.forged || m.country != c.active.country {
 			continue
 		}
 		if m.speedKnown() && m.speed < usable {
@@ -733,7 +756,7 @@ func (e *Engine) groupStale(c *connection) bool {
 	inGroup := map[string]bool{}
 	for _, m := range c.members {
 		inGroup[m.server.Key] = true
-		if m.alive {
+		if m.alive && !m.forged {
 			live++
 		}
 	}
@@ -1013,4 +1036,20 @@ func (m *member) tagOr(other *member) string {
 		return other.tag + "\x00" // never live, so the caller moves it
 	}
 	return m.tag
+}
+
+// lastResort says whether the connection runs only on the serverless
+// fallback (node.Direct), which no real server should wait behind.
+func (c *connection) lastResort() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.members) == 0 {
+		return false
+	}
+	for _, m := range c.members {
+		if m.server.Proto != "direct" {
+			return false
+		}
+	}
+	return true
 }

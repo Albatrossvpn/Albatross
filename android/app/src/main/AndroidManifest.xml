@@ -10,6 +10,11 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Updates download inside the app and open the system installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- "Local apps outside the VPN" finds the country's own apps among the
+         installed ones (Android 11 and later hide them otherwise). -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
     <!-- "Override GPS location": Android offers only apps that ask for this
          under Developer options, "Select mock location app". -->
     <uses-permission

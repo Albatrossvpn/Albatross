@@ -80,7 +80,7 @@ func readLines(path string) []string {
 // refreshHot re-tests the servers listed in path (the last hot.txt and the
 // top of fresh.txt) and writes the ones that still work to hot.txt. It runs
 // between full collections so the list the apps try first stays current.
-func refreshHot(path, out string, n int) {
+func refreshHot(path, out string, n int, crowd crowdStats, report, tester string) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatal(err)
@@ -93,22 +93,31 @@ func refreshHot(path, out string, n int) {
 			continue
 		}
 		seen[nd.Key()] = true
-		e := &entry{link: l, proto: nd.Proto}
+		e := &entry{link: l, proto: nd.Proto, key: node.Key64(nd.Key())}
 		if !nd.UDPBased() {
 			e.endpoint = nd.Endpoint()
 		}
 		list = append(list, e)
 	}
-	passed, _ := realTest(list, n)
+	first, tested := realTest(list, n)
+	passed := confirm(first)
+	if report != "" {
+		writeReport(report, tester, first, passed, tested)
+	}
 	sort.SliceStable(list, func(i, j int) bool {
-		di, oki := passed[list[i]]
-		dj, okj := passed[list[j]]
-		if oki != okj {
-			return oki
-		}
-		return di < dj
+		_, oki := passed[list[i]]
+		_, okj := passed[list[j]]
+		return oki && !okj
 	})
-	hot := hotList(list, passed, hotSize)
+	var ok []*entry
+	for _, e := range list {
+		if _, good := passed[e]; good {
+			ok = append(ok, e)
+		}
+	}
+	crowdOrder(ok, passed, crowd)
+	copy(list, ok)
+	hot := hotList(list, passed, hotSize, crowd)
 	checkIran(hot)
 	if len(hot) == 0 {
 		log.Print("nothing passed; hot.txt left as it was")
@@ -134,6 +143,7 @@ type entry struct {
 	pop      int
 	endpoint string // "" for UDP-based servers
 	proto    string
+	key      uint64 // node.Key64 of the server's key
 }
 
 type meta struct {
@@ -176,13 +186,38 @@ func main() {
 	real := flag.Int("real", 8000, "connect through this many of the fresh servers with the cores in SING_BOX and XRAY; 0 skips")
 	prev := flag.String("prev", "", "directory holding the last published lists, for new.txt")
 	hotFrom := flag.String("hot-from", "", "only rewrite hot.txt in -out from the servers listed in this file that pass the real test")
+	crowdPath := flag.String("crowd", "", "comma-separated reports about servers from inside the country (list/servers/crowd.json, iran.json): confirmed servers first in hot.txt, failing ones left out")
+	report := flag.String("report", "", "with -hot-from: write this run's results in the report form to this file (for a tester inside the country, deploy/tester)")
+	tester := flag.String("tester", "", "the tester's name in -report (for example iran)")
+	discover := flag.String("discover", "", "find more sources (GitHub search with GITHUB_TOKEN, mentions in known lists and channels) and write sources.txt, channels.txt and discover.json to this directory; nothing else is done")
+	discoverPrev := flag.String("discover-prev", "", "with -discover: the directory holding the previous run's sources.txt, channels.txt and discover.json, checked again and kept while they answer")
+	discoverMinutes := flag.Int("discover-minutes", 40, "with -discover: stop looking after this many minutes and write what was found")
+	extraSubs := flag.String("sources", "", "a discovered sources.txt to read beside the shipped lists")
+	extraTG := flag.String("channels", "", "a discovered channels.txt to read beside the shipped lists")
 	flag.Parse()
+	if *discover != "" {
+		runDiscover(context.Background(), *discover, *discoverPrev, os.Getenv("GITHUB_TOKEN"), *discoverMinutes)
+		return
+	}
+	crowd := loadCrowd(*crowdPath)
 	if *hotFrom != "" {
-		refreshHot(*hotFrom, *out, *real)
+		refreshHot(*hotFrom, *out, *real, crowd, *report, *tester)
 		return
 	}
 
 	srcs := sources.Collected()
+	// Discovered sources (-discover) come after the shipped ones; the
+	// shipped list wins when both name a source.
+	known := map[string]bool{}
+	for _, s := range srcs {
+		known[s.ID] = true
+	}
+	for _, s := range append(extraSources(*extraSubs, sources.KindSubscription), extraSources(*extraTG, sources.KindTelegram)...) {
+		if !known[s.ID] {
+			known[s.ID] = true
+			srcs = append(srcs, s)
+		}
+	}
 	if *limit > 0 && *limit < len(srcs) {
 		srcs = srcs[:*limit]
 	}
@@ -251,7 +286,7 @@ func main() {
 				k := node.Key64(n.Key())
 				e := byKey[k]
 				if e == nil {
-					e = &entry{link: n.Link(), proto: n.Proto}
+					e = &entry{link: n.Link(), proto: n.Proto, key: k}
 					if !n.UDPBased() {
 						e.endpoint = n.Endpoint()
 					}
@@ -308,7 +343,8 @@ func main() {
 		}
 	}
 	passed, tested := realTest(freshE, *real)
-	freshE, failedE := orderFresh(freshE, passed, tested)
+	passed = confirm(passed)
+	freshE, failedE := orderFresh(freshE, passed, tested, crowd)
 	restE = append(failedE, restE...)
 	fresh, rest := links(freshE), links(restE)
 
@@ -324,7 +360,7 @@ func main() {
 		m.Files[name] = len(links)
 	}
 	write("fresh.txt", fresh)
-	hot := hotList(freshE, passed, hotSize)
+	hot := hotList(freshE, passed, hotSize, crowd)
 	m.IranChecked, m.IranOpen = checkIran(hot)
 	write("hot.txt", links(hot))
 	if *prev != "" {
@@ -341,6 +377,18 @@ func main() {
 		if err != nil || len(k) != 32 {
 			log.Fatal("OWN_KEY must be 64 hex digits")
 		}
+		// own-0.bin: the relays inside the country (OWN_RELAYS, one link
+		// per line), unsharded, so every install knows them. Written even
+		// when empty, so the fetch never fails.
+		relays := strings.Fields(os.Getenv("OWN_RELAYS"))
+		sealed, err := sources.Seal(k, strings.Join(relays, "\n")+"\n")
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(*out, "own-0.bin"), sealed, 0o644); err != nil {
+			log.Fatal(err)
+		}
+		m.Files["own-0.bin"] = len(relays)
 		// Split into sources.OwnBuckets parts; each app reads two. With
 		// fewer servers than parts, each part gets one of them.
 		links := strings.Fields(own)

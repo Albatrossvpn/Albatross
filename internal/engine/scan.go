@@ -37,6 +37,10 @@ var protoCodes = map[string]uint8{
 // refreshEvery says how often each kind of source is downloaded again.
 func refreshEvery(s sources.Source, mobile bool) time.Duration {
 	switch {
+	case s.Relay:
+		// The relays inside the country: the list that matters most in a
+		// shutdown, small, and served from inside too.
+		return 30 * time.Minute
 	case (s.Hot || s.Delta) && mobile:
 		return 30 * time.Minute
 	case s.Hot || s.Delta:
@@ -76,10 +80,12 @@ func (e *Engine) refreshLoop() {
 			e.refreshRules()
 			go e.checkUpdate()
 		}
-		e.refreshDue()
+		// The network's regime first: a storm of doomed fetches must not
+		// delay noticing that foreign addresses are cut.
 		if e.regimeDue() {
 			e.updateRegime()
 		}
+		e.refreshDue()
 		e.updateHelp()
 		if time.Since(e.crowdAt) > crowdEvery && e.proxyClient() != nil {
 			// Reports go only through the VPN (crowdReport).
@@ -125,7 +131,7 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 			for i := range jobs {
 				text, ok := e.cachedText(srcs[i])
 				if !ok && srcs[i].Central && srcs[i].Tier == sources.TierPriority {
-					text, ok = sources.Snapshot(), true
+					text, ok = sources.SnapshotFor(srcs[i]), true
 				}
 				if ok && text != "" {
 					e.ingest(i, srcs[i], text, states)
@@ -207,10 +213,14 @@ func (e *Engine) refreshSources(central bool) {
 	e.mu.Lock()
 	var due []int
 	now := time.Now()
-	skipBuiltin := !central && e.centralOK(now)
+	shut := e.reg.Regime.severity() >= regimeAllowlist.severity() && !connected
+	skipBuiltin := !central && (e.centralOK(now) || shut)
 	for i, s := range e.srcs {
 		if !s.Enabled || s.Central != central || (skipBuiltin && s.Builtin) {
 			continue
+		}
+		if shut && s.Kind == sources.KindTelegram {
+			continue // a foreign site; nothing to fetch there now
 		}
 		st := e.srcStats[i]
 		if s.Kind == sources.KindTelegram && !connected && st.LastError != "" && now.Sub(st.Fetched) < 3*time.Hour {
@@ -257,8 +267,13 @@ func (e *Engine) refreshSources(central bool) {
 					e.scan.SourcesOK++
 				} else {
 					st.LastError = res.Err.Error()
-					// Retry failed sources sooner than a full interval.
-					st.Fetched = time.Now().Add(-refreshEvery(srcs[i], e.opt.Mobile) + 10*time.Minute)
+					// Retry failed sources sooner than a full interval; not
+					// so soon while foreign addresses are cut.
+					retry := 10 * time.Minute
+					if shut {
+						retry = 30 * time.Minute
+					}
+					st.Fetched = time.Now().Add(-refreshEvery(srcs[i], e.opt.Mobile) + retry)
 				}
 				e.mu.Unlock()
 				if added > 0 {
@@ -325,6 +340,10 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 	if s.Sealed {
 		text = sources.Open(text)
 	}
+	if s.Hot && states == nil {
+		// The mark means "in the current hot list", not last week's.
+		e.pool.ClearFlag(pool.FlagHot)
+	}
 	parseSlots <- struct{}{}
 	defer func() { <-parseSlots }()
 	scores := e.sourceScores()
@@ -359,6 +378,12 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 		}
 		if s.Hot {
 			en.Flags |= pool.FlagHot
+		}
+		if s.Sealed {
+			en.Flags |= pool.FlagOwn
+		}
+		if e.domesticEndpoint(n) {
+			en.Flags |= pool.FlagDomestic
 		}
 		if isPlain(n) {
 			en.Flags |= pool.FlagPlain
@@ -477,10 +502,16 @@ func (e *Engine) pickBatch(size int) []candidate {
 	wantProto := protoCodes[protocol] // 0 = any
 	haveXray := e.bin.Xray != ""
 	targetHasServers := false
+	// Protocols with a working server now; the others are stocked first,
+	// so every protocol the user may choose has a server ready.
+	stocked := map[uint8]bool{}
 	var recheck []*Server
 	for _, s := range e.good {
 		if !s.matches(protocol) {
 			continue
+		}
+		if s.usable(now) {
+			stocked[protoCodes[s.Proto]] = true
 		}
 		if target != "" && s.Country == target && s.usable(now) {
 			targetHasServers = true
@@ -490,7 +521,16 @@ func (e *Engine) pickBatch(size int) []candidate {
 		if (target == "" || s.Country == target) && s.usable(now) {
 			limit = 10 * time.Minute
 		}
+		if (s.Own || s.Domestic) && e.wantConnect && e.conn == nil {
+			limit = 2 * time.Minute
+		}
 		if e.conn != nil && e.conn.uses(s.Key) {
+			if s.Proto == "wireguard" || s.Proto == "warpplus" {
+				// A second session with the same key would take the
+				// peer's session away from the live tunnel; the
+				// connection's own checks cover it.
+				continue
+			}
 			limit = 5 * time.Minute
 		}
 		if age > limit && now.Sub(s.LastOK) < 7*24*time.Hour {
@@ -502,16 +542,29 @@ func (e *Engine) pickBatch(size int) []candidate {
 	learned := e.net.snapshot()
 	e.mu.Lock()
 	reg, regProbe := e.reg.Regime, e.reg.Probe
+	searching := e.wantConnect && e.conn == nil
 	e.mu.Unlock()
+	shut := reg.severity() >= regimeAllowlist.severity()
 	var out []candidate
 	rand.Shuffle(len(recheck), func(i, j int) { recheck[i], recheck[j] = recheck[j], recheck[i] })
-	maxRecheck := size / 3
+	// The project's own servers and the relays inside the country come
+	// first, not capped: they are the way out when nothing else is.
+	rest := recheck[:0]
 	for _, s := range recheck {
+		if s.Own || s.Domestic {
+			out = append(out, candidate{key: s.key64, link: s.Link, source: -1, good: s})
+		} else {
+			rest = append(rest, s)
+		}
+	}
+	maxRecheck := len(out) + size/3
+	for _, s := range rest {
 		if len(out) >= maxRecheck {
 			break
 		}
 		out = append(out, candidate{key: s.key64, link: s.Link, source: -1, good: s})
 	}
+	_ = searching
 	k := size - len(out)
 	var h minHeap
 	var tb [2]byte
@@ -538,6 +591,10 @@ func (e *Engine) pickBatch(size int) []candidate {
 		if en.Engine == 2 && !haveXray {
 			return
 		}
+		if shut && !canGetOut(reg, regProbe, en) {
+			// Only what the regime leaves a path for is worth a test.
+			return
+		}
 		sc := 0.0
 		if int(en.Source) < len(scores) {
 			sc = scores[en.Source] * 100
@@ -556,6 +613,9 @@ func (e *Engine) pickBatch(size int) []candidate {
 		}
 		if en.State == pool.StateDead {
 			sc -= 40
+		}
+		if wantProto == 0 && en.Proto != 0 && !stocked[en.Proto] {
+			sc += 60
 		}
 		if tb[0] != 0 {
 			if en.Hint == tb {
@@ -598,6 +658,11 @@ func (e *Engine) scanPace() (size, chunk int, pause time.Duration) {
 		size = 600
 	case "low":
 		size = 120
+	}
+	if e.reg.Regime.severity() >= regimeAllowlist.severity() && e.conn == nil {
+		// Only a few candidates can work; the rest would be tested at
+		// full pace for nothing, battery and data for nothing.
+		return size, chunk, 30 * time.Second
 	}
 	if e.wantConnect && e.conn == nil {
 		return max(size, 300), chunk, 0
@@ -683,11 +748,24 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 		n, err := node.ParseLink(c.link)
 		if err != nil || n.Engine() == node.EngineNone {
 			e.pool.Update(c.key, func(p *pool.Entry) { p.State = pool.StateRejected })
+			e.forget(c.key)
 			continue
 		}
 		c.node = n
-		if c.good != nil && c.good.PinIP != "" {
-			c.node, c.pin, c.pinReason = antiblock.Pin(n, c.good.PinIP), c.good.PinIP, c.good.PinReason
+		if c.good != nil {
+			// As it last worked: ECH, the pinned address and the split edge.
+			if c.good.ECH {
+				nn := *n
+				nn.TryECH = true
+				c.node, c.ech = &nn, true
+			}
+			if c.good.PinIP != "" {
+				c.node, c.pin, c.pinReason = antiblock.Pin(c.node, c.good.PinIP), c.good.PinIP, c.good.PinReason
+				if c.good.SplitIP != "" {
+					c.split = c.good.SplitIP
+					c.node.SplitDownload = c.split
+				}
+			}
 		}
 		cands = append(cands, c)
 	}
@@ -710,13 +788,28 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 		nodes[i] = cands[i].node
 	}
 	probes := e.tester.TCPProbe(e.ctx, nodes)
+	if e.ctx.Err() != nil {
+		return // probes cut off by shutdown say nothing about the servers
+	}
 	var live []candidate
+	probed, answered := 0, 0
 	for i, c := range cands {
+		if !c.node.UDPBased() && !c.node.NoEndpoint() {
+			probed++
+			if probes[i] >= 0 {
+				answered++
+			}
+		}
 		if probes[i] < 0 && !(cleanOn && antiblock.CDNFrontable(c.node)) {
 			e.recordFail(c, "unreachable")
 			continue
 		}
 		live = append(live, c)
+	}
+	if probed >= 50 && answered == 0 {
+		// Not one of fifty addresses answered: the network, not the
+		// servers, has changed.
+		e.reprobeRegime("no server address answers")
 	}
 	if e.ctx.Err() != nil {
 		return
@@ -733,7 +826,7 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 			continue
 		}
 		c.setHello(learned.pickHello(c.frag, rand.Float64))
-		if frag == "auto" && !c.frag && c.node.Security == "tls" && learned.fragHelps(c.fp()) {
+		if frag == "auto" && !c.frag && c.node.Security == "tls" && c.node.Engine() == node.EngineSingBox && learned.fragHelps(c.fp()) {
 			c.frag = true
 		}
 	}
@@ -755,23 +848,30 @@ func (e *Engine) runBatch(batch []candidate, chunk int) {
 		r := c
 		changed := false
 		// The second try changes the ClientHello: fragmented, unless that
-		// clearly does worse on this network, else another browser's.
+		// clearly does worse on this network, else another browser's. ECH
+		// and fragmentation are sing-box's; Xray nodes get another
+		// browser's hello, which Xray does honour.
+		sb := r.node.Engine() == node.EngineSingBox
 		switch {
-		case !r.ech && r.node.Security == "tls" && r.node.ECH == "" && antiblock.CDNFrontable(r.node):
+		case sb && !r.ech && r.node.Security == "tls" && r.node.ECH == "" && antiblock.CDNFrontable(r.node):
 			// Behind a CDN, ECH hides the name SNI filtering looks for.
 			n := *r.node
 			n.TryECH = true
 			r.node, r.ech, changed = &n, true, true
-		case frag == "auto" && !r.frag && r.node.Security == "tls" && !r.node.UDPBased() && (r.hello == 0 || !learned.fragHurts(r.fp())):
+		case sb && frag == "auto" && !r.frag && r.node.Security == "tls" && !r.node.UDPBased() && (r.hello == 0 || !learned.fragHurts(r.fp())):
 			r.frag, changed = true, true
 		case r.hello != 0:
 			r.setHello(learned.nextHello(r.fp(), r.frag))
 			changed = true
 		}
-		if cleanOn && len(clean) > 0 && antiblock.CDNFrontable(c.node) && r.pinReason != "clean" {
+		// A clean edge address is tried too, or a fresh one when the address
+		// a server was pinned to is no longer among this network's clean
+		// ones (another network, or the address got blocked). The pin goes
+		// on r.node, so the ClientHello or ECH change above is kept.
+		if cleanOn && len(clean) > 0 && antiblock.CDNFrontable(r.node) && (r.pinReason != "clean" || !inClean(clean, r.pin)) {
 			i := rand.Intn(min(len(clean), 3))
 			ip := clean[i].IP
-			r.node, r.pin, r.pinReason, changed = antiblock.Pin(c.node, ip), ip, "clean", true
+			r.node, r.pin, r.pinReason, changed = antiblock.Pin(r.node, ip), ip, "clean", true
 			if r.node.Transport == "xhttp" && len(clean) > 1 {
 				r.split = clean[(i+1)%min(len(clean), 4)].IP
 				r.node.SplitDownload = r.split
@@ -823,7 +923,7 @@ func (e *Engine) unpoison(cands []candidate) []candidate {
 			switch {
 			case r.Poisoned && r.IP != "":
 				out[i].node, out[i].pin, out[i].pinReason = antiblock.Pin(c.node, r.IP), r.IP, "dns"
-			case r.Poisoned:
+			case r.Poisoned && e.fetchMode() == sources.ModeNormal:
 				drop[i] = true
 			}
 		}(i, c)
@@ -864,6 +964,7 @@ func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidat
 			switch {
 			case r.Rejected:
 				e.pool.Update(c.key, func(p *pool.Entry) { p.State = pool.StateRejected; p.LastTest = pool.Minutes(time.Now()) })
+				e.forget(c.key)
 			case r.OK:
 				e.recordOK(c, r)
 			case r.Tampered && e.distrust(c.key, c.node.Name):
@@ -915,11 +1016,15 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	e.net.record(protoCodes[n.Proto], n.Style(), true)
 	e.net.recordHello(c.helloCode(), true)
 	e.net.recordNet(n.NetID(), true)
+	e.net.recordServer(c.key, true)
+	own := false
 	e.pool.Update(c.key, func(p *pool.Entry) {
 		p.State = pool.StateOK
 		p.Fails = 0
 		p.LastTest = pool.Minutes(now)
+		own = p.Flags&pool.FlagOwn != 0
 	})
+	domestic := e.domesticEndpoint(n)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.httpsOK = now
@@ -950,6 +1055,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	s.OKCount++
 	s.Fragment = c.frag
 	s.ECH = c.ech
+	s.Domestic, s.Own = domestic, own || s.Own
 	s.Hello = ""
 	if c.hello != 0 {
 		s.Hello = helloFPs[c.fp()]
@@ -961,16 +1067,31 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 
 func (e *Engine) recordFail(c candidate, reason string) {
 	now := time.Now()
+	// Where foreign addresses are cut, a foreign server's failure says
+	// nothing about it: nothing is learned from it and it keeps its
+	// chances for when they come back. Only what the regime leaves a path
+	// for is judged.
+	e.mu.Lock()
+	reg, p := e.reg.Regime, e.reg.Probe
+	e.mu.Unlock()
+	frozen := false
 	if en, ok := e.pool.Get(c.key); ok {
-		e.net.record(en.Proto, en.Style, false)
-		e.net.recordNet(en.Net, false)
+		frozen = reg.severity() >= regimeAllowlist.severity() && !p.Foreign && !canGetOut(reg, p, &en)
+		if !frozen {
+			e.net.record(en.Proto, en.Style, false)
+			e.net.recordNet(en.Net, false)
+			e.net.recordServer(c.key, false)
+		}
 	}
 	e.pool.Update(c.key, func(p *pool.Entry) {
+		p.LastTest = pool.Minutes(now)
+		if frozen {
+			return
+		}
 		p.State = pool.StateDead
 		if p.Fails < 255 {
 			p.Fails++
 		}
-		p.LastTest = pool.Minutes(now)
 	})
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -979,13 +1100,49 @@ func (e *Engine) recordFail(c candidate, reason string) {
 	}
 	if s := e.good[c.key]; s != nil {
 		s.TestedAt = now
-		s.Fails++
-		if s.Fails >= 6 && now.Sub(s.LastOK) > 24*time.Hour {
-			delete(e.good, c.key)
+		if !frozen {
+			s.Fails++
+			if s.Fails >= 6 && now.Sub(s.LastOK) > 24*time.Hour {
+				delete(e.good, c.key)
+			}
 		}
 	}
 	e.scan.Tested++
 	e.scan.recent = append(e.scan.recent, now)
+}
+
+// canGetOut reports whether a candidate has a path where the regime cuts
+// foreign addresses: a relay inside the country, the DNS tunnel while the
+// resolver recurses, the ping carrier while ping gets out, UDP 53 while it
+// is open, and under the allowlist CDN-fronted TLS servers too.
+func canGetOut(r regime, p regimeProbe, en *pool.Entry) bool {
+	switch {
+	case en.Flags&pool.FlagDomestic != 0:
+		return true
+	case node.StyleDNSTunnel(en.Style):
+		return p.Recursion
+	case node.StyleICMP(en.Style):
+		return p.ICMP != "no"
+	case node.StyleDNSPort(en.Style):
+		return p.UDP53
+	}
+	if r == regimeAllowlist {
+		wire, port := node.StyleWire(en.Style), node.StylePort(en.Style)
+		tr := (wire - 1) % 8
+		return (tr == 1 || tr == 2 || tr == 4 || tr == 5) && port >= 1 && port <= 3
+	}
+	return false
+}
+
+// forget drops a known server the core refuses for good (or whose link
+// no longer parses), so it is neither offered nor rechecked again.
+func (e *Engine) forget(key uint64) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if s := e.good[key]; s != nil {
+		delete(e.good, key)
+		e.logf("info", "Server %s is no longer usable here and was removed.", s.Name)
+	}
 }
 
 // statsLoop keeps derived numbers fresh and saves state regularly.
@@ -1023,4 +1180,14 @@ func (e *Engine) statsLoop() {
 		e.scan.recent = e.scan.recent[i:]
 		e.mu.Unlock()
 	}
+}
+
+// inClean says whether ip is one of the clean edge addresses found here.
+func inClean(clean []antiblock.CleanIP, ip string) bool {
+	for _, c := range clean {
+		if c.IP == ip {
+			return true
+		}
+	}
+	return false
 }

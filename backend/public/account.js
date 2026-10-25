@@ -34,10 +34,58 @@ function signedOut() {
   $("#logout").classList.add("hidden");
 }
 
+// Connection apps for Apple devices: where to get each, and the address
+// that adds a subscription to it with one tap.
+const APPS = [
+  { id: "v2box", name: "V2Box", store: "https://apps.apple.com/app/id6446814690",
+    link: (u, n) => `v2box://install-sub?url=${encodeURIComponent(u)}&name=${encodeURIComponent(n)}` },
+  { id: "streisand", name: "Streisand", store: "https://apps.apple.com/app/id6450534064", link: (u) => `streisand://import/${u}` },
+  { id: "shadowrocket", name: "Shadowrocket", store: "https://apps.apple.com/app/id932747118",
+    link: (u, n) => `shadowrocket://add/sub://${btoa(u).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}?remark=${encodeURIComponent(n)}` },
+  { id: "hiddify", name: "Hiddify", store: "https://apps.apple.com/app/id6596777532", link: (u, n) => `hiddify://import/${u}#${encodeURIComponent(n)}` },
+  { id: "singbox", name: "sing-box", store: "https://apps.apple.com/app/id6673731168",
+    link: (u, n) => `sing-box://import-remote-profile?url=${encodeURIComponent(u)}#${encodeURIComponent(n)}` },
+];
+let app = APPS.find((a) => a.id === localStorage.getItem("app")) || APPS[0];
+let sub;
+
+function renderApps() {
+  $("#apps").innerHTML = APPS.map((a) => `<button type="button" data-app="${a.id}" class="${a === app ? "on" : ""}">${a.name}</button>`).join("");
+  $("#app-get").innerHTML = `Not installed yet? <a href="${app.store}" target="_blank" rel="noopener">Get ${esc(app.name)} from the App Store</a>, then come back here.`;
+}
+
+function renderSub() {
+  const el = $("#sub-list");
+  if (!sub) return;
+  const brand = sub.brand || "Albatross";
+  const rows = [];
+  const row = (label, count, choice) => {
+    const u = sub.url + (choice ? "?c=" + choice : "");
+    const name = `${brand} ${label.replace(/^\S+\s/, "")}`;
+    rows.push(`<div class="row between wrap-row"><span>${esc(label)} <span class="muted small">· ${count} ${count === 1 ? "server" : "servers"}</span></span><a class="btn small primary" href="${esc(app.link(u, name))}">Add to ${esc(app.name)}</a></div>`);
+  };
+  row("All servers", sub.servers + sub.edge, "");
+  if (sub.edge) row(`${brand} Edge`, sub.edge, "edge");
+  for (const c of sub.countries) row(`${c.flag} ${c.name}`, c.count, c.code);
+  el.innerHTML = rows.join("") || `<span class="muted note">No servers are listed right now. Try again in a few minutes.</span>`;
+  $("#sub-url").textContent = sub.url;
+}
+
+async function loadSub() {
+  try {
+    sub = await api("GET", "sub", { token });
+    renderSub();
+  } catch (e) {
+    $("#sub-list").innerHTML = `<span class="muted note">${esc(e.message)}</span>`;
+  }
+}
+
 function render(a) {
   $("#auth").classList.add("hidden");
   $("#dash").classList.remove("hidden");
   $("#logout").classList.remove("hidden");
+  if (a.allowed) loadSub();
+  else $("#sub-list").innerHTML = `<span class="muted note">The servers are available while the account can connect.</span>`;
   $("#d-name").textContent = a.username;
   const pill = $("#d-status");
   pill.textContent = a.allowed ? "Active" : { disabled: "Off", expired: "Expired" }[a.reason] || "Limit reached";
@@ -120,5 +168,27 @@ for (const [k, label] of [["windows", "Windows"], ["android", "Android"]]) {
   if (url) dl.insertAdjacentHTML("beforeend", `<a class="btn" href="${esc(url)}">Download for ${label}</a>`);
 }
 if (!dl.children.length) dl.innerHTML = `<span class="muted note">Downloads will appear here.</span>`;
+
+// Apple devices: the page can live on the Home Screen like an app.
+const apple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && "ontouchend" in document;
+$("#a2hs").classList.toggle("hidden", !apple || window.navigator.standalone === true || matchMedia("(display-mode: standalone)").matches);
+renderApps();
+$("#apps").addEventListener("click", (e) => {
+  const id = e.target.dataset.app;
+  if (!id) return;
+  app = APPS.find((a) => a.id === id) || app;
+  localStorage.setItem("app", app.id);
+  renderApps();
+  renderSub();
+});
+$("#sub-copy").addEventListener("click", async () => {
+  if (!sub) return;
+  try {
+    await navigator.clipboard.writeText(sub.url);
+    toast("Copied.");
+  } catch {
+    toast("Select the address and copy it.");
+  }
+});
 
 if (token) load();

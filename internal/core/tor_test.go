@@ -96,3 +96,26 @@ func TestTorConfigAndroid(t *testing.T) {
 		}
 	}
 }
+
+// An install folder with a space in its name (C:\Program Files, a user
+// name with a space) must not split the transport's path.
+func TestTorConfigSpaceInPath(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "Program Files", "Albatross")
+	torBin := filepath.Join(dir, "tor")
+	pt := filepath.Join(dir, torPTDir)
+	os.MkdirAll(pt, 0o755)
+	exe := ""
+	if runtime.GOOS == "windows" {
+		exe = ".exe"
+	}
+	os.WriteFile(filepath.Join(pt, "lyrebird"+exe), []byte("x"), 0o755)
+	os.WriteFile(filepath.Join(pt, torPTFile), []byte(`{"pluggableTransports": {"lyrebird": "ClientTransportPlugin obfs4 exec ${pt_path}lyrebird"}, "bridges": {}}`), 0o644)
+	rc, err := TorConfig(torBin, 9050, filepath.Join(dir, "data"), []byte(`{"obfs4":["obfs4 192.0.2.1:443 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA cert=x iat-mode=0"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "ClientTransportPlugin obfs4 exec " + filepath.Join(torPTDir, "lyrebird"+exe)
+	if !strings.Contains(rc, want) || !strings.Contains(rc, "Bridge obfs4 192.0.2.1:443") {
+		t.Fatalf("torrc:\n%s", rc)
+	}
+}

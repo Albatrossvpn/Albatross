@@ -55,6 +55,9 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 		out["password"] = n.Password
 		if n.Plugin == "shadow-tls" {
 			out["detour"] = tag + "-stls"
+			// The ShadowTLS detour carries TCP only; UDP (QUIC, games,
+			// calls) rides inside it as sing-box servers allow.
+			out["udp_over_tcp"] = true
 		} else if n.Plugin != "" {
 			out["plugin"] = n.Plugin
 			if n.PluginOpts != "" {
@@ -65,16 +68,17 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 		out["type"] = "hysteria2"
 		n.sbServerHop(out)
 		out["password"] = n.Password
-		if n.Obfs == "salamander" || n.ObfsPassword != "" {
+		if n.ObfsPassword != "" {
 			out["obfs"] = map[string]any{"type": "salamander", "password": n.ObfsPassword}
 		}
 		up, down := n.UpMbps, n.DownMbps
-		if up <= 0 && down <= 0 && o.LineMbps > 0 {
+		if up <= 0 && down <= 0 && o.LineMbps >= 10 {
 			// A little above what was measured, since the measurement went
 			// through servers slower than the line; upload is rarely
-			// measured and usually far slower.
-			down = min(max(o.LineMbps*5/4, 10), 1000)
-			up = min(max(o.LineMbps/4, 5), 50)
+			// measured and usually far slower. Brutal never backs off, so
+			// a slow line keeps BBR instead of being flooded.
+			down = min(o.LineMbps*5/4, 1000)
+			up = min(max(o.LineMbps/4, 1), 50)
 		}
 		if up > 0 {
 			out["up_mbps"] = up
@@ -121,11 +125,10 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 		out["password"] = n.Password
 		out["tls"] = n.sbTLS(o)
 	case "direct":
-		// Nothing to connect to: the ClientHello of every TLS connection is
-		// split so a name-based filter does not see the name whole.
+		// Nothing to connect to. The ClientHello of every TLS connection is
+		// split so a name-based filter does not see the name whole; sing-box
+		// takes that as a route option (core.Set.Direct), not here.
 		out["type"] = "direct"
-		out["tls_fragment"] = true
-		out["tls_record_fragment"] = true
 		return out, false
 	case "ssh":
 		out["type"] = "ssh"
@@ -276,7 +279,9 @@ func (n *Node) sbTLS(o SingBoxOptions) map[string]any {
 	if fp != "" {
 		t["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
 	}
-	if o.Spoof != "" && n.Security == "tls" {
+	if sni := n.serverName(); o.Spoof != "" && n.Security == "tls" && sni != "" && net.ParseIP(sni) == nil && !strings.EqualFold(sni, o.Spoof) {
+		// sing-box refuses spoof on a hello without a name, and a name
+		// equal to the spoof name gains nothing.
 		t["spoof"] = o.Spoof
 	}
 	if n.Security == "reality" {

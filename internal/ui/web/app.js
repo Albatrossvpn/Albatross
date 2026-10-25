@@ -126,6 +126,13 @@ function render(s) {
     "Lets people in censored countries reach Tor through this computer. Runs only outside Iran on an open network.";
   $("notice").classList.toggle("hidden", !s.notice);
   $("notice").textContent = s.notice || "";
+  var networkText = {
+    national: "Only addresses inside the country can be reached right now. Using the relays and carriers that still get out; a share code from a friend who is connected helps.",
+    allowlist: "Only a few foreign services are reachable right now. Connections go through what still passes.",
+    offline: "No network. Will connect as soon as there is one."
+  }[s.network];
+  $("network").classList.toggle("hidden", !networkText || s.status === "connected");
+  $("network").textContent = networkText || "";
 
   var u = s.update;
   // A required update the app downloads itself blocks the page only once
@@ -389,7 +396,7 @@ each(document.querySelectorAll(".tabs button"), function (b) { b.addEventListene
 // ---------- Settings ----------
 
 var settingsBusy = false;
-var toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats", "allow_lan", "override_gps"];
+var toggles = ["secure_only", "block_ads", "auto_connect", "start_with_system", "help_others", "share_stats", "allow_lan", "override_gps", "bypass_apps"];
 
 function fillSettings(st) {
   toggles.forEach(function (k) { $("set-" + k).checked = !!st[k]; });

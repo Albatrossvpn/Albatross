@@ -77,7 +77,10 @@ func main() {
 			go quit()
 			return nil
 		},
-		Sources:   only,
+		Sources: only,
+		// The network's own resolver, for the DNS tunnel: the one address
+		// that keeps answering when foreign ones are cut.
+		LocalDNS:  platform.SystemDNS(),
 		DataDir:   dir,
 		AppDirs:   []string{platform.ExeDir()},
 		ExeName:   platform.ExeName(),

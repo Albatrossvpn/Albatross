@@ -54,13 +54,22 @@ type ptConfig struct {
 // needed. Each success must be paired with a releaseTor.
 func (r *Runtime) acquireTor(ctx context.Context) (int, error) {
 	t := &r.tor
+	// The bridge list may be a network fetch: outside the lock, so a
+	// Disconnect waiting to release tor is not held behind it.
+	var extra []byte
+	t.mu.Lock()
+	needStart := t.p == nil || t.p.Exited()
+	t.mu.Unlock()
+	if needStart && r.TorBridges != nil {
+		extra = r.TorBridges()
+	}
 	t.mu.Lock()
 	if t.idle != nil {
 		t.idle.Stop()
 		t.idle = nil
 	}
 	if t.p == nil || t.p.Exited() {
-		if err := r.startTorLocked(); err != nil {
+		if err := r.startTorLocked(extra); err != nil {
 			t.mu.Unlock()
 			return 0, err
 		}
@@ -118,7 +127,7 @@ func (r *Runtime) StopTor() {
 	p.Stop()
 }
 
-func (r *Runtime) startTorLocked() error {
+func (r *Runtime) startTorLocked(extra []byte) error {
 	if r.Bin.Tor == "" {
 		return fmt.Errorf("tor is not installed")
 	}
@@ -129,10 +138,6 @@ func (r *Runtime) startTorLocked() error {
 	ports, err := FreePorts(1)
 	if err != nil {
 		return err
-	}
-	var extra []byte
-	if r.TorBridges != nil {
-		extra = r.TorBridges()
 	}
 	rc, err := TorConfig(r.Bin.Tor, ports[0], filepath.Join(dir, "data"), extra)
 	if err != nil {
@@ -210,8 +215,10 @@ func TorConfig(torBin string, port int, dataDir string, extra []byte) (string, e
 	n := 0
 	for _, key := range torKeys(cfg.Bridges, more) {
 		for _, br := range append(append([]string(nil), more[key]...), cfg.Bridges[key]...) {
-			br = strings.TrimSpace(br)
+			// Rebuilt from its fields: a line from a remote list can carry
+			// no newline, and so no directive of its own, into torrc.
 			f := strings.Fields(br)
+			br = strings.Join(f, " ")
 			if len(f) < 2 || seen[br] || !have[f[0]] {
 				continue
 			}
@@ -292,13 +299,14 @@ func loadPTConfig(torBin string) (*ptConfig, string) {
 // not unquote them, so the path is written relative to tor's folder (tor
 // runs there), which keeps spaces in the install path out of it.
 func ptLine(s, dir, torDir string) (string, bool) {
-	s = strings.ReplaceAll(s, "${pt_path}", dir+string(filepath.Separator))
+	// The line is split before the path goes in: an install folder with a
+	// space in its name must not split the path itself.
 	f := strings.Fields(s)
 	// ClientTransportPlugin <names> exec <path> [args]
 	if len(f) < 4 || f[0] != "ClientTransportPlugin" || f[2] != "exec" {
 		return "", false
 	}
-	exe := f[3]
+	exe := strings.ReplaceAll(f[3], "${pt_path}", dir+string(filepath.Separator))
 	if !filepath.IsAbs(exe) {
 		exe = filepath.Join(dir, exe)
 	}

@@ -36,6 +36,31 @@ type crowdCounts struct {
 	Style [32]crowdRate `json:"style"`
 	Hello [16]crowdRate `json:"hello"`
 	Port  [8]crowdRate  `json:"port"`
+	// Servers counts tests per server (the hex of its 64-bit key, which
+	// names no address), so the collector learns which of its servers work
+	// from users' networks, not only from its own test abroad.
+	Servers map[string]*crowdRate `json:"servers,omitempty"`
+}
+
+// crowdServers bounds how many servers one report names.
+const crowdServers = 300
+
+// addServer counts one test of a server; new servers are dropped once the
+// report is full, so a report stays small.
+func (c *crowdCounts) addServer(key uint64, ok bool) {
+	k := strconv.FormatUint(key, 16)
+	r := c.Servers[k]
+	if r == nil {
+		if len(c.Servers) >= crowdServers {
+			return
+		}
+		if c.Servers == nil {
+			c.Servers = map[string]*crowdRate{}
+		}
+		r = &crowdRate{}
+		c.Servers[k] = r
+	}
+	r.add(ok)
 }
 
 // crowdRate is a plain count of passes and tests.
@@ -68,6 +93,18 @@ func (c *crowdCounts) report(asn uint32) map[string]any {
 	put("style", c.Style[:])
 	put("hello", c.Hello[:])
 	put("port", c.Port[:])
+	if len(c.Servers) > 0 {
+		list := make([][]any, 0, len(c.Servers))
+		for k, r := range c.Servers {
+			if r[1] > 0 {
+				list = append(list, []any{k, r[0], r[1]})
+			}
+		}
+		if len(list) > 0 {
+			out["servers"] = list
+			has = true
+		}
+	}
 	if !has {
 		return nil
 	}
@@ -194,6 +231,20 @@ func (c *crowdCounts) minus(body map[string]any) {
 				x := &rs[r[0]]
 				x[0] -= min(x[0], r[1])
 				x[1] -= min(x[1], r[2])
+			}
+		}
+	}
+	if list, ok := body["servers"].([][]any); ok {
+		for _, r := range list {
+			k, _ := r[0].(string)
+			if x := c.Servers[k]; x != nil {
+				okN, _ := r[1].(uint32)
+				n, _ := r[2].(uint32)
+				x[0] -= min(x[0], okN)
+				x[1] -= min(x[1], n)
+				if x[1] == 0 {
+					delete(c.Servers, k)
+				}
 			}
 		}
 	}

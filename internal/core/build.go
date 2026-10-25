@@ -30,6 +30,31 @@ type Set struct {
 	xrayIdx   []int    // node index per Xray node
 	Xray      map[string]any
 	XrayProbe string
+	// Direct lists the tags of serverless nodes (node.Direct), whose TLS
+	// connections must be fragmented by a route option (FragmentRules).
+	Direct []string
+}
+
+// FragmentRules are the route rules that split the TLS ClientHello of the
+// serverless nodes' connections (sing-box allows tls_fragment as a route
+// option only, and not together with tls_record_fragment). match adds the
+// rule's condition for one tag, for configs that route by user; nil makes
+// the rule apply to everything, for a live connection on that node alone.
+func FragmentRules(s *Set, match func(tag string) map[string]any) []any {
+	var out []any
+	for _, tag := range s.Direct {
+		r := map[string]any{}
+		if match != nil {
+			r = match(tag)
+		}
+		r["action"] = "route-options"
+		r["tls_fragment"] = true
+		out = append(out, r)
+		if match == nil {
+			break
+		}
+	}
+	return out
 }
 
 // BuildOptions tune generated outbounds.
@@ -72,6 +97,9 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 			frag = frag || o.FragmentFor(n)
 		}
 		obj, ep := n.SingBox(tag, node.SingBoxOptions{Fragment: frag, Spoof: o.Spoof, LineMbps: o.LineMbps})
+		if n.Proto == "direct" {
+			s.Direct = append(s.Direct, tag)
+		}
 		if ep {
 			s.Endpoints = append(s.Endpoints, obj)
 			s.epIdx = append(s.epIdx, i)
@@ -161,6 +189,7 @@ type Running struct {
 	Rejected []*node.Node // configs a core refused
 	Failed   []*node.Node // warp-plus methods that could not connect
 	release  func()       // lets go of the shared tor
+	released sync.Once
 }
 
 // Stop stops every core.
@@ -175,10 +204,13 @@ func (r *Running) Stop() {
 	for _, p := range r.WarpPlus {
 		p.Stop()
 	}
-	if r.release != nil {
-		r.release()
-		r.release = nil
-	}
+	// Once, whatever the number of concurrent Stop calls: a second release
+	// would let go of tor for another holder.
+	r.released.Do(func() {
+		if r.release != nil {
+			r.release()
+		}
+	})
 }
 
 // Alive reports whether every core is still running.
@@ -202,7 +234,10 @@ type Runtime struct {
 }
 
 var (
-	sbIndexRe   = regexp.MustCompile(`(outbounds?|endpoints?)\[(\d+)\]`)
+	sbIndexRe = regexp.MustCompile(`(outbounds?|endpoints?)\[(\d+)\]`)
+	// At start and post-start, sing-box names the outbound by tag instead:
+	// "start outbound/vless[n5]: ..."; tags are "n" + the node's index.
+	sbTagRe     = regexp.MustCompile(`(?:outbound|endpoint)/[\w-]+\[n(\d+)(?:-stls)?\]`)
 	xrayIndexRe = regexp.MustCompile(`outbound config with tag x(\d+)`)
 )
 
@@ -243,8 +278,10 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 		var xr *Process
 		if set.Xray != nil {
 			if r.Bin.Xray == "" {
-				// Without Xray those nodes cannot run at all.
-				nodes, rejected = dropIdx(nodes, set.xrayIdx, rejected)
+				// Without Xray those nodes cannot run now. That says nothing
+				// about the servers (an antivirus may have taken the file),
+				// so they fail this time instead of being refused for good.
+				nodes, failed = dropIdx(nodes, set.xrayIdx, failed)
 				continue
 			}
 			xr, err = r.start(ctx, "xray", name, set.Xray, set.XrayProbe, o.OnLine, func(path string) []string {
@@ -256,7 +293,10 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 						i, _ := strconv.Atoi(m[1])
 						nodes, rejected = dropIdx(nodes, []int{i}, rejected)
 					} else {
-						nodes, rejected = dropIdx(nodes, set.xrayIdx, rejected)
+						// Xray quit for a reason that names no config (a port
+						// taken meanwhile, the phone killing it): a failure of
+						// this run, not of every server in it.
+						nodes, failed = dropIdx(nodes, set.xrayIdx, failed)
 					}
 					continue
 				}
@@ -282,6 +322,12 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 					}
 					if k < len(idx) {
 						nodes, rejected = dropIdx(nodes, []int{idx[k]}, rejected)
+						continue
+					}
+				}
+				if m := sbTagRe.FindStringSubmatch(ee.Output); m != nil {
+					if k, _ := strconv.Atoi(m[1]); k < len(nodes) {
+						nodes, rejected = dropIdx(nodes, []int{k}, rejected)
 						continue
 					}
 				}
@@ -320,7 +366,9 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 				wg.Add(1)
 				go func(i int) {
 					defer wg.Done()
-					if port, err := r.acquireTor(ctx); err == nil {
+					sctx, cancel := context.WithTimeout(ctx, sidecarBudget(ctx, torWait))
+					defer cancel()
+					if port, err := r.acquireTor(sctx); err == nil {
 						torPorts[i] = port
 					}
 				}(i)
@@ -356,7 +404,7 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 				if err != nil {
 					return
 				}
-				if err := p.WaitListening(ctx, bind, 75*time.Second); err != nil {
+				if err := p.WaitListening(ctx, bind, sidecarBudget(ctx, 75*time.Second)); err != nil {
 					p.Stop()
 					return
 				}
@@ -398,6 +446,19 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 		}
 	}
 	return running, bound, failed, keep, release
+}
+
+// sidecarBudget is how long a sidecar (warp-plus, usque, tor) may take to
+// come up: its own allowance, or two thirds of what the caller has left,
+// so one slow sidecar never uses up the time the group's other servers
+// need to start.
+func sidecarBudget(ctx context.Context, own time.Duration) time.Duration {
+	if dl, ok := ctx.Deadline(); ok {
+		if left := time.Until(dl) * 2 / 3; left < own {
+			return max(left, time.Second)
+		}
+	}
+	return own
 }
 
 func dropIdx(nodes []*node.Node, idx []int, rejected []*node.Node) ([]*node.Node, []*node.Node) {

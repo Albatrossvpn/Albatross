@@ -55,3 +55,7 @@ func OpenURL(u string) error {
 	}
 	return exec.Command(cmd, u).Start()
 }
+
+// SystemDNS is the network's resolver; unknown here (the Android app
+// passes it from the system, and Linux cores read resolv.conf themselves).
+func SystemDNS() string { return "" }

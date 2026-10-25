@@ -54,10 +54,10 @@ func TestAPIGuards(t *testing.T) {
 // Every switch on the settings page must come back in the state, or a
 // switch shown off can never be turned off.
 func TestSettingsRoundTrip(t *testing.T) {
-	b, _ := json.Marshal(publicSettingsOf(engine.Settings{AllowLAN: true, HelpOthers: true, ShareStats: true, OverrideGPS: true}))
+	b, _ := json.Marshal(publicSettingsOf(engine.Settings{AllowLAN: true, HelpOthers: true, ShareStats: true, OverrideGPS: true, BypassApps: true}))
 	var m map[string]any
 	json.Unmarshal(b, &m)
-	for _, k := range []string{"allow_lan", "help_others", "share_stats", "override_gps"} {
+	for _, k := range []string{"allow_lan", "help_others", "share_stats", "override_gps", "bypass_apps"} {
 		if m[k] != true {
 			t.Errorf("%s missing from the page's settings: %s", k, b)
 		}
