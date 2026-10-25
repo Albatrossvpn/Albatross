@@ -20,7 +20,11 @@ admin_token() {
 }
 
 # backend/, where wrangler.toml names the bucket and wrangler is installed.
-bucket_dir() { echo "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../backend" && pwd)"; }
+# Resolved once, as an absolute path: the functions below change directory
+# into it, and a relative path from the caller's directory would then point
+# nowhere (the 1.0.0 release stored its files but could not check them).
+ALBATROSS_BACKEND="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../backend" && pwd)"
+bucket_dir() { echo "$ALBATROSS_BACKEND"; }
 
 # True when wrangler can write the bucket directly.
 have_wrangler() {
@@ -33,6 +37,8 @@ bucket_name() { sed -n 's/^bucket_name *= *"\([^"]*\)".*/\1/p' "$(bucket_dir)/wr
 # r2_put <key> <file> <content-type> [cache-control]: stores a file in the bucket.
 r2_put() {
   local key="$1" file="$2" type="$3" cc="${4:-}"
+  # wrangler runs in backend/, so the file's path must not depend on here.
+  file="$(cd "$(dirname "$file")" && pwd)/$(basename "$file")"
   local args=(r2 object put "$(bucket_name)/$key" --file "$file" --content-type "$type" --remote)
   [ -n "$cc" ] && args+=(--cache-control "$cc")
   (cd "$(bucket_dir)" && npx wrangler "${args[@]}" > /dev/null)
