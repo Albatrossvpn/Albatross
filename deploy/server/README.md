@@ -19,6 +19,7 @@ rest:
 | Hysteria 2 + Salamander, port hopping 20000–40000 and 53 | 443/udp |
 | TUIC v5 (BBR) | 8444/udp |
 | VMess (AEAD) + HTTPUpgrade, no TLS | 80/tcp |
+| VMess (AEAD) + HTTPUpgrade, no TLS | 53/tcp |
 | VMess (AEAD) + mKCP inside ICMP echo (Xray xicmp) | ping |
 | VMess (AEAD) + mKCP inside DNS queries (Xray xdns), with `DNS_TUNNEL` | 53/udp |
 
@@ -40,7 +41,7 @@ session travels inside echo packets, slowly, but it connects.
    owner's identity and a card for verification.
 2. In the cloud's firewall (Oracle: *Networking → Virtual cloud networks →
    the subnet's security list*), allow inbound TCP 80, 443, 2053, 2083, 2087,
-   2096, 8388, 8443, 8445, 8880, UDP 53, 443, 8388, 8444, 20000–40000, and ICMP
+   2096, 8388, 8443, 8445, 8880, TCP 53, UDP 53, 443, 8388, 8444, 20000–40000, and ICMP
    echo requests (type 8) from everywhere, which carry the ICMP protocol.
 3. On the machine, as root:
    ```sh

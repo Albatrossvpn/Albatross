@@ -43,6 +43,8 @@ P_HTTP=80            # VMess (AEAD) + HTTPUpgrade, no TLS: looks like plain HTTP
 # UDP 53 also lands on Hysteria 2: in the June 2025 shutdown it was the
 # only UDP port that still got out.
 P_HY2_DNS=53
+# TCP 53 as well: allowlists that keep DNS open often keep both transports.
+P_TCP53=53
 # VMess over mKCP carried in ICMP echo (Xray xicmp): ping is what stays
 # open when both TCP and UDP to foreign addresses are cut. The port only
 # names the mKCP session inside the echo packets.
@@ -180,6 +182,9 @@ singbox_config() {
     {"type": "vmess", "tag": "http", "listen": "::", "listen_port": $P_HTTP,
      "users": [{"uuid": "$UUID", "alterId": 0}],
      "transport": {"type": "httpupgrade", "path": "$WS_PATH"}},
+    {"type": "vmess", "tag": "tcp53", "listen": "::", "listen_port": $P_TCP53,
+     "users": [{"uuid": "$UUID", "alterId": 0}],
+     "transport": {"type": "httpupgrade", "path": "$WS_PATH"}},
     {"type": "tuic", "tag": "tuic", "listen": "::", "listen_port": $P_TUIC,
      "users": [{"uuid": "$UUID", "password": "$PASS"}],
      "congestion_control": "bbr", $tls}
@@ -280,10 +285,21 @@ EOF
   systemctl restart albatross-sing-box albatross-xray
 }
 
+# free_port53 stops systemd-resolved's stub listener, which holds port 53 on
+# the loopback address and would keep the cores from binding it; the
+# machine keeps resolving through the upstream list resolved maintains.
+free_port53() {
+  [ -d /run/systemd/system ] || return 0
+  mkdir -p /etc/systemd/resolved.conf.d
+  printf '[Resolve]\nDNSStubListener=no\n' >/etc/systemd/resolved.conf.d/albatross.conf
+  ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+  systemctl restart systemd-resolved 2>/dev/null || true
+}
+
 firewall() {
   # Oracle's Ubuntu images reject everything but SSH in iptables; the
   # cloud's own security list must allow the same ports (see README).
-  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS 80; do
+  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 80; do
     iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$p" -j ACCEPT
   done
   for p in $P_SS $P_HY2 $P_TUIC $HOP_RANGE; do
@@ -328,6 +344,7 @@ vless://$UUID@$DOMAIN:$P_WS?security=tls&sni=$DOMAIN&fp=chrome&type=ws&host=$DOM
 vless://$UUID@$DOMAIN:$P_GRPC?security=tls&sni=$DOMAIN&fp=chrome&type=grpc&serviceName=$GRPC_NAME#$n-gRPC
 $(vmess_link "$DOMAIN" "$P_UPGRADE" tls Albatross-HTTPUpgrade)
 $(vmess_link "$h" "$P_HTTP" "" Albatross-HTTP80)
+$(vmess_link "$h" "$P_TCP53" "" Albatross-TCP53)
 $(vmess_link "$h" "$P_ICMP" "" Albatross-ICMP icmp)
 $([ -z "$DNS_TUNNEL" ] || vmess_link "$h" 53 "" Albatross-DNS "dns:$DNS_TUNNEL")
 anytls://$PASS@$DOMAIN:$P_ANYTLS?sni=$DOMAIN#$n-AnyTLS
@@ -376,6 +393,7 @@ main() {
   "$SB" check -c "$OUT/sing-box.json"
   "$XRAY" run -test -c "$OUT/xray.json" >/dev/null
   if [ "$DRY_RUN" != 1 ]; then
+    free_port53
     firewall
     services
   fi
