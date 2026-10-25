@@ -22,7 +22,7 @@ concurrency:
   group: adblock-${{ github.ref == 'refs/heads/main' && 'publish' || github.ref }}
 
 env:
-  SINGBOX_VERSION: "1.14.3"
+  SINGBOX_VERSION: "1.14.4"
 
 jobs:
   build:
