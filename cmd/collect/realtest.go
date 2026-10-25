@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/tester"
+	"github.com/Albatrossvpn/vp/internal/core"
+	"github.com/Albatrossvpn/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/tester"
 )
 
 // realTest connects through up to n of list with the real cores, the way

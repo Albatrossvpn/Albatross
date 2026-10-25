@@ -25,7 +25,7 @@ numeric="$(echo "$VERSION" | sed -E 's/^([0-9]+)\.([0-9]+)\.([0-9]+).*/\1.\2.\3.
 go run github.com/tc-hib/go-winres@v0.3.3 make --in build/windows/winres.json --out cmd/albatross/rsrc \
   --arch amd64 --product-version "$numeric" --file-version "$numeric"
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -H windowsgui -X main.version=$VERSION -X github.com/cezomagoanlace29861-jpg/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/cezomagoanlace29861-jpg/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/cezomagoanlace29861-jpg/vp/internal/sources.WorkerMirror=${ACCOUNT_URL:-}" -o "$out/Albatross.exe" ./cmd/albatross
+  -ldflags "-s -w -H windowsgui -X main.version=$VERSION -X github.com/Albatrossvpn/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/Albatrossvpn/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.WorkerMirror=${ACCOUNT_URL:-}" -o "$out/Albatross.exe" ./cmd/albatross
 
 fetch() {
   [ -s "$2" ] || curl -fsSL --retry 4 --retry-delay 3 -o "$2" "$1"
@@ -73,7 +73,7 @@ Bundled components (see the licenses folder):
   Site rule sets            https://github.com/SagerNet/sing-geoip, https://github.com/SagerNet/sing-geosite (GPL-3.0-or-later),
                             https://github.com/Chocolate4U/Iran-sing-box-rules
   Ad list (updated daily)   HaGeZi, OISD, AdGuard DNS filter (GPL-3.0), PersianBlocker (AGPL-3.0);
-                            https://github.com/cezomagoanlace29861-jpg/Albatross/tree/rules
+                            https://github.com/Albatrossvpn/Albatross/tree/rules
 TXT
 sed -i 's/$/\r/' "$out/README.txt"
 

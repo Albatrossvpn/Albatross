@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/tester"
+	"github.com/Albatrossvpn/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/tester"
 )
 
 // psiphonCountries are the exits warp-plus can ask Psiphon for.

@@ -32,9 +32,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/geo"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/geo"
+	"github.com/Albatrossvpn/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // hotSize is how many servers hot.txt holds: enough for every phone to find

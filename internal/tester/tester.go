@@ -23,8 +23,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/core"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/core"
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 // Result of a real test.

@@ -1,6 +1,6 @@
 # Accounts
 
-A Cloudflare Worker with a D1 database. It serves the account pages (user account page, administration panel, privacy and terms pages) and the API the apps use. The public website is built elsewhere (GoDaddy); this service lives on its own subdomains, `accounts.albatross.online` and `accounts.albatrossvpn.online` (both in `wrangler.toml`, so a blocked one leaves the other), and `/` redirects to the account page. Link to it from the website.
+A Cloudflare Worker with a D1 database. It serves the account pages (user account page, administration panel, privacy and terms pages) and the API the apps use. The public website is built elsewhere (GoDaddy); this service lives on its own subdomain, `accounts.albatrossvpn.online` (in `wrangler.toml`), and `/` redirects to the account page. Link to it from the website.
 
 | What | Where |
 |---|---|
@@ -24,7 +24,7 @@ The service decides; the official app obeys. The servers that carry the traffic 
 
 ## Deploying
 
-You need a Cloudflare account and a domain whose DNS is on Cloudflare (a Worker can only answer on a custom domain of a zone Cloudflare serves). With the domain registered at GoDaddy: add it to Cloudflare, copy GoDaddy's DNS records into the Cloudflare zone (the website's `A` and `www` records, and any mail records), then set the domain's nameservers at GoDaddy to the two Cloudflare gives you. Use a subdomain for this service (`accounts.albatross.online` and `accounts.albatrossvpn.online` in `wrangler.toml`; both zones must be on Cloudflare); the website keeps the bare domain.
+You need a Cloudflare account and a domain whose DNS is on Cloudflare (a Worker can only answer on a custom domain of a zone Cloudflare serves). With the domain registered at GoDaddy: add it to Cloudflare, copy GoDaddy's DNS records into the Cloudflare zone (the website's `A` and `www` records, and any mail records), then set the domain's nameservers at GoDaddy to the two Cloudflare gives you. Use a subdomain for this service (`accounts.albatrossvpn.online` in `wrangler.toml`); the website keeps the bare domain.
 
 The Worker answers only on its custom domain (`routes` in `wrangler.toml`), never on `*.workers.dev`: that address names the Cloudflare account and links the service to the account's other Workers. Release builds take the domain from `wrangler.toml` (`build/account-url.sh`); `SITE_DOMAIN` can add another, tried after it.
 

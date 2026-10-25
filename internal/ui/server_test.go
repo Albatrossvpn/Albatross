@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cezomagoanlace29861-jpg/vp/internal/engine"
-	"github.com/cezomagoanlace29861-jpg/vp/internal/sources"
+	"github.com/Albatrossvpn/vp/internal/engine"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 func TestAPIGuards(t *testing.T) {

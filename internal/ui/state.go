@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/cezomagoanlace29861-jpg/vp/internal/engine"
+import "github.com/Albatrossvpn/vp/internal/engine"
 
 // What the page is told. It shows how many servers can be reached, where
 // they are and how fast; where servers come from, their names and how they
