@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { pool } from "../src/sub.js";
+import { keyedID, openKeyed, pool } from "../src/sub.js";
 import { DAY, TIERS, accountOf, checkPassword, checkUsername, hashPassword, maxDevices, randomPassword, rollPeriod, safeEqual, sign, tierOf, verify, verifyPassword } from "../src/lib.js";
 
 test("passwords are salted and verified", async () => {
@@ -220,4 +220,16 @@ test("a subscription is topped up from the fresh list when the hot list is short
   assert.equal(pool(hot, "", 10).length, 3, "nothing fresh: the hot list alone");
   const udp = pool("hysteria2://a@h:443#DE\nvless://b@h:443#US\ntuic://c@h:443#FR\nss://YWVzOmJhc2U@h2:8388#NL", "", 1);
   assert.deepEqual(udp.map((e) => e.link.split("://")[0]), ["vless", "ss", "hysteria2", "tuic"], "UDP servers go last");
+});
+
+// A sealed list (the collector's SealKeyed, sample made with the Go side)
+// opens with the key of its id, and with nothing else.
+test("a sealed list opens with the collector's key of its id", async () => {
+  const key = "00070e151c232a31383f464d545b626970777e858c939aa1a8afb6bdc4cbd2d9";
+  const bytes = Uint8Array.from(atob("QUxCSzEAAAAAaP4NQHJEHYIFi+TuDMmpLmqPOJKUD8RU3TSupdYsuHO/I9i+lWY3jVMXKSqf+K8sz/qHL07M/WVrDYU8jDSs+WnVQYLZaOelP8y6dPQGcllDHqRK6g=="), (c) => c.charCodeAt(0));
+  assert.equal(keyedID(bytes), 1761480000);
+  assert.equal(await openKeyed([{ id: 1, key: "ab".repeat(32) }, { id: 1761480000, key }], bytes), "vless://a@h1:443#Germany\nss://YWVzOmJhc2U@h2:8388#US\n");
+  assert.equal(await openKeyed([{ id: 1761480000, key: "ab".repeat(32) }], bytes), "", "the wrong key opens nothing");
+  assert.equal(await openKeyed([], bytes), "");
+  assert.equal(keyedID(new TextEncoder().encode("vless://plain")), null);
 });

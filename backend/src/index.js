@@ -4,8 +4,8 @@ import {
   DAY, DEFAULT_TIER, DEVICE_ACTIVE, SUB_ACTIVE, TIERS, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, maxDevices, versionLess,
   randomPassword, rollPeriod, safeEqual, sign, tag, tierOf, verify, verifyPassword,
 } from "./lib.js";
-import { LIST_KEYS, LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
-import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, subPool, subToken } from "./sub.js";
+import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
+import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -489,19 +489,10 @@ async function listKeys(request, env) {
   const { user } = await authUser(request, env);
   const a = await viewOf(env, user, deviceOf(request), now());
   if (!a.allowed) return json({ keys: [], reason: a.reason });
-  let keys = [];
-  if (env.FILES) {
-    try {
-      const o = await env.FILES.get(LIST_KEYS);
-      const all = o ? await o.json() : [];
-      keys = (Array.isArray(all) ? all : [])
-        .filter((k) => Number.isSafeInteger(k.id) && typeof k.key === "string" && /^[0-9a-f]{64}$/.test(k.key))
-        .sort((x, y) => y.id - x.id)
-        .slice(0, LIST_KEYS_GIVEN);
-    } catch {
-      keys = [];
-    }
-  }
+  const keys = (await storedListKeys(env))
+    .filter((k) => Number.isSafeInteger(k.id) && typeof k.key === "string" && /^[0-9a-f]{64}$/.test(k.key))
+    .sort((x, y) => y.id - x.id)
+    .slice(0, LIST_KEYS_GIVEN);
   return json({ keys, reason: "" });
 }
 

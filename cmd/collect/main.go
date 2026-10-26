@@ -227,7 +227,7 @@ func main() {
 	out := flag.String("out", "servers", "output directory")
 	keysIn := flag.String("keys", "", "the list keys handed out so far (JSON), read to keep the recent ones")
 	keysOut := flag.String("keys-out", "", "where to write the list keys with this run's new one (JSON; outside -out, they are secret)")
-	plain := flag.Bool("plain", true, "also write the lists unsealed, for apps from before the sealed lists")
+	plain := flag.Bool("plain", false, "also write the lists unsealed, for apps from before the sealed lists")
 	shards := flag.Int("shards", 8, "number of all-N.txt files")
 	probe := flag.Bool("probe", true, "drop servers whose address does not answer")
 	probeConc := flag.Int("probe-concurrency", 1500, "parallel reachability probes")
