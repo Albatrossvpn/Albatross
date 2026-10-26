@@ -22,7 +22,7 @@ func TestSealedOwnList(t *testing.T) {
 	}
 	OwnKey = strings.Repeat("ab", 32)
 	c := Central(7)
-	if !c[0].Sealed || !c[0].Relay || !strings.HasSuffix(c[0].URL, "/own-0.bin") {
+	if !c[0].Sealed || !c[0].Relay || !strings.HasSuffix(c[0].URL, "/own-0.bin"+KeyedSuffix) || !c[0].Keyed {
 		t.Fatalf("the relay list must come first for every install: %+v", c[0])
 	}
 	if !c[1].Sealed || !c[2].Sealed || c[1].Relay || c[1].URL == c[2].URL || !strings.Contains(c[1].URL, "/own-") {

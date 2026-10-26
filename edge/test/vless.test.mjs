@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { decodeEarly, forbidden, parseHeader, relays } from "../src/vless.js";
+import { decodeEarly, forbidden, parseHeader, relayTarget, relays } from "../src/vless.js";
 
 const uuid = "0f1e2d3c4b5a49788a9b0c1d2e3f4a5b";
 const idBytes = uuid.match(/../g).map((h) => parseInt(h, 16));
@@ -52,4 +52,8 @@ test("early data is base64url in the protocol header", () => {
 test("relays come from PROXY_IP, comma separated", () => {
   assert.deepEqual(relays({ PROXY_IP: " a.example:8443, b.example ,, " }), ["a.example:8443", "b.example"]);
   assert.deepEqual(relays({}), []);
+  assert.deepEqual(relayTarget("b.example", 80), { hostname: "b.example", port: 80 });
+  assert.deepEqual(relayTarget("a.example:10443", 443), { hostname: "a.example", port: 10443 });
+  assert.equal(relayTarget("a.example:10443", 80), null, "a TLS relay takes TLS destinations only");
+  assert.deepEqual(relayTarget("[2001:db8::1]:10443", 443), { hostname: "2001:db8::1", port: 10443 });
 });

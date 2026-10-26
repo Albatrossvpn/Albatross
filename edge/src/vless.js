@@ -5,6 +5,19 @@ export function relays(env) {
   return String(env.PROXY_IP || "").split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * Where a relay is reached for a destination port: a bare host takes
+ * every port (the relay listens on the destination's port); "host:port"
+ * is a TLS relay (it reads the destination off the ClientHello), so it
+ * takes TLS destinations (443) only. Null when the relay does not apply.
+ */
+export function relayTarget(relay, port) {
+  const m = /^\[?([^\]]+?)\]?(?::(\d+))?$/.exec(relay);
+  if (!m) return null;
+  if (!m[2]) return { hostname: m[1], port };
+  return port === 443 ? { hostname: m[1], port: Number(m[2]) } : null;
+}
+
 /** Early data rides in the Sec-WebSocket-Protocol header, base64url. */
 export function decodeEarly(h) {
   if (!h) return null;
