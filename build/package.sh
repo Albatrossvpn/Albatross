@@ -75,11 +75,14 @@ bash "$root/build/tor.sh" windows-x86_64 "$out/core" "$dl"
 fetch "https://github.com/klzgrad/naiveproxy/releases/download/$NAIVE_VERSION/naiveproxy-$NAIVE_VERSION-win-x64.zip" "$dl/naive-$NAIVE_VERSION.zip"
 unzip -q -o "$dl/naive-$NAIVE_VERSION.zip" -d "$tmp/naive"
 cp "$(find "$tmp/naive" -iname 'naive.exe' | head -1)" "$out/core/naive.exe"
-cp "$(find "$tmp/naive" -iname 'LICENSE*' | head -1)" "$out/licenses/naiveproxy-LICENSE.txt"
+lic="$(find "$tmp/naive" -iname 'LICENSE*' | head -1)"
+[ -n "$lic" ] && cp "$lic" "$out/licenses/naiveproxy-LICENSE.txt" ||
+  printf 'NaiveProxy (https://github.com/klzgrad/naiveproxy) is under the BSD 3-Clause license.\n' > "$out/licenses/naiveproxy-LICENSE.txt"
 fetch "https://github.com/juicity/juicity/releases/download/v$JUICITY_VERSION/juicity-windows-x86_64.zip" "$dl/juicity-$JUICITY_VERSION.zip"
 unzip -q -o "$dl/juicity-$JUICITY_VERSION.zip" -d "$tmp/juicity"
 cp "$(find "$tmp/juicity" -iname 'juicity-client.exe' | head -1)" "$out/core/juicity-client.exe"
-cp "$(find "$tmp/juicity" -iname 'LICENSE*' | head -1)" "$out/licenses/juicity-LICENSE.txt" 2>/dev/null ||
+lic="$(find "$tmp/juicity" -iname 'LICENSE*' | head -1)"
+[ -n "$lic" ] && cp "$lic" "$out/licenses/juicity-LICENSE.txt" ||
   printf 'Juicity (https://github.com/juicity/juicity) is under the GNU AGPL v3; its source is at that address.\n' > "$out/licenses/juicity-LICENSE.txt"
 fetch "https://github.com/enfein/mieru/releases/download/v$MIERU_VERSION/mieru_${MIERU_VERSION}_windows_amd64.zip" "$dl/mieru-$MIERU_VERSION.zip"
 unzip -q -o "$dl/mieru-$MIERU_VERSION.zip" -d "$tmp/mieru"
@@ -95,7 +98,7 @@ printf 'WStunnel (https://github.com/erebe/wstunnel) is under the BSD 3-Clause l
 # AmneziaWG as a SOCKS5 proxy: wireproxy's AmneziaWG fork, built from its
 # source (it publishes no binaries).
 git clone -q --depth 1 --branch "$WIREPROXY_AWG_REF" https://github.com/artem-russkikh/wireproxy-awg "$tmp/wpawg"
-(cd "$tmp/wpawg" && GOTOOLCHAIN=auto GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w" -o "$out/core/wireproxy-awg.exe" .)
+(cd "$tmp/wpawg" && GOTOOLCHAIN=auto GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w -checklinkname=0" -o "$out/core/wireproxy-awg.exe" .)
 cp "$tmp/wpawg/LICENSE" "$out/licenses/wireproxy-awg-LICENSE.txt"
 # The Snowflake proxy for "Help others" is its own module: its library
 # needs a newer Go than the app.
