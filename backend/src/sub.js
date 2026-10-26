@@ -4,6 +4,7 @@
 // itself. The address carries a token of its own (a year, void when the
 // password changes), so the apps need no sign-in.
 import { DAY, accountOf, edgeLinks, sign, verify } from "./lib.js";
+import { LIST_KEYS } from "./files.js";
 import { COUNTRIES, flag, hint } from "./countries.js";
 
 export const SUB_TTL = 365 * DAY;
@@ -179,9 +180,62 @@ export function headers(title, account, interval = 1) {
   return h;
 }
 
-/** A server list as the service has it: its own storage, or GitHub where there is none. */
+// The collector seals its lists with a key per collection (the Go side:
+// internal/sources SealKeyed): "ALBK1", the key's id (8 bytes, big
+// endian), then AES-256-GCM with the nonce first.
+const KEYED_MAGIC = "ALBK1";
+
+/** The id of the key a sealed list needs, or null when it is not one. */
+export function keyedID(bytes) {
+  if (bytes.length < KEYED_MAGIC.length + 8) return null;
+  for (let i = 0; i < KEYED_MAGIC.length; i++) if (bytes[i] !== KEYED_MAGIC.charCodeAt(i)) return null;
+  let id = 0n;
+  for (let i = 0; i < 8; i++) id = (id << 8n) | BigInt(bytes[KEYED_MAGIC.length + i]);
+  return Number(id);
+}
+
+/** Opens a sealed list with the key of its id among keys ({id, key: hex}); "" when it cannot be opened. */
+export async function openKeyed(keys, bytes) {
+  const id = keyedID(bytes);
+  if (id === null) return "";
+  const k = keys.find((x) => x.id === id);
+  if (!k || !/^[0-9a-f]{64}$/.test(k.key)) return "";
+  const raw = Uint8Array.from(k.key.match(/../g), (h) => parseInt(h, 16));
+  const body = bytes.subarray(KEYED_MAGIC.length + 8);
+  if (body.length < 12 + 16) return "";
+  try {
+    const key = await crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["decrypt"]);
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: body.subarray(0, 12) }, key, body.subarray(12));
+    return new TextDecoder().decode(plain);
+  } catch {
+    return "";
+  }
+}
+
+/** The lists' keys the collector stored (LIST_KEYS), or []. */
+export async function storedListKeys(env) {
+  if (!env.FILES) return [];
+  try {
+    const o = await env.FILES.get(LIST_KEYS);
+    const all = o ? await o.json() : [];
+    return Array.isArray(all) ? all : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * A server list as the service has it: the sealed copy in its own
+ * storage, opened with the collector's keys (the plain copy while one
+ * is still published), or GitHub where there is no storage.
+ */
 export async function listFile(env, name) {
   if (env.FILES) {
+    const sealed = await env.FILES.get("list/servers/" + name + ".sealed");
+    if (sealed) {
+      const text = await openKeyed(await storedListKeys(env), new Uint8Array(await sealed.arrayBuffer()));
+      if (text) return text;
+    }
     const o = await env.FILES.get("list/servers/" + name);
     return o ? o.text() : "";
   }
