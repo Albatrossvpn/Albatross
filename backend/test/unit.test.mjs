@@ -179,15 +179,17 @@ test("subscriptions: countries read from names, servers renamed, the edge first"
   const links = atob(all.body).trim().split("\n");
   assert.equal(links.length, 5, "every server but the home country's, after the edge");
   assert.equal(links[0], "vless://e@edge:443?type=ws#Albatross%20Edge%201");
-  assert.equal(nameOf(links[1]), "Albatross 🇺🇸 United States 1");
-  assert.equal(nameOf(links[3]), "Albatross Server 3", "a server without a country keeps no name of its own");
-  assert.equal(nameOf(links[4]), "Albatross 🇯🇵 Japan 4");
+  assert.equal(nameOf(links[1]), "Albatross 🇺🇸 United States 1 · vless");
+  assert.equal(nameOf(links[3]), "Albatross Server 3 · shadowsocks", "a server without a country keeps no name of its own");
+  assert.equal(nameOf(links[4]), "Albatross 🇯🇵 Japan 4 · vmess");
   assert.ok(links[4].startsWith("vmess://"));
   assert.equal(all.title, "Albatross All servers");
 
   const de = build(entries, "DE", "Albatross", edge);
-  assert.deepEqual(atob(de.body).trim().split("\n").map(nameOf), ["Albatross 🇩🇪 Germany 1"]);
+  assert.deepEqual(atob(de.body).trim().split("\n").map(nameOf), ["Albatross 🇩🇪 Germany 1 · trojan"]);
   assert.equal(de.title, "Albatross Germany");
+  assert.equal(build(entries, "DE", "Albatross", edge, "2026-10-26T11:05:09Z").title, "Albatross Germany · 26 Oct 11:05 UTC");
+  assert.equal(build(entries, "DE", "Albatross", edge, "junk").title, "Albatross Germany");
   assert.equal(atob(build(entries, "edge", "Albatross", edge).body).trim().split("\n").length, 1);
   assert.equal(rename("ss://x@y:1#old", "new name"), "ss://x@y:1#new%20name");
 
