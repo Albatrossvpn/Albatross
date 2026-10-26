@@ -192,17 +192,20 @@ func hotList(ordered []*entry, passed map[*entry]time.Duration, max int, crowd c
 		}
 	}
 	for _, p := range protoOrder {
-		want := protoReserve
+		// Scaled to the list: a small list (tests) keeps its shares.
+		want := min(protoReserve, max/15)
 		if p == "wireguard" {
-			want = wgReserve
+			want = min(wgReserve, max/7)
 		}
-		out = reserveProto(out, cands, p, want)
+		if want > 0 {
+			out = reserveProto(out, cands, p, want)
+		}
 	}
 	return out
 }
 
-// protoReserve is how many servers of each protocol the hot list carries
-// at least when that many passed; wgReserve the same for WireGuard.
+// protoReserve is how many servers of each protocol a 300-server hot list
+// carries at least when that many passed; wgReserve the same for WireGuard.
 const protoReserve, wgReserve = 20, 40
 
 // reserveProto makes sure out holds up to want servers of proto from
