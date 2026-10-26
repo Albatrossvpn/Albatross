@@ -94,18 +94,55 @@ if bad:
 PY
 }
 
-# ship_prebuilt <file> <name> <abi> keeps a helper we only downloaded when
-# phones with 16 KB pages can load it, and otherwise leaves it out of the
-# APK: the upstream build is linked for 4 KB pages, the protocol then shows
-# as not installed on that ABI, and everything else still ships. (Building
-# the helper from source would fix it.)
-ship_prebuilt() {
-  if check_alignment "$1" 2>/dev/null; then
-    return 0
+sysroot="$(dirname "$ndkbin")/sysroot/usr/lib"
+
+# api_have <abi> prints the path of a file listing what Android $api's libc
+# and system libraries define (the NDK's stubs for that version), made once.
+api_have() {
+  local abi="$1" triple have="$tmp/have-$1"
+  case "$abi" in
+    arm64-v8a) triple=aarch64-linux-android ;;
+    armeabi-v7a) triple=arm-linux-androideabi ;;
+    x86_64) triple=x86_64-linux-android ;;
+    *) echo "unexpected ABI $abi" >&2; return 1 ;;
+  esac
+  if [ ! -s "$have" ]; then
+    "$ndkbin/llvm-nm" -D --defined-only "$sysroot/$triple/$api"/lib{c,dl,log,m,z,android,EGL,GLESv2,jnigraphics}.so |
+      awk 'NF > 1 {sub(/@.*/, "", $NF); print $NF}' | sort -u > "$have"
   fi
-  echo "not shipped: $2 for $3 is linked for 4 KB pages, which phones with 16 KB pages refuse to load" >&2
-  rm -f "$1"
-  return 1
+  echo "$have"
+}
+
+# missing_symbols <abi> <library> prints what the library calls that Android
+# $api does not have.
+missing_symbols() {
+  local have
+  have="$(api_have "$1")"
+  { "$ndkbin/llvm-nm" -D --undefined-only "$2" 2> /dev/null || true; } |
+    awk '$1 == "U" {sub(/@.*/, "", $2); print $2}' | sort -u | comm -23 - "$have"
+}
+
+# ship_prebuilt <file> <name> <abi> keeps a helper we only downloaded when
+# it can run on every phone the app supports, and otherwise leaves it out of
+# the APK, so one helper does not stop the whole build: phones with 16 KB
+# pages refuse a library linked for 4 KB pages, and the oldest phone (Android
+# $api) lacks functions a newer build calls. The protocol then shows as not
+# installed on that ABI and everything else still ships. (Building the helper
+# from source against Android $api would fix it.)
+ship_prebuilt() {
+  local missing
+  if ! check_alignment "$1" 2>/dev/null; then
+    echo "not shipped: $2 for $3 is linked for 4 KB pages, which phones with 16 KB pages refuse to load" >&2
+    rm -f "$1"
+    return 1
+  fi
+  missing="$(missing_symbols "$3" "$1" | tr '\n' ' ')"
+  if [ -n "$missing" ]; then
+    echo "not shipped: $2 for $3 calls what Android $api lacks: $missing" >&2
+    rm -f "$1"
+    return 1
+  fi
+  return 0
 }
 
 # smoke <name> <binary> <args...> runs a core built for this machine from
@@ -328,27 +365,27 @@ cp app/build/outputs/apk/release/app-release.apk "$apk"
 
 # Every library in the APK must run on the oldest phone: built for its ABI,
 # needing only the system's libraries, and calling only what Android $api's
-# libc has (the NDK's stubs for that version list it).
+# libc has (the NDK's stubs for that version list it). Every problem is
+# reported before the build fails, not only the first.
 x="$tmp/apk" && rm -rf "$x" && mkdir -p "$x" && unzip -q "$apk" 'lib/*' -d "$x"
-sysroot="$(dirname "$ndkbin")/sysroot/usr/lib"
+failed=0
 for dir in "$x"/lib/*; do
   abi="$(basename "$dir")"
   case "$abi" in
-    arm64-v8a) machine=AArch64 triple=aarch64-linux-android ;;
-    armeabi-v7a) machine=ARM triple=arm-linux-androideabi ;;
-    x86_64) machine=X86-64 triple=x86_64-linux-android ;;
+    arm64-v8a) machine=AArch64 ;;
+    armeabi-v7a) machine=ARM ;;
+    x86_64) machine=X86-64 ;;
     *) echo "unexpected ABI $abi in the APK" >&2; exit 1 ;;
   esac
-  have="$tmp/have-$abi"
-  "$ndkbin/llvm-nm" -D --defined-only "$sysroot/$triple/$api"/lib{c,dl,log,m,z,android,EGL,GLESv2,jnigraphics}.so |
-    awk 'NF > 1 {sub(/@.*/, "", $NF); print $NF}' | sort -u > "$have"
   for so in "$dir"/*.so; do
-    "$readelf" -h "$so" | grep -q "Machine:.*$machine" || { echo "$abi/$(basename "$so") is not built for $abi" >&2; exit 1; }
+    name="$abi/$(basename "$so")"
+    "$readelf" -h "$so" | grep -q "Machine:.*$machine" || { echo "$name is not built for $abi" >&2; failed=1; }
     bad="$("$readelf" -d "$so" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | grep -vxE 'lib(c|m|dl|log|z|android|EGL|GLESv2|jnigraphics)\.so' || true)"
-    [ -z "$bad" ] || { echo "$abi/$(basename "$so") needs libraries Android does not have: $bad" >&2; exit 1; }
-    new="$({ "$ndkbin/llvm-nm" -D --undefined-only "$so" 2> /dev/null || true; } | awk '$1 == "U" {sub(/@.*/, "", $2); print $2}' | sort -u | comm -23 - "$have")"
-    [ -z "$new" ] || { echo "$abi/$(basename "$so") calls what Android $api lacks: $new" >&2; exit 1; }
+    [ -z "$bad" ] || { echo "$name needs libraries Android does not have: $bad" >&2; failed=1; }
+    new="$(missing_symbols "$abi" "$so" | tr '\n' ' ')"
+    [ -z "$new" ] || { echo "$name calls what Android $api lacks: $new" >&2; failed=1; }
   done
   echo "$abi: $(ls "$dir" | tr '\n' ' ')"
 done
+[ "$failed" = 0 ] || exit 1
 ls -la "$apk"
