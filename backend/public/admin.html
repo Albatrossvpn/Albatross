@@ -40,7 +40,7 @@
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>User</th><th>Status</th><th>Data</th><th>Time</th><th>Ends</th><th>Last seen</th><th></th></tr></thead>
+        <thead><tr><th>User</th><th>Status</th><th>Plan</th><th>Data</th><th>Time</th><th>Ends</th><th>Last seen</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -54,6 +54,7 @@
     <h2 id="u-title">New user</h2>
     <label class="field" id="u-name-field"><span>Username</span><input id="u-name" autocapitalize="none" spellcheck="false" maxlength="32"></label>
     <label class="field" id="u-pass-field"><span>Password</span><input id="u-pass" autocomplete="off" placeholder="Leave empty to generate one"></label>
+    <label class="field"><span>Plan (devices connected at once)</span><select id="u-tier"></select></label>
     <div class="two">
       <label class="field"><span>Data per period (GB)</span><input id="u-quota" type="number" min="0" step="any" placeholder="0 = no limit"></label>
       <label class="field"><span>Time per period (hours)</span><input id="u-hours" type="number" min="0" step="any" placeholder="0 = no limit"></label>
@@ -83,6 +84,7 @@
       <div class="two">
         <label class="field"><span>Username prefix</span><input id="b-prefix" value="user" maxlength="21"></label>
         <label class="field"><span>How many (1–200)</span><input id="b-count" type="number" min="1" max="200" value="10"></label>
+        <label class="field"><span>Plan</span><select id="b-tier"></select></label>
         <label class="field"><span>Data per period (GB)</span><input id="b-quota" type="number" min="0" step="any" placeholder="0 = no limit"></label>
         <label class="field"><span>Time per period (hours)</span><input id="b-hours" type="number" min="0" step="any" placeholder="0 = no limit"></label>
         <label class="field"><span>Renews every (days)</span><input id="b-reset" type="number" min="0" step="1" value="0" placeholder="0 = never"></label>
@@ -123,6 +125,7 @@
       <label class="field"><span>Time per period (hours)</span><input id="t-hours" type="number" min="0" step="any"></label>
       <label class="field"><span>Renews every (days)</span><input id="t-reset" type="number" min="0" step="1"></label>
       <label class="field"><span>Valid for (days, 0 = no end)</span><input id="t-valid" type="number" min="0" step="1"></label>
+      <label class="field"><span>Plan</span><select id="t-tier"></select></label>
     </div>
     <label class="field"><span>Windows download link</span><input id="t-win" type="url" placeholder="https://"></label>
     <label class="field"><span>Android download link</span><input id="t-and" type="url" placeholder="https://"></label>

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Albatrossvpn/vp/internal/account"
 	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
@@ -201,5 +202,21 @@ func TestMeterCountsAndStops(t *testing.T) {
 	defer svc.mu.Unlock()
 	if svc.used < 5100 {
 		t.Fatalf("service was told about %d bytes, want 5100", svc.used)
+	}
+}
+
+// The message for an account whose plan has all its devices connected
+// names the plan's number.
+func TestLimitMessageDevices(t *testing.T) {
+	one := limitMessage(account.ReasonDevices, account.Info{Reason: account.ReasonDevices, MaxDevices: 1})
+	if !strings.Contains(one, "another device") || !strings.Contains(one, "account page") {
+		t.Fatalf("one device: %q", one)
+	}
+	four := limitMessage(account.ReasonDevices, account.Info{Reason: account.ReasonDevices, MaxDevices: 4})
+	if !strings.Contains(four, "on 4 devices") {
+		t.Fatalf("four devices: %q", four)
+	}
+	if none := limitMessage(account.ReasonDevices, account.Info{}); !strings.Contains(none, "as many devices as your plan allows") {
+		t.Fatalf("unknown plan: %q", none)
 	}
 }
