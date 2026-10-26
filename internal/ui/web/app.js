@@ -207,6 +207,7 @@ function renderAccount(a) {
   meter("acc-time", a.used_seconds, a.max_seconds, fmtTime);
   var dates = [];
   if (a.max_devices) dates.push(a.devices + " of " + a.max_devices + (a.max_devices === 1 ? " device" : " devices") + " connected");
+  else if (a.tier) dates.push(a.devices + (a.devices === 1 ? " device" : " devices") + " connected · no limit");
   if (a.resets_at) dates.push("Renews " + fmtDate(a.resets_at));
   if (a.expires_at) dates.push("Expires " + fmtDate(a.expires_at));
   if (!a.quota_bytes && !a.max_seconds && !a.expires_at) dates.push("No limits on this account");

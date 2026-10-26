@@ -25,15 +25,21 @@ import (
 // works, only less privately (see tunnelFirst for why direct comes last).
 
 // dohWire answer DNS-over-HTTPS queries in the DNS wire format (RFC 8484).
-var dohWire = []string{"https://dns.google/dns-query", "https://cloudflare-dns.com/dns-query"}
+// The ones by address need no lookup of their own and carry no name for
+// the filtering to read; all are asked at once.
+var dohWire = []string{
+	"https://dns.google/dns-query", "https://cloudflare-dns.com/dns-query",
+	"https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query", "https://9.9.9.9/dns-query", "https://94.140.14.14/dns-query",
+}
 
 // dohWait bounds a lookup; all the servers are asked at once.
 const dohWait = 3 * time.Second
 
 // How long one try may take to connect and finish its handshake. Where ECH
 // is blocked the handshake usually hangs rather than fails, so the ECH try
-// gets at most half of what the call has left.
-var echWait, plainWait = 4 * time.Second, 8 * time.Second
+// gets at most half of what the call has left. A try at one of the other
+// ways to reach the service (reach.go) is shorter: there are several.
+var echWait, plainWait, wayWait = 4 * time.Second, 8 * time.Second, 4 * time.Second
 
 // httpsRecord is what a name's HTTPS record says about reaching it.
 type httpsRecord struct {
@@ -72,8 +78,9 @@ func (k keepDeadline) RoundTrip(req *http.Request) (*http.Response, error) {
 
 // newPrivateDirect returns the client for direct account calls, and warm,
 // which looks a name up ahead of a call; doh reaches the DNS-over-HTTPS
-// servers.
-func newPrivateDirect(doh *http.Client) (client *http.Client, warm func(host string)) {
+// servers, store remembers how names were reached (reach.go; nil keeps
+// nothing).
+func newPrivateDirect(doh *http.Client, store *reachStore) (client *http.Client, warm func(host string)) {
 	cache := &httpsCache{doh: doh, recs: map[string]httpsRecord{}, busy: map[string]chan struct{}{}}
 	t := &http.Transport{
 		DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -86,7 +93,7 @@ func newPrivateDirect(doh *http.Client) (client *http.Client, warm func(host str
 			if err != nil {
 				return nil, err
 			}
-			c, refused, err := dialPrivate(ctx, network, host, port, cache.get(ctx, host), nil)
+			c, refused, err := dialAny(ctx, network, host, port, cache.get(ctx, host), store, nil)
 			if refused {
 				cache.forgetECH(host)
 			}
@@ -147,6 +154,39 @@ func (h *httpsCache) forgetECH(host string) {
 	}
 }
 
+// tlsDial connects to addr and completes a handshake for host within wait:
+// with ECH when ech is a key, and with the ClientHello in pieces when frag
+// is set (fragment.go). roots is nil (the system's) outside tests.
+func tlsDial(ctx context.Context, network, addr, host string, ech []byte, frag bool, wait time.Duration, roots *x509.CertPool) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	var d net.Dialer
+	raw, err := d.DialContext(ctx, network, addr)
+	if err != nil {
+		return nil, err
+	}
+	var conn net.Conn = raw
+	if frag {
+		conn = &fragConn{Conn: raw}
+	}
+	cfg := &tls.Config{ServerName: host, NextProtos: []string{"http/1.1"}, EncryptedClientHelloConfigList: ech, RootCAs: roots}
+	c := tls.Client(conn, cfg)
+	if err := c.HandshakeContext(ctx); err != nil {
+		raw.Close()
+		return nil, err
+	}
+	return c, nil
+}
+
+// echFor bounds an ECH try to half of what ctx has left.
+func echFor(ctx context.Context) time.Duration {
+	wait := echWait
+	if d, ok := ctx.Deadline(); ok && time.Until(d)/2 < wait {
+		wait = time.Until(d) / 2
+	}
+	return wait
+}
+
 // dialPrivate connects to host with ECH when rec has a key, at rec's
 // addresses when it has some (so the system's resolver is not asked).
 // refused says the ECH handshake failed and an ordinary one was made
@@ -160,29 +200,23 @@ func dialPrivate(ctx context.Context, network, host, port string, rec httpsRecor
 		}
 	}
 	handshake := func(ech []byte, wait time.Duration) (net.Conn, error) {
-		if d, ok := ctx.Deadline(); ok && ech != nil && time.Until(d)/2 < wait {
-			wait = time.Until(d) / 2
+		if ech != nil {
+			wait = min(wait, echFor(ctx))
 		}
-		ctx, cancel := context.WithTimeout(ctx, wait)
-		defer cancel()
-		var d net.Dialer
-		var raw net.Conn
 		err := errors.New("no address")
 		for _, t := range targets {
-			if raw, err = d.DialContext(ctx, network, t); err == nil {
+			var c net.Conn
+			if c, err = tlsDial(ctx, network, t, host, ech, false, wait, roots); err == nil {
+				return c, nil
+			}
+			// Another address is worth a try only for a connection that
+			// failed outright, not a handshake that did.
+			var ne net.Error
+			if !errors.As(err, &ne) || ctx.Err() != nil {
 				break
 			}
 		}
-		if err != nil {
-			return nil, err
-		}
-		cfg := &tls.Config{ServerName: host, NextProtos: []string{"http/1.1"}, EncryptedClientHelloConfigList: ech, RootCAs: roots}
-		c := tls.Client(raw, cfg)
-		if err := c.HandshakeContext(ctx); err != nil {
-			raw.Close()
-			return nil, err
-		}
-		return c, nil
+		return nil, err
 	}
 	if rec.ech == nil {
 		c, err = handshake(nil, plainWait)
@@ -200,6 +234,57 @@ func dialPrivate(ctx context.Context, network, host, port string, rec httpsRecor
 	// ECH is refused or blocked on this network.
 	c, err = handshake(nil, plainWait)
 	return c, true, err
+}
+
+// dialAny connects to host by whatever way gets through (reach.go): ECH at
+// the record's first address when the name has a key, then each way in
+// turn, plain and with a fragmented hello, until ctx ends. refused says
+// an ECH handshake failed. What works is remembered in store.
+func dialAny(ctx context.Context, network, host, port string, rec httpsRecord, store *reachStore, roots *x509.CertPool) (net.Conn, bool, error) {
+	refused := false
+	if rec.ech != nil {
+		target := host
+		for _, a := range rec.addrs {
+			if !bogus(a) {
+				target = a.String()
+				break
+			}
+		}
+		c, err := tlsDial(ctx, network, net.JoinHostPort(target, port), host, rec.ech, false, echFor(ctx), roots)
+		var rej *tls.ECHRejectionError
+		if errors.As(err, &rej) && len(rej.RetryConfigList) > 0 {
+			c, err = tlsDial(ctx, network, net.JoinHostPort(target, port), host, rej.RetryConfigList, false, echFor(ctx), roots)
+		}
+		if err == nil {
+			store.remember(host, target, false)
+			return c, false, nil
+		}
+		if ctx.Err() != nil {
+			return nil, false, err
+		}
+		refused = true
+	}
+	last, hasLast := store.last(host)
+	err := errNoWay
+	for _, t := range store.tries(host, rec, func() []string { return systemAddrs(ctx, host) }) {
+		if ctx.Err() != nil {
+			break
+		}
+		wait := wayWait
+		if d, ok := ctx.Deadline(); ok && time.Until(d) < wait {
+			wait = time.Until(d)
+		}
+		c, e := tlsDial(ctx, network, net.JoinHostPort(t.addr, port), host, nil, t.frag, wait, roots)
+		if e == nil {
+			store.remember(host, t.addr, t.frag)
+			return c, refused, nil
+		}
+		err = e
+		if hasLast && t.addr == last.Addr && t.frag == last.Frag {
+			store.forget(host)
+		}
+	}
+	return nil, refused, err
 }
 
 // lookupHTTPS asks the DNS-over-HTTPS servers for host's HTTPS record.

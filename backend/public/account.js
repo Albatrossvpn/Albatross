@@ -102,8 +102,8 @@ function render(a) {
   meter($("#m-data"), "Data", a.used_bytes, a.quota_bytes, fmtBytes);
   meter($("#m-time"), "Time", a.used_seconds, a.max_seconds, fmtTime);
   const rows = [];
-  rows.push(["Plan", `${planPill(a.tier)} up to ${a.max_devices} ${a.max_devices === 1 ? "device" : "devices"} at once`]);
-  rows.push(["Connected now", esc(`${a.devices} of ${a.max_devices}`)]);
+  rows.push(["Plan", `${planPill(a.tier)} ${a.max_devices ? `up to ${a.max_devices} ${a.max_devices === 1 ? "device" : "devices"} at once` : "any number of devices"}`]);
+  rows.push(["Connected now", esc(a.max_devices ? `${a.devices} of ${a.max_devices}` : `${a.devices}`)]);
   if (a.resets_at) rows.push(["Allowance renews", esc(fmtDate(a.resets_at))]);
   rows.push(["Account ends", esc(a.expires_at ? fmtDate(a.expires_at) : "Never")]);
   $("#d-kv").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
@@ -115,7 +115,9 @@ async function loadDevices() {
   const el = $("#dev-list");
   try {
     const r = await api("GET", "devices", { token });
-    $("#dev-plan").textContent = `Your ${planName(r.tier)} plan lets ${r.max_devices === 1 ? "one device" : `${r.max_devices} devices`} connect at the same time. A device keeps its place for a few minutes after it disconnects; the subscription for Apple devices keeps it for six hours after an app refreshes it.`;
+    $("#dev-plan").textContent = r.max_devices
+      ? `Your ${planName(r.tier)} plan lets ${r.max_devices === 1 ? "one device" : `${r.max_devices} devices`} connect at the same time. A device keeps its place for a few minutes after it disconnects; the subscription for Apple devices keeps it for six hours after an app refreshes it.`
+      : `Your ${planName(r.tier)} plan lets any number of devices connect at the same time. These are the devices this account has been used on.`;
     el.innerHTML = r.devices.map((d) => `<div class="row between wrap-row">
       <span>${esc(d.name)}<span class="muted small"> · ${d.active ? "connected" : "last seen " + esc(ago(d.last_seen))}</span></span>
       <button class="btn small" type="button" data-remove="${esc(d.id)}">Remove</button></div>`).join("") ||
