@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -381,5 +382,45 @@ func TestEdge(t *testing.T) {
 	c.mu.Unlock()
 	if _, err := c.Edge(context.Background()); !errors.Is(err, ErrSignedOut) || c.View().SignedIn {
 		t.Fatalf("stale session: err %v signed in %v", err, c.View().SignedIn)
+	}
+}
+
+// The device headers name this installation to the service; the number is
+// made once and kept, and the "devices" refusal is passed on as is.
+func TestDeviceHeadersAndReason(t *testing.T) {
+	dir := t.TempDir()
+	id := DeviceID(dir)
+	if len(id) != 32 || strings.Trim(id, "0123456789abcdef") != "" {
+		t.Fatalf("device id %q", id)
+	}
+	if again := DeviceID(dir); again != id {
+		t.Fatalf("device id changed: %q then %q", id, again)
+	}
+	if other := DeviceID(t.TempDir()); other == id {
+		t.Fatal("two installations got the same device id")
+	}
+	var seen http.Header
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"token": "t1", "account": Info{
+			Username: "ada", Allowed: false, Reason: ReasonDevices, Tier: "silver", MaxDevices: 2, Devices: 2,
+		}})
+	}))
+	defer ts.Close()
+	c, _ := newTestClient(t, ts.URL)
+	c.Device, c.DeviceName = id, "Windows"
+	info, err := c.Login(context.Background(), "ada", "pw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen.Get("X-Albatross-Device") != id || seen.Get("X-Albatross-Device-Name") != "Windows" {
+		t.Fatalf("device headers: %v", seen)
+	}
+	if why := info.Why(time.Now()); why != ReasonDevices {
+		t.Fatalf("Why = %q, want devices", why)
+	}
+	if info.Tier != "silver" || info.MaxDevices != 2 || info.Devices != 2 {
+		t.Fatalf("plan fields lost: %+v", info)
 	}
 }

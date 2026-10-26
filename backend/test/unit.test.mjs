@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DAY, accountOf, checkPassword, checkUsername, hashPassword, randomPassword, rollPeriod, safeEqual, sign, verify, verifyPassword } from "../src/lib.js";
+import { DAY, TIERS, accountOf, checkPassword, checkUsername, hashPassword, maxDevices, randomPassword, rollPeriod, safeEqual, sign, tierOf, verify, verifyPassword } from "../src/lib.js";
 
 test("passwords are salted and verified", async () => {
   const a = await hashPassword("correct horse");
@@ -44,6 +44,31 @@ test("an account is allowed until a limit is reached, in a fixed order of reason
   assert.equal(accountOf(user({ expires_at: t }), t).reason, "expired");
   assert.equal(accountOf(user({ disabled: 1, used_bytes: 5000, expires_at: 1 }), t).reason, "disabled");
   assert.equal(accountOf(user({ quota_bytes: 0, max_seconds: 0, used_bytes: 1e12, used_seconds: 1e9 }), t).allowed, true, "zero means unlimited");
+});
+
+test("the plan says how many devices may hold a slot at once", () => {
+  const t = 10_100;
+  assert.deepEqual(Object.keys(TIERS), ["bronze", "silver", "gold", "vip"]);
+  assert.equal(tierOf("gold"), "gold");
+  assert.equal(tierOf("platinum"), "bronze", "an unknown plan is the first one");
+  assert.equal(tierOf(undefined), "bronze", "rows from before plans existed");
+  assert.equal(maxDevices({ tier: "vip" }), 8);
+  // A device asking for a slot: refused once the others fill the plan.
+  const a = accountOf(user({ tier: "silver" }), t, { others: 1 });
+  assert.equal(a.allowed, true);
+  assert.deepEqual([a.tier, a.max_devices, a.devices], ["silver", 2, 2]);
+  const b = accountOf(user({ tier: "silver" }), t, { others: 2 });
+  assert.equal(b.reason, "devices");
+  assert.equal(b.devices, 2);
+  assert.equal(accountOf(user(), t, { others: 1 }).reason, "devices", "bronze: one device");
+  assert.equal(accountOf(user({ tier: "vip" }), t, { others: 7 }).allowed, true);
+  // The other limits come first.
+  assert.equal(accountOf(user({ used_bytes: 1000 }), t, { others: 5 }).reason, "quota");
+  // A page sees how many devices hold a slot and is never refused for it.
+  const w = accountOf(user(), t, { active: 1 });
+  assert.equal(w.allowed, true);
+  assert.equal(w.devices, 1);
+  assert.equal(accountOf(user(), t).devices, 0);
 });
 
 test("the allowance renews every period and the renewal date is reported", () => {

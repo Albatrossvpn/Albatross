@@ -16,11 +16,11 @@ let proc;
 
 // `ip` stands in for the client's address: the local Worker keeps a
 // CF-Connecting-IP header it is given.
-async function call(method, path, { token, body, ip } = {}) {
+async function call(method, path, { token, body, ip, headers } = {}) {
   const res = await fetch(BASE + "/api/v1/" + path, {
     method,
     headers: {
-      "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}), ...(ip ? { "CF-Connecting-IP": ip } : {}),
+      "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}), ...(ip ? { "CF-Connecting-IP": ip } : {}), ...headers,
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -391,6 +391,70 @@ test("subscriptions for other devices: one address per account, servers by count
   const id = users.body.users[0].id;
   assert.equal((await call("PATCH", `admin/users/${id}`, { token: admin, body: { disabled: true } })).status, 200);
   assert.equal((await fetch(fresh)).status, 403);
+});
+
+test("plans: as many devices as the plan allows may be connected at once", async () => {
+  const dev = (n, name = "Windows") => ({ "X-Albatross-Device": n.repeat(16), "X-Albatross-Device-Name": name });
+  assert.equal((await call("POST", "admin/users", { token: admin, body: { username: "planned", password: "plan-pass-123", tier: "platinum" } })).status, 400);
+  const c = await call("POST", "admin/users", { token: admin, body: { username: "planned", password: "plan-pass-123", tier: "silver" } });
+  assert.equal(c.status, 201);
+  assert.equal(c.body.user.tier, "silver");
+  assert.equal(c.body.user.max_devices, 2);
+  const l = await call("POST", "login", { body: { username: "planned", password: "plan-pass-123" }, headers: dev("a") });
+  const tok = l.body.token;
+  assert.deepEqual([l.body.account.tier, l.body.account.max_devices, l.body.account.devices], ["silver", 2, 1], "signing in holds no slot, but this device would get one");
+  // Two devices connect; the third is refused and the first two stay.
+  let r = await call("POST", "usage", { token: tok, body: { bytes: 1, seconds: 1 }, headers: dev("a") });
+  assert.equal(r.body.account.allowed, true);
+  assert.equal(r.body.account.devices, 1);
+  r = await call("POST", "usage", { token: tok, body: { bytes: 1, seconds: 1 }, headers: dev("b", "Android") });
+  assert.equal(r.body.account.allowed, true);
+  assert.equal(r.body.account.devices, 2);
+  r = await call("POST", "usage", { token: tok, body: { bytes: 1, seconds: 1 }, headers: dev("c") });
+  assert.equal(r.body.account.allowed, false);
+  assert.equal(r.body.account.reason, "devices");
+  assert.equal(r.body.account.used_bytes, 3, "its use still counts");
+  r = await call("POST", "usage", { token: tok, body: {}, headers: dev("a") });
+  assert.equal(r.body.account.allowed, true, "the devices that hold a slot keep it");
+  // The website sees the devices and may not be refused for them.
+  const me = await call("GET", "me", { token: tok, headers: { "X-Albatross-Client": "web" } });
+  assert.equal(me.body.account.allowed, true);
+  assert.equal(me.body.account.devices, 2);
+  const list = await call("GET", "devices", { token: tok, headers: { "X-Albatross-Client": "web" } });
+  assert.equal(list.body.max_devices, 2);
+  assert.deepEqual(list.body.devices.map((d) => [d.name, d.active]).sort(), [["Android", true], ["Windows", false], ["Windows", true]]);
+  // Removing a device frees its slot at once.
+  assert.equal((await call("DELETE", "devices/" + "a".repeat(16), { token: tok, headers: { "X-Albatross-Client": "web" } })).status, 200);
+  assert.equal((await call("DELETE", "devices/" + "a".repeat(16), { token: tok, headers: { "X-Albatross-Client": "web" } })).status, 404);
+  r = await call("POST", "usage", { token: tok, body: {}, headers: dev("c") });
+  assert.equal(r.body.account.allowed, true);
+  // A smaller plan: a device that finds the slots full gives up its own.
+  const id = (await call("GET", "admin/users?q=planned", { token: admin })).body.users[0].id;
+  r = await call("PATCH", `admin/users/${id}`, { token: admin, body: { tier: "bronze" } });
+  assert.equal(r.body.user.tier, "bronze");
+  assert.equal(r.body.user.devices, 2);
+  assert.equal((await call("POST", "usage", { token: tok, body: {}, headers: dev("b") })).body.account.reason, "devices");
+  assert.equal((await call("POST", "usage", { token: tok, body: {}, headers: dev("c") })).body.account.allowed, true);
+  assert.equal((await call("GET", "admin/users?q=planned", { token: admin })).body.users[0].devices, 1);
+  // The subscription for Apple devices holds a slot too.
+  const sub = BASE + new URL((await call("GET", "sub", { token: tok, headers: { "X-Albatross-Client": "web" } })).body.url).pathname;
+  const refused = await fetch(sub);
+  assert.equal(refused.status, 403);
+  assert.match(await refused.text(), /1 devices? of this account/);
+  assert.equal((await call("DELETE", "devices/" + "c".repeat(16), { token: tok, headers: { "X-Albatross-Client": "web" } })).status, 200);
+  assert.equal((await fetch(sub)).status, 200);
+  assert.equal((await call("POST", "usage", { token: tok, body: {}, headers: dev("c") })).body.account.reason, "devices");
+  assert.equal((await call("GET", "devices", { token: tok, headers: { "X-Albatross-Client": "web" } })).body.devices[0].name, "iPhone, iPad and Mac (subscription)");
+  // Copies that name no device share one; signing everyone out forgets the devices.
+  assert.equal((await call("POST", "usage", { token: tok, body: {} })).body.account.reason, "devices");
+  await call("PATCH", `admin/users/${id}`, { token: admin, body: { sign_out: true } });
+  const again = (await call("POST", "login", { body: { username: "planned", password: "plan-pass-123" } })).body.token;
+  assert.equal((await call("POST", "usage", { token: again, body: {} })).body.account.allowed, true);
+  // The default plan for sign-ups.
+  assert.equal((await call("PUT", "admin/settings", { token: admin, body: { default_tier: "diamond" } })).status, 400);
+  assert.equal((await call("PUT", "admin/settings", { token: admin, body: { default_tier: "gold", signup_open: true } })).status, 200);
+  assert.equal((await call("GET", "public")).body.tiers.gold.devices, 4);
+  assert.equal((await call("POST", "signup", { body: { username: "golden", password: "12345678" } })).body.account.tier, "gold");
 });
 
 test("copies older than the manifest's min_version are refused; the website never is", async () => {

@@ -46,13 +46,22 @@ const (
 	ReasonExpired  = "expired"
 	ReasonQuota    = "quota"
 	ReasonTime     = "time"
+	// ReasonDevices means as many devices as the plan allows are connected
+	// already.
+	ReasonDevices = "devices"
 )
 
 // Info is what the service says about a user. Zero limits mean unlimited.
 type Info struct {
-	Username    string `json:"username"`
-	Allowed     bool   `json:"allowed"`
-	Reason      string `json:"reason,omitempty"`
+	Username string `json:"username"`
+	Allowed  bool   `json:"allowed"`
+	Reason   string `json:"reason,omitempty"`
+	// Tier is the plan (bronze, silver, gold, vip), which decides how many
+	// devices may be connected at once (MaxDevices); Devices is how many
+	// are, this one included when it may connect.
+	Tier        string `json:"tier,omitempty"`
+	MaxDevices  int    `json:"max_devices,omitempty"`
+	Devices     int    `json:"devices,omitempty"`
 	QuotaBytes  int64  `json:"quota_bytes"`
 	UsedBytes   int64  `json:"used_bytes"`
 	MaxSeconds  int64  `json:"max_seconds"`
@@ -139,6 +148,10 @@ type Client struct {
 	// Version is this copy's version, sent with every call: the service
 	// refuses copies older than the update manifest's minimum.
 	Version string
+	// Device names this installation to the service (DeviceID), which
+	// counts the devices connected with one account against its plan;
+	// DeviceName says what kind of device it is ("Windows", "Android").
+	Device, DeviceName string
 
 	mu sync.Mutex
 	st stored
@@ -379,6 +392,12 @@ func (c *Client) call(ctx context.Context, method, path, token string, body, out
 		if c.Version != "" {
 			req.Header.Set("X-Albatross-Version", c.Version)
 		}
+		if c.Device != "" {
+			req.Header.Set("X-Albatross-Device", c.Device)
+			if c.DeviceName != "" {
+				req.Header.Set("X-Albatross-Device-Name", c.DeviceName)
+			}
+		}
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
@@ -451,3 +470,21 @@ func (c *Client) Edge(ctx context.Context) ([]string, error) {
 
 // SessionPath is where an engine keeps the session inside its data dir.
 func SessionPath(dir string) string { return filepath.Join(dir, "account.json") }
+
+// DeviceID returns this installation's name for the account service: a
+// random number made once and kept in the data folder, so the service can
+// tell the devices one account is used on apart. It says nothing about
+// the device itself.
+func DeviceID(dir string) string {
+	path := filepath.Join(dir, "device.id")
+	if b, err := os.ReadFile(path); err == nil {
+		if s := strings.TrimSpace(string(b)); len(s) == 32 && strings.Trim(s, "0123456789abcdef") == "" {
+			return s
+		}
+	}
+	var b [16]byte
+	rand.Read(b[:])
+	id := hex.EncodeToString(b[:])
+	os.WriteFile(path, []byte(id), 0o600)
+	return id
+}
