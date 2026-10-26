@@ -202,15 +202,15 @@ test("a subscription is topped up from the fresh list when the hot list is short
   const hot = ["vless://a@h1:443#Germany", "ss://YWVzOmJhc2U@h2:8388#US", "albatross://x@h3:1#own", "trojan://p@h4:443#Iran", "wireguard://k@h5:51820#NL"].join("\n");
   const fresh = Array.from({ length: 500 }, (_, i) => `vmess://${Buffer.from(JSON.stringify({ add: "f" + i, ps: "FR " + i })).toString("base64")}`).join("\n");
   const full = pool(hot, fresh, 2);
-  assert.deepEqual(full.map((e) => e.link.split("://")[0]), ["vless", "ss"], "enough hot servers: no top-up, own protocols and Iran left out");
+  assert.deepEqual(full.map((e) => e.link.split("://")[0]), ["vless", "ss", "wireguard"], "enough hot servers: no top-up, own protocols and Iran left out, WireGuard kept");
   let n = 0;
   const seq = () => ((n += 0.37) % 1);
   const topped = pool(hot, fresh, 10, seq);
   assert.equal(topped.length, 10);
-  assert.equal(topped.filter((e) => e.link.startsWith("vmess://")).length, 8);
+  assert.equal(topped.filter((e) => e.link.startsWith("vmess://")).length, 7);
   const other = pool(hot, fresh, 10);
   assert.equal(other.length, 10);
-  assert.equal(pool(hot, "", 10).length, 2, "nothing fresh: the hot list alone");
+  assert.equal(pool(hot, "", 10).length, 3, "nothing fresh: the hot list alone");
   const udp = pool("hysteria2://a@h:443#DE\nvless://b@h:443#US\ntuic://c@h:443#FR\nss://YWVzOmJhc2U@h2:8388#NL", "", 1);
   assert.deepEqual(udp.map((e) => e.link.split("://")[0]), ["vless", "ss", "hysteria2", "tuic"], "UDP servers go last");
 });

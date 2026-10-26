@@ -196,3 +196,44 @@ func TestCheckIranUsesItsCache(t *testing.T) {
 		t.Fatalf("saved %v", saved)
 	}
 }
+
+// Servers of a protocol the most shared lists lack are still among the
+// ones the real test covers, and the hot list keeps room for WireGuard.
+func TestRareProtocolsAreTestedAndKept(t *testing.T) {
+	var list []*entry
+	for i := 0; i < 50; i++ {
+		list = append(list, &entry{link: "vless://x@v" + string(rune('a'+i%26)) + ":1#" + string(rune('A'+i%26)), proto: "vless", pop: 100 - i})
+	}
+	for i := 0; i < 5; i++ {
+		list = append(list, &entry{link: "wireguard://k@w:" + string(rune('1'+i)) + "#W", proto: "wireguard", pop: 1})
+	}
+	promoteRare(list, 20, 3)
+	wg := 0
+	for _, e := range list[:20] {
+		if e.proto == "wireguard" {
+			wg++
+		}
+	}
+	if wg != 3 || len(list) != 55 {
+		t.Fatalf("%d wireguard among the first 20, %d entries", wg, len(list))
+	}
+	if list[0].proto != "vless" || list[0].pop != 100 {
+		t.Fatalf("the most shared server moved: %+v", list[0])
+	}
+
+	out := list[:4]
+	cands := list
+	got := reserveProto(append([]*entry(nil), out...), cands, "wireguard", 2)
+	wg = 0
+	for _, e := range got {
+		if e.proto == "wireguard" {
+			wg++
+		}
+	}
+	if len(got) != 4 || wg != 2 {
+		t.Fatalf("reserve: %d entries, %d wireguard", len(got), wg)
+	}
+	if got[0] != list[0] {
+		t.Fatal("the first server was replaced instead of the last")
+	}
+}
