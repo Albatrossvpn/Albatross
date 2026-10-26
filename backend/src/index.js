@@ -81,6 +81,8 @@ async function route(request, env, url) {
     case "GET me": return me(request, env);
     case "GET edge": return edge(request, env);
     case "GET devices": return devicesList(request, env);
+    case "GET dns/google.mobileconfig": return dnsProfile("google");
+    case "GET dns/cloudflare.mobileconfig": return dnsProfile("cloudflare");
     case "GET sub": return subInfo(request, env, url);
     case "POST usage": return usage(request, env);
     case "POST password": return changePassword(request, env);
@@ -230,6 +232,84 @@ async function publicInfo(env) {
     turnstile_sitekey: env.TURNSTILE_SITEKEY || "",
     downloads: { windows: s.download_windows, android: s.download_android },
     tiers: TIERS,
+  });
+}
+
+// ---------- Encrypted DNS for Apple devices ----------
+//
+// On some networks the resolver answers for this service's names with a
+// lie, so the account page and the subscription never load there. A
+// configuration profile that sets DNS over HTTPS for the whole device
+// goes around that; Safari installs it from these addresses.
+
+const DNS_PROVIDERS = {
+  google: { name: "Google", url: "https://dns.google/dns-query", addrs: ["8.8.8.8", "8.8.4.4", "2001:4860:4860::8888", "2001:4860:4860::8844"], id: "google" },
+  cloudflare: { name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query", addrs: ["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001"], id: "cloudflare" },
+};
+
+function dnsProfile(which) {
+  const p = DNS_PROVIDERS[which];
+  if (!p) throw new HttpError(404, "Not found.");
+  const xml = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const body = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>DNSSettings</key>
+      <dict>
+        <key>DNSProtocol</key>
+        <string>HTTPS</string>
+        <key>ServerURL</key>
+        <string>${xml(p.url)}</string>
+        <key>ServerAddresses</key>
+        <array>
+${p.addrs.map((a) => `          <string>${a}</string>`).join("\n")}
+        </array>
+      </dict>
+      <key>PayloadDescription</key>
+      <string>Encrypted DNS (${xml(p.name)}) for every network</string>
+      <key>PayloadDisplayName</key>
+      <string>Encrypted DNS: ${xml(p.name)}</string>
+      <key>PayloadIdentifier</key>
+      <string>online.albatrossvpn.dns.${p.id}.settings</string>
+      <key>PayloadType</key>
+      <string>com.apple.dnsSettings.managed</string>
+      <key>PayloadUUID</key>
+      <string>a1b2c3d4-0000-4000-8000-${p.id === "google" ? "000000000001" : "000000000002"}</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>ProhibitDisablement</key>
+      <false/>
+    </dict>
+  </array>
+  <key>PayloadDescription</key>
+  <string>Looks names up over an encrypted connection to ${xml(p.name)}, so a network's resolver cannot answer with lies. Remove it any time in Settings, General, VPN &amp; Device Management.</string>
+  <key>PayloadDisplayName</key>
+  <string>Encrypted DNS (${xml(p.name)})</string>
+  <key>PayloadIdentifier</key>
+  <string>online.albatrossvpn.dns.${p.id}</string>
+  <key>PayloadRemovalDisallowed</key>
+  <false/>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>a1b2c3d4-0000-4000-8000-${p.id === "google" ? "000000000011" : "000000000012"}</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>
+`;
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/x-apple-aspen-config; charset=utf-8",
+      "Content-Disposition": `attachment; filename="encrypted-dns-${p.id}.mobileconfig"`,
+      "Cache-Control": "public, max-age=86400",
+      "X-Content-Type-Options": "nosniff",
+    },
   });
 }
 

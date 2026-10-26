@@ -68,6 +68,14 @@
       <div class="row wrap-row" id="d-dl"></div>
       <p class="muted note mt">Sign in to the app with this username and password.</p>
     </div>
+    <div class="card" id="dns">
+      <h2>Servers not updating, or this page hard to reach?</h2>
+      <p class="muted note">On some networks the operator's DNS answers for our addresses with a wrong address, so the page and the servers in your connection app stop loading. Encrypted DNS goes around that. On iPhone and iPad, install one of these profiles in Safari (Settings, General, VPN &amp; Device Management, then Install); on Android, set Private DNS to <code>dns.google</code>; the Albatross app for Windows and Android needs nothing.</p>
+      <div class="row wrap-row">
+        <a class="btn small" href="/api/v1/dns/google.mobileconfig">Encrypted DNS: Google</a>
+        <a class="btn small" href="/api/v1/dns/cloudflare.mobileconfig">Encrypted DNS: Cloudflare</a>
+      </div>
+    </div>
     <div class="card" id="devices">
       <h2>iPhone, iPad and Mac</h2>
       <p class="muted note">On Apple devices a connection app from the App Store carries the traffic. Pick yours, then add your servers to it with one tap; they appear under the <span data-name>Albatross</span> name and refresh by themselves.</p>
