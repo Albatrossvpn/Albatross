@@ -52,7 +52,7 @@ const newSize = 4000
 // minProtoTests is how many servers of each protocol the real test covers
 // at least: the most shared servers are mostly VLESS, and a protocol the
 // filtering spares (WireGuard works well here) was hardly ever tested.
-const minProtoTests = 400
+const minProtoTests = 200
 
 // promoteRare moves servers of protocols that have fewer than min entries
 // among the first n of list forward into that range, keeping the order
