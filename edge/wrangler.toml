@@ -12,10 +12,11 @@ routes = [{ pattern = "edge.albatrossvpn.online", custom_domain = true }]
 [vars]
 # Where the Worker reaches sites that are themselves behind Cloudflare
 # (a Worker cannot open a socket to Cloudflare's own addresses): one or
-# more "host" or "host:port" relays, comma separated, tried in order.
+# more "host" (takes every port) or "host:port" (a TLS relay: 443 only)
+# relays, comma separated, tried in order.
 # Empty means such sites are not reachable through the edge; the app then
 # uses another server for them.
-PROXY_IP = ""
+PROXY_IP = "148.113.3.23:10443"
 
 # Secrets (set by the deploy workflow, never in this file):
 #   EDGE_UUID  the VLESS user id; the account service hands out the same one

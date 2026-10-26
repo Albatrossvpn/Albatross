@@ -468,6 +468,38 @@ func (c *Client) Edge(ctx context.Context) ([]string, error) {
 	return out.Links, nil
 }
 
+// ListKey is one of the keys the collector's lists are sealed with, as the
+// service hands them out: the key's id and the key in hex.
+type ListKey struct {
+	ID  uint64 `json:"id"`
+	Key string `json:"key"`
+}
+
+// ListKeys returns the keys that open the collector's lists, newest first,
+// for the signed-in user. An account at a limit gets none. A session the
+// service no longer accepts is forgotten, as in Sync.
+func (c *Client) ListKeys(ctx context.Context) ([]ListKey, error) {
+	c.mu.Lock()
+	token := c.st.Token
+	c.mu.Unlock()
+	if token == "" {
+		return nil, ErrSignedOut
+	}
+	var out struct {
+		Keys []ListKey `json:"keys"`
+	}
+	err := c.call(ctx, http.MethodGet, "listkeys", token, nil, &out)
+	var he *Error
+	if errors.As(err, &he) && he.Status == http.StatusUnauthorized {
+		c.logoutIf(token)
+		return nil, ErrSignedOut
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out.Keys, nil
+}
+
 // SessionPath is where an engine keeps the session inside its data dir.
 func SessionPath(dir string) string { return filepath.Join(dir, "account.json") }
 
