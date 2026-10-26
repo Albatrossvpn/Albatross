@@ -69,6 +69,33 @@ type AccountState struct {
 	MaxDevices int    `json:"max_devices"`
 	Devices    int    `json:"devices"`
 	SiteURL    string `json:"site_url,omitempty"`
+	// Progress says what signing in is doing right now, while it is:
+	// finding a server to go through can take a while.
+	Progress string `json:"progress,omitempty"`
+}
+
+// Steps of signing in, shown to the user.
+const (
+	stepFinding = "Looking for a server to sign in through…"
+	stepThrough = "Signing in through a server…"
+	stepDirect  = "Contacting the account service directly…"
+)
+
+// setStep tells the UI what signing in is doing ("" when it is done).
+func (e *Engine) setStep(s string) {
+	e.mu.Lock()
+	e.loginStep = s
+	e.mu.Unlock()
+}
+
+// setStepIf moves signing in from one step to the next; other calls
+// through tunnelFirst (usage checks) show nothing.
+func (e *Engine) setStepIf(from, to string) {
+	e.mu.Lock()
+	if e.loginStep == from {
+		e.loginStep = to
+	}
+	e.mu.Unlock()
 }
 
 func accountURLs(opt Options) []string {
@@ -90,7 +117,10 @@ func (e *Engine) Account() AccountState {
 	if e.acct == nil {
 		return AccountState{}
 	}
-	st := AccountState{Enabled: true, SiteURL: e.acct.Site()}
+	e.mu.Lock()
+	step := e.loginStep
+	e.mu.Unlock()
+	st := AccountState{Enabled: true, SiteURL: e.acct.Site(), Progress: step}
 	v := e.acct.View()
 	if !v.SignedIn {
 		return st
@@ -120,7 +150,9 @@ func (e *Engine) Login(username, password string) error {
 		_, err := e.acct.Login(ctx, username, password)
 		return err
 	}
+	e.setStep(stepFinding)
 	err := e.tunnelFirst(ctx, signInWait-directWait, login)
+	e.setStep("")
 	if err != nil {
 		if errors.Is(err, account.ErrUnreachable) || errors.Is(err, context.DeadlineExceeded) {
 			return errors.New("Cannot reach the account service. Check your internet connection and try again.")
@@ -174,6 +206,7 @@ func (e *Engine) tunnelFirst(ctx context.Context, wait time.Duration, call func(
 			// call's later tries.
 			go e.cf.Scan(ctx, 60, 4)
 		}
+		e.setStepIf(stepFinding, stepDirect)
 		go func() { done <- call(account.WithClient(ctx, e.privateDirect)) }()
 	}
 	delay := time.NewTimer(directAfter)
@@ -240,6 +273,7 @@ func (e *Engine) viaServer(ctx context.Context, call func(context.Context) error
 			continue
 		}
 		e.logf("info", "Signing in through a server.")
+		e.setStepIf(stepFinding, stepThrough)
 		// A copy set up for this device (the shared tester lacks the
 		// phone's settings, without which sing-box exits at once there).
 		t := e.newTester()
