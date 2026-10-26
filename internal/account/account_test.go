@@ -351,6 +351,13 @@ func TestEdge(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/v1/login":
 			fmt.Fprint(w, `{"token":"t1","account":{"username":"u"}}`)
+		case "/api/v1/listkeys":
+			if r.Header.Get("Authorization") != "Bearer t1" {
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprint(w, `{"error":"Sign in again."}`)
+				return
+			}
+			fmt.Fprint(w, `{"keys":[{"id":1761480000,"key":"00ff"}]}`)
 		case "/api/v1/edge":
 			gotAuth = r.Header.Get("Authorization")
 			if gotAuth != "Bearer t1" {
@@ -375,6 +382,10 @@ func TestEdge(t *testing.T) {
 	links, err := c.Edge(context.Background())
 	if err != nil || len(links) != 1 || gotAuth != "Bearer t1" {
 		t.Fatalf("links %v err %v auth %q", links, err, gotAuth)
+	}
+	keys, err := c.ListKeys(context.Background())
+	if err != nil || len(keys) != 1 || keys[0].ID != 1761480000 || keys[0].Key != "00ff" {
+		t.Fatalf("list keys %v err %v", keys, err)
 	}
 	// A session the service no longer accepts is forgotten.
 	c.mu.Lock()

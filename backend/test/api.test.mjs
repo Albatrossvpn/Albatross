@@ -131,6 +131,19 @@ test("the administrator renews, limits time, disables and re-enables", async () 
   assert.equal((await call("PATCH", `admin/users/${id}`, { token: admin, body: { quota_bytes: -5 } })).status, 400);
 });
 
+test("the lists' keys go to signed-in users who may connect, newest first", async () => {
+  assert.equal((await call("GET", "listkeys")).status, 401);
+  const admin = (await call("POST", "admin/login", { body: { username: ADMIN.username, password: ADMIN.password } })).body.token;
+  await call("POST", "admin/users", { token: admin, body: { username: "keys-1", password: "keys-pass-1", quota_bytes: 0, max_seconds: 0, valid_days: 30 } });
+  const token = (await call("POST", "login", { body: { username: "keys-1", password: "keys-pass-1" } })).body.token;
+  const r = await call("GET", "listkeys", { token });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("cache-control"), "no-store");
+  assert.ok(Array.isArray(r.body.keys), "a list of keys, empty before the first collection");
+  for (let i = 1; i < r.body.keys.length; i++) assert.ok(r.body.keys[i - 1].id > r.body.keys[i].id, "newest first");
+  await call("POST", "admin/users/keys-1", { token: admin, body: { enabled: false } }).catch(() => {});
+});
+
 test("a usage report sent again with the same id is counted once", async () => {
   const c = await call("POST", "admin/users", { token: admin, body: { username: "twice", password: "twice-pass-1", quota_bytes: 10 * GB } });
   assert.equal(c.status, 201);

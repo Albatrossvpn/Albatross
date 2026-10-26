@@ -11,6 +11,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	_ "embed"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -71,6 +72,10 @@ type Source struct {
 	Delta bool `json:"delta,omitempty"`
 	// Sealed lists are encrypted with OwnKey (see Open).
 	Sealed bool `json:"sealed,omitempty"`
+	// Keyed lists are sealed with the list key of the collection that
+	// wrote them (SealKeyed), which the account service hands to signed-in
+	// users only (see OpenKeyed).
+	Keyed bool `json:"keyed,omitempty"`
 	// Relay marks the sealed list of the relays inside the country (own-0.bin).
 	Relay bool `json:"relay,omitempty"`
 }
@@ -182,17 +187,72 @@ func Central(install uint32) []Source {
 	}
 	// hot.txt is the few hundred servers that passed the collector's real
 	// test most recently: small, re-tested every 20 minutes, tried first.
-	add("hot.txt", TierPriority)
-	out[len(out)-1].Hot = true
+	// The lists go out sealed with a key that changes every collection
+	// and that only signed-in users get from the account service, so a
+	// copy of the app with the sign-in cut out reads nothing.
+	add("hot.txt"+KeyedSuffix, TierPriority)
+	out[len(out)-1].Hot, out[len(out)-1].Keyed = true, true
 	// new.txt is what fresh.txt gained lately; phones fetch it often and
 	// the whole fresh.txt rarely.
-	add("new.txt", TierPriority)
-	out[len(out)-1].Delta = true
-	add("fresh.txt", TierPriority)
+	add("new.txt"+KeyedSuffix, TierPriority)
+	out[len(out)-1].Delta, out[len(out)-1].Keyed = true, true
+	add("fresh.txt"+KeyedSuffix, TierPriority)
+	out[len(out)-1].Keyed = true
 	for i := 1; i <= CentralShards; i++ {
-		add(fmt.Sprintf("all-%d.txt", i), TierDeep)
+		add(fmt.Sprintf("all-%d.txt", i)+KeyedSuffix, TierDeep)
+		out[len(out)-1].Keyed = true
 	}
 	return out
+}
+
+// KeyedSuffix ends the name of a list sealed with a list key.
+const KeyedSuffix = ".sealed"
+
+// keyedMagic opens a keyed list: the format, then the key's id.
+const keyedMagic = "ALBK1"
+
+// ListKey is one of the keys the lists are sealed with: its id (the time
+// of the collection that made it) and the key itself.
+type ListKey struct {
+	ID  uint64 `json:"id"`
+	Key []byte `json:"key"`
+}
+
+// SealKeyed seals a list with a list key; the key's id travels in front so
+// the app knows which key opens it.
+func SealKeyed(k ListKey, text string) ([]byte, error) {
+	sealed, err := Seal(k.Key, text)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, len(keyedMagic)+8+len(sealed))
+	out = append(out, keyedMagic...)
+	out = binary.BigEndian.AppendUint64(out, k.ID)
+	return append(out, sealed...), nil
+}
+
+// KeyedID returns the id of the key a keyed list needs, or false when the
+// data is not a keyed list.
+func KeyedID(data string) (uint64, bool) {
+	if len(data) < len(keyedMagic)+8 || data[:len(keyedMagic)] != keyedMagic {
+		return 0, false
+	}
+	return binary.BigEndian.Uint64([]byte(data[len(keyedMagic) : len(keyedMagic)+8])), true
+}
+
+// OpenKeyed opens a keyed list with the key of its id among keys, or
+// returns "".
+func OpenKeyed(keys []ListKey, data string) string {
+	id, ok := KeyedID(data)
+	if !ok {
+		return ""
+	}
+	for _, k := range keys {
+		if k.ID == id {
+			return OpenWith(k.Key, data[len(keyedMagic)+8:])
+		}
+	}
+	return ""
 }
 
 // OwnKey (hex, 32 bytes) decrypts own.bin, the list of the project's own
