@@ -48,7 +48,7 @@ function limitsFrom(p) {
 }
 
 function fillLimits(p, u) {
-  $(`#${p}-tier`).value = u.tier || "bronze";
+  $(`#${p}-tier`).value = u.tier || "auto";
   $(`#${p}-quota`).value = u.quota_bytes ? +(u.quota_bytes / GB).toFixed(3) : "";
   $(`#${p}-hours`).value = u.max_seconds ? +(u.max_seconds / 3600).toFixed(2) : "";
   $(`#${p}-reset`).value = u.reset_days || "";
@@ -86,7 +86,10 @@ const planCell = (u) => `${planBadge(u.tier, planName(u.tier))}<div class="muted
 /** Fills every plan selector from the service's list of plans. */
 function fillPlans() {
   const opts = Object.entries(tiers).map(([k, t]) => `<option value="${esc(k)}">${esc(t.name)} · ${t.devices ? `${t.devices} ${t.devices === 1 ? "device" : "devices"}` : "any number of devices"}</option>`).join("");
-  for (const id of ["u-tier", "b-tier", "t-tier"]) $("#" + id).innerHTML = opts;
+  // "Auto" lets the data allowance pick the plan: no limit VIP, 100 GB
+  // and up Gold, 10 GB and up Silver, less Bronze.
+  const auto = `<option value="auto">Auto · by data allowance</option>`;
+  for (const id of ["u-tier", "b-tier", "t-tier"]) $("#" + id).innerHTML = auto + opts;
 }
 
 async function loadUsers() {
@@ -163,7 +166,7 @@ function openUser(u) {
   $("#u-save").textContent = u ? "Save" : "Create";
   $("#u-name").value = "";
   $("#u-pass").value = "";
-  fillLimits("u", u || { reset_days: 0, quota_bytes: 5 * GB, tier: "bronze" });
+  fillLimits("u", u || { reset_days: 0, quota_bytes: 5 * GB, tier: "auto" });
   if (u) $("#u-toggle").textContent = u.disabled ? "Turn on" : "Turn off";
   $("#user-dialog").showModal();
 }
@@ -222,7 +225,7 @@ $("#bulk").addEventListener("click", () => {
   for (const id of ["b-copy", "b-download"]) $("#" + id).classList.add("hidden");
   $("#b-create").classList.remove("hidden");
   $("#b-error").textContent = "";
-  fillLimits("b", { reset_days: 0, quota_bytes: 5 * GB, tier: "bronze" });
+  fillLimits("b", { reset_days: 0, quota_bytes: 5 * GB, tier: "auto" });
   $("#bulk-dialog").showModal();
 });
 $("#b-cancel").addEventListener("click", () => $("#bulk-dialog").close());
@@ -259,7 +262,7 @@ $("#settings").addEventListener("click", async () => {
   $("#t-hours").value = +(Number(s.default_max_seconds) / 3600).toFixed(2);
   $("#t-reset").value = s.default_reset_days;
   $("#t-valid").value = s.default_valid_days;
-  $("#t-tier").value = s.default_tier || "bronze";
+  $("#t-tier").value = s.default_tier || "auto";
   $("#t-win").value = s.download_windows;
   $("#t-and").value = s.download_android;
   $("#t-error").textContent = "";

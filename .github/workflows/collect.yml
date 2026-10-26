@@ -96,11 +96,11 @@ jobs:
         # 15,000 real tests take a few minutes (most fail at once); the
         # address probe before them stops after ten (cmd/collect -probe-minutes).
         run: |
-          # The plain copies of the lists stay while apps from before the
-          # sealed lists are around (LISTS_PLAIN=0 ends them).
+          # The lists go out sealed; the plain copies only while LISTS_PLAIN
+          # is 1 (apps from before 1.0.2 were cut off by the forced update).
           go run ./cmd/collect -prev prev -real 15000 -probe-minutes 10 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" \
             -sources "$RUNNER_TEMP/sources.txt" -channels "$RUNNER_TEMP/channels.txt" -out "$RUNNER_TEMP/servers" \
-            -keys "$RUNNER_TEMP/listkeys.json" -keys-out "$RUNNER_TEMP/listkeys.new.json" -plain="${LISTS_PLAIN:-1}"
+            -keys "$RUNNER_TEMP/listkeys.json" -keys-out "$RUNNER_TEMP/listkeys.new.json" -plain="${LISTS_PLAIN:-0}"
           # The discovered lists travel with the servers branch too.
           for f in sources.txt channels.txt; do [ -f "$RUNNER_TEMP/$f" ] && cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/servers/$f"; done; true
       # The collector itself, for a tester inside the country (deploy/tester).
@@ -129,6 +129,7 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          LISTS_PLAIN: ${{ vars.LISTS_PLAIN }}
         run: |
           account="$(bash build/account-url.sh | cut -d, -f1)"
           files=()
@@ -138,6 +139,12 @@ jobs:
           done
           bash deploy/files/publish-lists.sh "$account" servers "${files[@]}"
           bash deploy/files/publish-lists.sh "$account" tools "$RUNNER_TEMP"/tools/collect-linux-*
+          # Without plain copies, the stale plain lists in storage go too.
+          if [ "${LISTS_PLAIN:-0}" != 1 ] && [ -n "$CLOUDFLARE_API_TOKEN" ]; then
+            for f in hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt own-0.bin own-1.bin own-2.bin own-3.bin own-4.bin; do
+              (cd backend && npx wrangler r2 object delete "albatross-files/list/servers/$f" --remote >/dev/null 2>&1) || true
+            done
+          fi
           # The lists' keys, for the account service only: outside list/,
           # so they are never served as a file. The new lists are of no use
           # to anyone until this is stored, so it must succeed.

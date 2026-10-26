@@ -129,6 +129,17 @@ export const TIERS = {
 };
 export const DEFAULT_TIER = "bronze";
 
+// The plan an account's data allowance earns when none is chosen for
+// it: no limit is VIP, 100 GB and up Gold, 10 GB and up Silver, less
+// Bronze.
+export function tierForQuota(quota) {
+  const gb = 1024 ** 3;
+  if (!(quota > 0)) return "vip";
+  if (quota >= 100 * gb) return "gold";
+  if (quota >= 10 * gb) return "silver";
+  return "bronze";
+}
+
 /** The plan a stored tier names; an unknown one is the default plan. */
 export const tierOf = (tier) => (Object.hasOwn(TIERS, tier) ? tier : DEFAULT_TIER);
 

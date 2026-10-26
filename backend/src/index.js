@@ -2,10 +2,10 @@
 // change their account on the website, the administrator manages everyone.
 import {
   DAY, DEFAULT_TIER, DEVICE_ACTIVE, SUB_ACTIVE, TIERS, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, maxDevices, versionLess,
-  randomPassword, rollPeriod, safeEqual, sign, tag, tierOf, verify, verifyPassword,
+  randomPassword, rollPeriod, safeEqual, sign, tag, tierForQuota, tierOf, verify, verifyPassword,
 } from "./lib.js";
-import { LIST_KEYS, LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
-import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, subPool, subToken } from "./sub.js";
+import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
+import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -17,7 +17,7 @@ const DEFAULTS = {
   default_max_seconds: "0",
   default_valid_days: "0",
   default_reset_days: "0", // allowances renew only when the admin recharges them
-  default_tier: DEFAULT_TIER,
+  default_tier: "auto", // the plan sign-ups get: by their allowance, or a named plan
   download_windows: "",
   download_android: "",
 };
@@ -450,7 +450,8 @@ async function signup(request, env) {
       `INSERT INTO users (username, pass_hash, created_at, quota_bytes, max_seconds, expires_at, reset_days, period_start, tier)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?3, ?8)`,
     ).bind(username.trim().toLowerCase(), await hashPassword(password), t, Number(s.default_quota_bytes), Number(s.default_max_seconds),
-      days > 0 ? t + days * DAY : 0, Number(s.default_reset_days), tierOf(s.default_tier)).run();
+      days > 0 ? t + days * DAY : 0, Number(s.default_reset_days),
+      s.default_tier === "auto" || !s.default_tier ? tierForQuota(Number(s.default_quota_bytes)) : tierOf(s.default_tier)).run();
   } catch (e) {
     if (/UNIQUE/i.test(String(e))) throw new HttpError(409, "That username is taken.");
     throw e;
@@ -489,19 +490,10 @@ async function listKeys(request, env) {
   const { user } = await authUser(request, env);
   const a = await viewOf(env, user, deviceOf(request), now());
   if (!a.allowed) return json({ keys: [], reason: a.reason });
-  let keys = [];
-  if (env.FILES) {
-    try {
-      const o = await env.FILES.get(LIST_KEYS);
-      const all = o ? await o.json() : [];
-      keys = (Array.isArray(all) ? all : [])
-        .filter((k) => Number.isSafeInteger(k.id) && typeof k.key === "string" && /^[0-9a-f]{64}$/.test(k.key))
-        .sort((x, y) => y.id - x.id)
-        .slice(0, LIST_KEYS_GIVEN);
-    } catch {
-      keys = [];
-    }
-  }
+  const keys = (await storedListKeys(env))
+    .filter((k) => Number.isSafeInteger(k.id) && typeof k.key === "string" && /^[0-9a-f]{64}$/.test(k.key))
+    .sort((x, y) => y.id - x.id)
+    .slice(0, LIST_KEYS_GIVEN);
   return json({ keys, reason: "" });
 }
 
@@ -745,9 +737,13 @@ function limitsFrom(b, base = {}) {
   num("expires_at", 4102444800);
   num("reset_days", 3650);
   if (b.note !== undefined) out.note = String(b.note).slice(0, 200);
-  if (b.tier !== undefined) {
+  // The plan: as chosen, or ("" / auto / none given) the one the
+  // allowance earns whenever the allowance is set.
+  if (b.tier !== undefined && b.tier !== "" && b.tier !== "auto") {
     if (!Object.hasOwn(TIERS, b.tier)) throw new HttpError(400, `The plan is one of ${Object.keys(TIERS).join(", ")}.`);
     out.tier = b.tier;
+  } else if (out.quota_bytes !== undefined) {
+    out.tier = tierForQuota(out.quota_bytes);
   }
   return { ...base, ...out };
 }
@@ -759,7 +755,7 @@ async function createUser(env, name, password, limits, t) {
       `INSERT INTO users (username, pass_hash, created_at, quota_bytes, max_seconds, expires_at, reset_days, period_start, note, tier)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?3, ?8, ?9)`,
     ).bind(name.trim().toLowerCase(), await hashPassword(password), t, limits.quota_bytes ?? 0, limits.max_seconds ?? 0,
-      limits.expires_at ?? 0, limits.reset_days ?? 0, limits.note ?? "", limits.tier ?? DEFAULT_TIER).run();
+      limits.expires_at ?? 0, limits.reset_days ?? 0, limits.note ?? "", limits.tier ?? tierForQuota(limits.quota_bytes ?? 0)).run();
   } catch (e) {
     if (/UNIQUE/i.test(String(e))) throw new HttpError(409, `The username "${name}" is taken.`);
     throw e;
@@ -853,7 +849,7 @@ async function adminSaveSettings(request, env) {
     let v = String(b[k]).slice(0, 500);
     if (k === "signup_open") v = b[k] === true || v === "1" ? "1" : "0";
     else if (k === "default_tier") {
-      if (!Object.hasOwn(TIERS, v)) throw new HttpError(400, `The plan is one of ${Object.keys(TIERS).join(", ")}.`);
+      if (v !== "auto" && !Object.hasOwn(TIERS, v)) throw new HttpError(400, `The plan is auto or one of ${Object.keys(TIERS).join(", ")}.`);
     } else if (k.startsWith("download_")) {
       if (v && !/^https:\/\//.test(v)) throw new HttpError(400, "Download links must start with https://");
     } else if (!/^\d{1,16}$/.test(v)) throw new HttpError(400, `Bad value for ${k}.`);
