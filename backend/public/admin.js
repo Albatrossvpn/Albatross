@@ -1,4 +1,4 @@
-import { $, ago, api, esc, fmtBytes, fmtDate, fmtTime, frame, toast } from "/site.js";
+import { $, ago, api, esc, fmtBytes, fmtDate, fmtTime, frame, planBadge, toast } from "/site.js";
 
 const GB = 1024 ** 3;
 const KEY = "admin-session";
@@ -38,6 +38,7 @@ const num = (v) => (v === "" || v == null ? 0 : Number(v));
 
 function limitsFrom(p) {
   return {
+    tier: $(`#${p}-tier`).value,
     quota_bytes: Math.round(num($(`#${p}-quota`).value) * GB),
     max_seconds: Math.round(num($(`#${p}-hours`).value) * 3600),
     reset_days: Math.round(num($(`#${p}-reset`).value)),
@@ -47,6 +48,7 @@ function limitsFrom(p) {
 }
 
 function fillLimits(p, u) {
+  $(`#${p}-tier`).value = u.tier || "bronze";
   $(`#${p}-quota`).value = u.quota_bytes ? +(u.quota_bytes / GB).toFixed(3) : "";
   $(`#${p}-hours`).value = u.max_seconds ? +(u.max_seconds / 3600).toFixed(2) : "";
   $(`#${p}-reset`).value = u.reset_days || "";
@@ -75,7 +77,17 @@ function usageCell(used, limit, fmt) {
 
 const statusPill = (u) =>
   u.status === "active" ? `<span class="pill">Active</span>`
-    : `<span class="pill ${u.status === "disabled" ? "bad" : "warn"}">${esc({ disabled: "Off", expired: "Expired", quota: "Data used", time: "Time used" }[u.status] || u.status)}</span>`;
+    : `<span class="pill ${u.status === "disabled" ? "bad" : "warn"}">${esc({ disabled: "Off", expired: "Expired", quota: "Data used", time: "Time used", devices: "Devices full" }[u.status] || u.status)}</span>`;
+
+let tiers = {};
+const planName = (tier) => (tiers[tier] ? tiers[tier].name : tier);
+const planCell = (u) => `${planBadge(u.tier, planName(u.tier))}<div class="muted small">${u.max_devices ? `${u.devices} of ${u.max_devices}` : u.devices} ${u.devices === 1 && !u.max_devices ? "device" : "devices"}</div>`;
+
+/** Fills every plan selector from the service's list of plans. */
+function fillPlans() {
+  const opts = Object.entries(tiers).map(([k, t]) => `<option value="${esc(k)}">${esc(t.name)} · ${t.devices ? `${t.devices} ${t.devices === 1 ? "device" : "devices"}` : "any number of devices"}</option>`).join("");
+  for (const id of ["u-tier", "b-tier", "t-tier"]) $("#" + id).innerHTML = opts;
+}
 
 async function loadUsers() {
   const q = $("#q").value.trim();
@@ -85,12 +97,13 @@ async function loadUsers() {
   $("#rows").innerHTML = users.map((u) => `<tr>
     <td><b>${esc(u.username)}</b>${u.note ? `<div class="muted small">${esc(u.note)}</div>` : ""}</td>
     <td>${statusPill(u)}</td>
+    <td>${planCell(u)}</td>
     <td>${usageCell(u.used_bytes, u.quota_bytes, fmtBytes)}</td>
     <td>${usageCell(u.used_seconds, u.max_seconds, fmtTime)}</td>
     <td>${u.expires_at ? esc(fmtDate(u.expires_at)) : "—"}</td>
     <td>${esc(ago(u.last_seen))}</td>
     <td><button class="btn small" data-edit="${u.id}">Edit</button></td></tr>`).join("") ||
-    `<tr><td colspan="7" class="muted">No users.</td></tr>`;
+    `<tr><td colspan="8" class="muted">No users.</td></tr>`;
   for (const i of document.querySelectorAll("#rows .bar i")) i.style.width = i.dataset.w + "%";
   const from = r.total ? offset + 1 : 0;
   $("#count").textContent = `${from}–${offset + users.length} of ${r.total}`;
@@ -143,14 +156,14 @@ async function copy(text) {
 function openUser(u) {
   editing = u;
   $("#u-error").textContent = "";
-  $("#u-title").textContent = u ? `Edit ${u.username}` : "New user";
+  $("#u-title").innerHTML = u ? `Edit ${esc(u.username)} ${planBadge(u.tier, planName(u.tier))}` : "New user";
   $("#u-name-field").classList.toggle("hidden", !!u);
   $("#u-pass-field").classList.toggle("hidden", !!u);
   $("#u-extra").classList.toggle("hidden", !u);
   $("#u-save").textContent = u ? "Save" : "Create";
   $("#u-name").value = "";
   $("#u-pass").value = "";
-  fillLimits("u", u || { reset_days: 0, quota_bytes: 5 * GB });
+  fillLimits("u", u || { reset_days: 0, quota_bytes: 5 * GB, tier: "bronze" });
   if (u) $("#u-toggle").textContent = u.disabled ? "Turn on" : "Turn off";
   $("#user-dialog").showModal();
 }
@@ -209,7 +222,7 @@ $("#bulk").addEventListener("click", () => {
   for (const id of ["b-copy", "b-download"]) $("#" + id).classList.add("hidden");
   $("#b-create").classList.remove("hidden");
   $("#b-error").textContent = "";
-  fillLimits("b", { reset_days: 0, quota_bytes: 5 * GB });
+  fillLimits("b", { reset_days: 0, quota_bytes: 5 * GB, tier: "bronze" });
   $("#bulk-dialog").showModal();
 });
 $("#b-cancel").addEventListener("click", () => $("#bulk-dialog").close());
@@ -246,6 +259,7 @@ $("#settings").addEventListener("click", async () => {
   $("#t-hours").value = +(Number(s.default_max_seconds) / 3600).toFixed(2);
   $("#t-reset").value = s.default_reset_days;
   $("#t-valid").value = s.default_valid_days;
+  $("#t-tier").value = s.default_tier || "bronze";
   $("#t-win").value = s.download_windows;
   $("#t-and").value = s.download_android;
   $("#t-error").textContent = "";
@@ -260,6 +274,7 @@ $("#settings-form").addEventListener("submit", async (e) => {
     default_max_seconds: String(Math.round(num($("#t-hours").value) * 3600)),
     default_reset_days: String(Math.round(num($("#t-reset").value))),
     default_valid_days: String(Math.round(num($("#t-valid").value))),
+    default_tier: $("#t-tier").value,
     download_windows: $("#t-win").value.trim(),
     download_android: $("#t-and").value.trim(),
   }), $("#t-error"));
@@ -273,5 +288,6 @@ $("#q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeou
 $("#prev").addEventListener("click", () => { offset = Math.max(0, offset - LIMIT); loadUsers(); });
 $("#next").addEventListener("click", () => { offset += LIMIT; loadUsers(); });
 
-await frame();
+tiers = (await frame()).tiers || {};
+fillPlans();
 if (token) enter(token);

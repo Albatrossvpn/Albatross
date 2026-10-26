@@ -1,4 +1,4 @@
-import { $, api, esc, fmtBytes, fmtDate, fmtTime, frame, meter, toast } from "/site.js";
+import { $, ago, api, esc, fmtBytes, fmtDate, fmtTime, frame, meter, planBadge, toast } from "/site.js";
 
 let token = "";
 let info;
@@ -8,7 +8,11 @@ const reasons = {
   expired: "This account has expired.",
   quota: "The data allowance is used up.",
   time: "The time allowance is used up.",
+  devices: "All the devices your plan allows are connected. Disconnect one, or remove it below.",
 };
+
+const planName = (tier) => (info.tiers && info.tiers[tier] ? info.tiers[tier].name : tier);
+const planPill = (tier, cls) => planBadge(tier, planName(tier), cls);
 
 function showTab(name) {
   $("#login-form").classList.toggle("hidden", name !== "login");
@@ -87,8 +91,9 @@ function render(a) {
   if (a.allowed) loadSub();
   else $("#sub-list").innerHTML = `<span class="muted note">The servers are available while the account can connect.</span>`;
   $("#d-name").textContent = a.username;
+  $("#d-plan").innerHTML = planPill(a.tier, "big");
   const pill = $("#d-status");
-  pill.textContent = a.allowed ? "Active" : { disabled: "Off", expired: "Expired" }[a.reason] || "Limit reached";
+  pill.textContent = a.allowed ? "Active" : { disabled: "Off", expired: "Expired", devices: "Devices in use" }[a.reason] || "Limit reached";
   pill.className = "pill" + (a.allowed ? "" : " bad");
   $("#d-sub").textContent = a.allowed ? "You can connect." : "You cannot connect right now.";
   const n = $("#notice");
@@ -97,10 +102,43 @@ function render(a) {
   meter($("#m-data"), "Data", a.used_bytes, a.quota_bytes, fmtBytes);
   meter($("#m-time"), "Time", a.used_seconds, a.max_seconds, fmtTime);
   const rows = [];
-  if (a.resets_at) rows.push(["Allowance renews", fmtDate(a.resets_at)]);
-  rows.push(["Account ends", a.expires_at ? fmtDate(a.expires_at) : "Never"]);
-  $("#d-kv").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+  rows.push(["Plan", `${planPill(a.tier)} ${a.max_devices ? `up to ${a.max_devices} ${a.max_devices === 1 ? "device" : "devices"} at once` : "any number of devices"}`]);
+  rows.push(["Connected now", esc(a.max_devices ? `${a.devices} of ${a.max_devices}` : `${a.devices}`)]);
+  if (a.resets_at) rows.push(["Allowance renews", esc(fmtDate(a.resets_at))]);
+  rows.push(["Account ends", esc(a.expires_at ? fmtDate(a.expires_at) : "Never")]);
+  $("#d-kv").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
+  loadDevices();
 }
+
+// The devices the account has been used on; removing one frees its slot.
+async function loadDevices() {
+  const el = $("#dev-list");
+  try {
+    const r = await api("GET", "devices", { token });
+    $("#dev-plan").textContent = r.max_devices
+      ? `Your ${planName(r.tier)} plan lets ${r.max_devices === 1 ? "one device" : `${r.max_devices} devices`} connect at the same time. A device keeps its place for a few minutes after it disconnects; the subscription for Apple devices keeps it for six hours after an app refreshes it.`
+      : `Your ${planName(r.tier)} plan lets any number of devices connect at the same time. These are the devices this account has been used on.`;
+    el.innerHTML = r.devices.map((d) => `<div class="row between wrap-row">
+      <span>${esc(d.name)}<span class="muted small"> · ${d.active ? "connected" : "last seen " + esc(ago(d.last_seen))}</span></span>
+      <button class="btn small" type="button" data-remove="${esc(d.id)}">Remove</button></div>`).join("") ||
+      `<span class="muted note">No device has connected with this account yet.</span>`;
+  } catch (e) {
+    el.innerHTML = `<span class="muted note">${esc(e.message)}</span>`;
+  }
+}
+$("#dev-list").addEventListener("click", async (e) => {
+  const id = e.target.dataset && e.target.dataset.remove;
+  if (!id) return;
+  e.target.disabled = true;
+  try {
+    await api("DELETE", "devices/" + id, { token });
+    toast("Removed.");
+    load();
+  } catch (err) {
+    toast(err.message);
+    e.target.disabled = false;
+  }
+});
 
 async function load() {
   try {

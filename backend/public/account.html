@@ -50,7 +50,7 @@
   <div class="dash hidden" id="dash">
     <div class="card">
       <div class="row between wrap-row">
-        <div><h2 id="d-name" class="flush"></h2><span class="muted" id="d-sub"></span></div>
+        <div><div class="row wrap-row"><h2 id="d-name" class="flush"></h2><span id="d-plan"></span></div><span class="muted" id="d-sub"></span></div>
         <span class="pill" id="d-status"></span>
       </div>
       <div id="notice" class="notice hidden mt"></div>
@@ -59,9 +59,22 @@
       <dl class="kv" id="d-kv"></dl>
     </div>
     <div class="card">
+      <h2>Devices</h2>
+      <p class="muted note" id="dev-plan"></p>
+      <div class="stack" id="dev-list"></div>
+    </div>
+    <div class="card">
       <h2>Get the app</h2>
       <div class="row wrap-row" id="d-dl"></div>
       <p class="muted note mt">Sign in to the app with this username and password.</p>
+    </div>
+    <div class="card" id="dns">
+      <h2>Servers not updating, or this page hard to reach?</h2>
+      <p class="muted note">On some networks the operator's DNS answers for our addresses with a wrong address, so the page and the servers in your connection app stop loading. Encrypted DNS goes around that. On iPhone and iPad, install one of these profiles in Safari (Settings, General, VPN &amp; Device Management, then Install); on Android, set Private DNS to <code>dns.google</code>; the Albatross app for Windows and Android needs nothing.</p>
+      <div class="row wrap-row">
+        <a class="btn small" href="/api/v1/dns/google.mobileconfig">Encrypted DNS: Google</a>
+        <a class="btn small" href="/api/v1/dns/cloudflare.mobileconfig">Encrypted DNS: Cloudflare</a>
+      </div>
     </div>
     <div class="card" id="devices">
       <h2>iPhone, iPad and Mac</h2>

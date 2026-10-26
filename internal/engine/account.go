@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -10,6 +12,7 @@ import (
 
 	"github.com/Albatrossvpn/vp/internal/account"
 	"github.com/Albatrossvpn/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // AccountURL is the account service, set at build time with
@@ -45,6 +48,9 @@ const (
 	directWait = 20 * time.Second
 	// How long connecting tries servers to recheck an account at its limit.
 	limitSync = 25 * time.Second
+	// How long a call goes through servers alone before a direct call is
+	// made as well.
+	directAfter = 5 * time.Second
 )
 
 // AccountState is the signed-in user's account as the UI shows it.
@@ -59,7 +65,39 @@ type AccountState struct {
 	UsedSeconds int64  `json:"used_seconds"`
 	ExpiresAt   int64  `json:"expires_at"`
 	ResetsAt    int64  `json:"resets_at"`
-	SiteURL     string `json:"site_url,omitempty"`
+	// Tier is the plan; MaxDevices how many devices it lets connect at
+	// once; Devices how many are connected now.
+	Tier       string `json:"tier,omitempty"`
+	MaxDevices int    `json:"max_devices"`
+	Devices    int    `json:"devices"`
+	SiteURL    string `json:"site_url,omitempty"`
+	// Progress says what signing in is doing right now, while it is:
+	// finding a server to go through can take a while.
+	Progress string `json:"progress,omitempty"`
+}
+
+// Steps of signing in, shown to the user.
+const (
+	stepFinding = "Looking for a server to sign in through…"
+	stepThrough = "Signing in through a server…"
+	stepDirect  = "Contacting the account service directly…"
+)
+
+// setStep tells the UI what signing in is doing ("" when it is done).
+func (e *Engine) setStep(s string) {
+	e.mu.Lock()
+	e.loginStep = s
+	e.mu.Unlock()
+}
+
+// setStepIf moves signing in from one step to the next; other calls
+// through tunnelFirst (usage checks) show nothing.
+func (e *Engine) setStepIf(from, to string) {
+	e.mu.Lock()
+	if e.loginStep == from {
+		e.loginStep = to
+	}
+	e.mu.Unlock()
 }
 
 func accountURLs(opt Options) []string {
@@ -81,7 +119,10 @@ func (e *Engine) Account() AccountState {
 	if e.acct == nil {
 		return AccountState{}
 	}
-	st := AccountState{Enabled: true, SiteURL: e.acct.Site()}
+	e.mu.Lock()
+	step := e.loginStep
+	e.mu.Unlock()
+	st := AccountState{Enabled: true, SiteURL: e.acct.Site(), Progress: step}
 	v := e.acct.View()
 	if !v.SignedIn {
 		return st
@@ -90,6 +131,7 @@ func (e *Engine) Account() AccountState {
 	st.SignedIn, st.Username = true, i.Username
 	st.QuotaBytes, st.UsedBytes, st.MaxSeconds, st.UsedSeconds = i.QuotaBytes, i.UsedBytes, i.MaxSeconds, i.UsedSeconds
 	st.ExpiresAt, st.ResetsAt = i.ExpiresAt, i.ResetsAt
+	st.Tier, st.MaxDevices, st.Devices = i.Tier, i.MaxDevices, i.Devices
 	if why := i.Why(time.Now()); why != "" {
 		st.Message = limitMessage(why, i)
 	}
@@ -110,7 +152,9 @@ func (e *Engine) Login(username, password string) error {
 		_, err := e.acct.Login(ctx, username, password)
 		return err
 	}
+	e.setStep(stepFinding)
 	err := e.tunnelFirst(ctx, signInWait-directWait, login)
+	e.setStep("")
 	if err != nil {
 		if errors.Is(err, account.ErrUnreachable) || errors.Is(err, context.DeadlineExceeded) {
 			return errors.New("Cannot reach the account service. Check your internet connection and try again.")
@@ -118,6 +162,7 @@ func (e *Engine) Login(username, password string) error {
 		return err
 	}
 	e.logf("info", "Signed in.")
+	e.updateBadge()
 	// The service's own server (the edge) is for signed-in users.
 	methodsMu.Lock()
 	edgeFetched = time.Time{}
@@ -127,10 +172,12 @@ func (e *Engine) Login(username, password string) error {
 }
 
 // tunnelFirst runs call through the VPN, or while it is down through
-// working servers for up to wait, and only then directly: a direct call
-// shows the network that this device talks to the service (ECH hides the
-// name where it works, see ech.go). The service is also filtered in many
-// places.
+// working servers for up to wait and, from directAfter on or as soon as
+// the servers fail, directly as well: the first to get through wins. A
+// direct call shows the network that this device talks to the service
+// (ECH hides the name where it works, see ech.go), which is why the
+// servers get a head start; but the service is filtered in many places,
+// and signing in has to work on every network (reach.go).
 func (e *Engine) tunnelFirst(ctx context.Context, wait time.Duration, call func(context.Context) error) error {
 	if e.proxyClient() != nil {
 		return call(ctx)
@@ -143,13 +190,52 @@ func (e *Engine) tunnelFirst(ctx context.Context, wait time.Duration, call func(
 			}
 		}
 	}
-	vctx, cancel := context.WithTimeout(ctx, wait)
-	err := e.viaServer(vctx, call)
-	cancel()
-	if !errors.Is(err, account.ErrUnreachable) && !errors.Is(err, context.DeadlineExceeded) && !account.Busy(err) {
-		return err
+	unreachable := func(err error) bool {
+		return errors.Is(err, account.ErrUnreachable) || errors.Is(err, context.DeadlineExceeded) || account.Busy(err)
 	}
-	return call(account.WithClient(ctx, e.privateDirect))
+	vctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	done := make(chan error, 2)
+	go func() { done <- e.viaServer(vctx, call) }()
+	direct := false
+	startDirect := func() {
+		if direct {
+			return
+		}
+		direct = true
+		if e.cf != nil && len(e.cf.Best()) == 0 && e.cf.Age() > 10*time.Minute {
+			// Edge addresses the network lets through, for the direct
+			// call's later tries.
+			go e.cf.Scan(ctx, 60, 4)
+		}
+		go e.refreshReach(ctx)
+		e.setStepIf(stepFinding, stepDirect)
+		go func() { done <- call(account.WithClient(ctx, e.privateDirect)) }()
+	}
+	delay := time.NewTimer(directAfter)
+	defer delay.Stop()
+	var last error
+	for pending := 1; pending > 0; {
+		select {
+		case <-delay.C:
+			if !direct {
+				startDirect()
+				pending++
+			}
+		case err := <-done:
+			pending--
+			if !unreachable(err) {
+				cancel()
+				return err
+			}
+			last = err
+			if !direct {
+				startDirect()
+				pending++
+			}
+		}
+	}
+	return last
 }
 
 // viaServer runs call through working servers, one after another, until
@@ -190,6 +276,7 @@ func (e *Engine) viaServer(ctx context.Context, call func(context.Context) error
 			continue
 		}
 		e.logf("info", "Signing in through a server.")
+		e.setStepIf(stepFinding, stepThrough)
 		// A copy set up for this device (the shared tester lacks the
 		// phone's settings, without which sing-box exits at once there).
 		t := e.newTester()
@@ -215,6 +302,26 @@ func (e *Engine) Logout() {
 	}
 	e.Disconnect()
 	e.acct.Logout()
+	e.updateBadge()
+}
+
+// updateBadge tells the app which plan the signed-in account is on when
+// that changes ("" once nobody is signed in), so it can mark its icon.
+func (e *Engine) updateBadge() {
+	if e.acct == nil || e.opt.Badge == nil {
+		return
+	}
+	tier := ""
+	if v := e.acct.View(); v.SignedIn {
+		tier = v.Info.Tier
+	}
+	e.mu.Lock()
+	changed := !e.badged || tier != e.badge
+	e.badge, e.badged = tier, true
+	e.mu.Unlock()
+	if changed {
+		e.opt.Badge(tier)
+	}
 }
 
 // AllowConnect says whether the signed-in user may connect now. The last
@@ -241,6 +348,7 @@ func (e *Engine) AllowConnect() error {
 			return err
 		})
 		cancel()
+		e.updateBadge()
 		if errors.Is(err, account.ErrSignedOut) {
 			return ErrLoginRequired
 		}
@@ -263,6 +371,15 @@ func limitMessage(reason string, i account.Info) string {
 		return "Your time allowance is used up." + renew
 	case account.ReasonExpired:
 		return "Your account has expired."
+	case account.ReasonDevices:
+		n := i.MaxDevices
+		switch {
+		case n == 1:
+			return "This account is already connected on another device; your plan allows one at a time. Disconnect it, or remove it on your account page."
+		case n > 1:
+			return fmt.Sprintf("This account is already connected on %d devices, as many as your plan allows. Disconnect one, or remove it on your account page.", n)
+		}
+		return "This account is already connected on as many devices as your plan allows. Disconnect one, or remove it on your account page."
 	}
 	return "Your account is turned off."
 }
@@ -322,6 +439,7 @@ func (e *Engine) meterStep(ctx context.Context, c *connection, m *meterState, ch
 		switch {
 		case err == nil:
 			info, why, m.synced = got, got.Why(now), now
+			e.updateBadge()
 		case errors.Is(err, account.ErrSignedOut):
 			e.stopForAccount("Sign in to connect.")
 			return true
@@ -363,5 +481,43 @@ func (e *Engine) applyGrace(shut bool) {
 		e.logf("info", "The account service cannot be reached from this network; the account stays usable for 14 days.")
 	} else {
 		e.acct.SetGrace(account.Grace)
+	}
+}
+
+// reachSource is the collector's list of Cloudflare edge addresses that
+// answer from inside the country (cmd/collect, reach.json), served from
+// GitHub's CDN and the list mirrors like every other list.
+var reachSource = sources.Source{ID: "__reach__", Kind: sources.KindSubscription, URL: sources.CentralBase + "reach.json"}
+
+// reachEvery is how often the hints are fetched again.
+const reachEvery = 3 * time.Hour
+
+// refreshReach gives the reach store the collector's hints, from the
+// cache when they are recent, else fetched; it never waits long.
+func (e *Engine) refreshReach(ctx context.Context) {
+	if e.reach == nil || e.fetcher == nil {
+		return
+	}
+	e.mu.Lock()
+	recent := time.Since(e.reachAt) < reachEvery
+	e.reachAt = time.Now()
+	e.mu.Unlock()
+	apply := func(text string) bool {
+		var f struct {
+			Cloudflare []string `json:"cloudflare"`
+		}
+		if json.Unmarshal([]byte(text), &f) != nil || len(f.Cloudflare) == 0 {
+			return false
+		}
+		e.reach.setHints(f.Cloudflare)
+		return true
+	}
+	if b, ok := e.fetcher.Cached(reachSource); ok && apply(string(b)) && (recent || time.Since(e.fetcher.CachedAt(reachSource)) < reachEvery) {
+		return
+	}
+	fctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if res := e.fetcher.Fetch(fctx, reachSource); res.Err == nil && res.Text != "" {
+		apply(res.Text)
 	}
 }

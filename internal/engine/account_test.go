@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Albatrossvpn/vp/internal/account"
 	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
@@ -29,7 +30,7 @@ func (a *accountService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	acct := func() map[string]any {
 		m := map[string]any{"username": "ada", "allowed": !a.off && (a.quota == 0 || a.used < a.quota),
-			"quota_bytes": a.quota, "used_bytes": a.used, "resets_at": a.reset}
+			"quota_bytes": a.quota, "used_bytes": a.used, "resets_at": a.reset, "tier": "gold", "max_devices": 4, "devices": 1}
 		switch {
 		case a.off:
 			m["reason"] = "disabled"
@@ -201,5 +202,75 @@ func TestMeterCountsAndStops(t *testing.T) {
 	defer svc.mu.Unlock()
 	if svc.used < 5100 {
 		t.Fatalf("service was told about %d bytes, want 5100", svc.used)
+	}
+}
+
+// The message for an account whose plan has all its devices connected
+// names the plan's number.
+func TestLimitMessageDevices(t *testing.T) {
+	one := limitMessage(account.ReasonDevices, account.Info{Reason: account.ReasonDevices, MaxDevices: 1})
+	if !strings.Contains(one, "another device") || !strings.Contains(one, "account page") {
+		t.Fatalf("one device: %q", one)
+	}
+	four := limitMessage(account.ReasonDevices, account.Info{Reason: account.ReasonDevices, MaxDevices: 4})
+	if !strings.Contains(four, "on 4 devices") {
+		t.Fatalf("four devices: %q", four)
+	}
+	if none := limitMessage(account.ReasonDevices, account.Info{}); !strings.Contains(none, "as many devices as your plan allows") {
+		t.Fatalf("unknown plan: %q", none)
+	}
+}
+
+// The app is told the plan when someone signs in, and that there is none
+// when they sign out; a saved session tells it at start.
+func TestBadgeFollowsTheAccount(t *testing.T) {
+	svc := &accountService{quota: 1000}
+	ts := httptest.NewServer(svc)
+	defer ts.Close()
+	var mu sync.Mutex
+	var got []string
+	badge := func(tier string) {
+		mu.Lock()
+		got = append(got, tier)
+		mu.Unlock()
+	}
+	dir := t.TempDir()
+	e, err := New(Options{DataDir: dir, Sources: []sources.Source{}, AccountURLs: []string{ts.URL}, Badge: badge})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.updateBadge()
+	if err := e.Login("ada", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if a := e.Account(); a.Tier != "gold" || a.MaxDevices != 4 || a.Devices != 1 {
+		t.Fatalf("plan in the account state: %+v", a)
+	}
+	e.updateBadge() // a repeat with the same plan says nothing
+	e.Logout()
+	e.pool.Close()
+	mu.Lock()
+	seq := append([]string(nil), got...)
+	mu.Unlock()
+	if strings.Join(seq, ",") != ",gold," {
+		t.Fatalf("badges told: %q", seq)
+	}
+
+	// Signing in to a new engine tells it again.
+	got = nil
+	e2, err := New(Options{DataDir: dir, Sources: []sources.Source{}, AccountURLs: []string{ts.URL}, Badge: badge})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e2.pool.Close()
+	if err := e2.Login("ada", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	e2.updateBadge()
+	mu.Lock()
+	seq = append([]string(nil), got...)
+	mu.Unlock()
+	if strings.Join(seq, ",") != "gold" {
+		t.Fatalf("badges told after a restart: %q", seq)
 	}
 }

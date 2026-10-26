@@ -226,6 +226,10 @@ type Runtime struct {
 	Bin    Binaries
 	Dir    string // where configs are written
 	OnLine func(core, line string)
+	// StartWait is how long a core may take to start listening; zero
+	// means 15 seconds. The collector, which starts cores holding
+	// hundreds of servers on a busy machine, allows more.
+	StartWait time.Duration
 	// TorBridges, when set, returns extra bridge lines for tor as a JSON
 	// map of transport to lines.
 	TorBridges func() []byte
@@ -512,7 +516,11 @@ func (r *Runtime) start(ctx context.Context, coreName, name string, cfg map[stri
 	if err != nil {
 		return nil, err
 	}
-	if err := p.WaitListening(ctx, probe, 15*time.Second); err != nil {
+	wait := r.StartWait
+	if wait <= 0 {
+		wait = 15 * time.Second
+	}
+	if err := p.WaitListening(ctx, probe, wait); err != nil {
 		p.Stop()
 		return nil, err
 	}

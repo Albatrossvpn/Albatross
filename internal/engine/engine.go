@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -58,6 +59,10 @@ type Options struct {
 	// systems where the engine cannot list them itself (Android 11 and
 	// later refuse it); nil means the engine asks the system.
 	LANAddrs func() []string
+	// Badge is told the plan of the signed-in account ("bronze", "silver",
+	// "gold", "vip") whenever it changes, and "" when nobody is signed in,
+	// so the app can mark its icon with it. Nil means no badge.
+	Badge func(tier string)
 }
 
 // SystemProxy sets and clears the OS proxy settings.
@@ -83,14 +88,23 @@ type Engine struct {
 	// crowd stats (crowd.go); crowdAt is when tests were last reported.
 	crowdURLs []string
 	crowdAt   time.Time
+	// badge is the plan last given to opt.Badge, badged whether any was.
+	badge  string
+	badged bool
+	// loginStep is what signing in is doing now, for the UI ("" when not).
+	loginStep string
 	// httpsOK is when a server last passed a test with a genuine
 	// certificate, which shows this device checks certificates correctly
 	// (see distrust).
 	httpsOK time.Time
 	fetcher *sources.Fetcher
-	// privateDirect makes direct calls to the account service (ech.go).
+	// privateDirect makes direct calls to the account service (ech.go);
+	// reach knows the ways to it (reach.go), reachAt when its hints from
+	// the collector were last fetched.
 	privateDirect *http.Client
 	warmPrivate   func(host string)
+	reach         *reachStore
+	reachAt       time.Time
 	tester        *tester.Tester
 	resolver      *antiblock.Resolver
 	cf            *antiblock.Scanner
@@ -201,11 +215,21 @@ func New(opt Options) (*Engine, error) {
 		MaxIdleConnsPerHost: 4,
 		IdleConnTimeout:     30 * time.Second,
 	}}
-	e.privateDirect, e.warmPrivate = newPrivateDirect(direct)
+	e.reach = newReachStore(e.dir, func() []string {
+		var out []string
+		if e.cf != nil {
+			for _, c := range e.cf.Best() {
+				out = append(out, c.IP)
+			}
+		}
+		return out
+	})
+	e.privateDirect, e.warmPrivate = newPrivateDirect(direct, e.reach)
 	e.fetcher = &sources.Fetcher{Direct: direct, Proxy: e.proxyClient, Private: e.privateDirect, CacheDir: filepath.Join(e.dir, "cache")}
 	if urls := accountURLs(opt); len(urls) > 0 {
 		e.acct = account.New(urls, account.SessionPath(e.dir), e.accountHTTP)
 		e.acct.Version = opt.Version
+		e.acct.Device, e.acct.DeviceName = account.DeviceID(e.dir), deviceName(opt)
 		e.crowdURLs = urls
 	}
 	e.tester = &tester.Tester{Runtime: e.rt}
@@ -230,6 +254,8 @@ func New(opt Options) (*Engine, error) {
 // Start begins scanning (and connects if the user asked for that).
 func (e *Engine) Start() {
 	e.ctx, e.cancel = context.WithCancel(context.Background())
+	e.updateBadge()
+	go e.refreshReach(e.ctx)
 	// A crash left the system pointing at our dead proxy: at today's port,
 	// or at the one in use then, which an automatic port change (another
 	// program took the port) may have made different.
@@ -473,6 +499,23 @@ func (e *Engine) triggerRefill() {
 	case e.refill <- struct{}{}:
 	default:
 	}
+}
+
+// deviceName is the word for this kind of device that the account service
+// shows on the account page's device list.
+func deviceName(opt Options) string {
+	if opt.Mobile {
+		return "Android"
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return "Windows"
+	case "darwin":
+		return "Mac"
+	case "linux":
+		return "Linux"
+	}
+	return runtime.GOOS
 }
 
 // installNumber returns this installation's random number, made once and

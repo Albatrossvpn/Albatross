@@ -1,0 +1,48 @@
+name: Site mirror on GitHub Pages
+
+# A copy of the public website on GitHub Pages, for networks where the
+# site's own name is filtered: the same pages, with the downloads coming
+# from the releases on GitHub (site/public/site.js tells the two apart by
+# the host name) and the encrypted-DNS profiles for Apple devices.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "update.json", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - name: Build the mirror
+        # The mirror lives under /Albatross/, so the pages' root-relative
+        # links and assets get that prefix.
+        run: |
+          rm -rf _site && cp -r site/public _site
+          base="/Albatross"
+          find _site -name '*.html' -print0 | xargs -0 sed -i -E "s#(href|src|srcset|content)=\"/([^/\"][^\"]*)?\"#\1=\"$base/\2\"#g; s#(srcset=\"[^\"]*), /#\1, $base/#g"
+          find _site -name '*.css' -print0 | xargs -0 sed -i -E "s#url\\(/#url($base/#g"
+          # Nothing of the site's own API or storage is here.
+          rm -f _site/update.json
+          ls _site
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

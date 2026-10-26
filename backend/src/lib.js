@@ -114,18 +114,59 @@ export function rollPeriod(user, now) {
   return { period_start: user.period_start, used_bytes: user.used_bytes, used_seconds: user.used_seconds, rolled: false };
 }
 
-/** What the app and the panels are told about an account. */
-export function accountOf(user, now) {
+// ---------- Plans ----------
+
+/**
+ * The plans an account can be on, and how many devices each may have
+ * connected at the same time (0: as many as they like). An account's plan
+ * is its `tier` column.
+ */
+export const TIERS = {
+  bronze: { name: "Bronze", devices: 1 },
+  silver: { name: "Silver", devices: 2 },
+  gold: { name: "Gold", devices: 4 },
+  vip: { name: "VIP", devices: 0 },
+};
+export const DEFAULT_TIER = "bronze";
+
+/** The plan a stored tier names; an unknown one is the default plan. */
+export const tierOf = (tier) => (Object.hasOwn(TIERS, tier) ? tier : DEFAULT_TIER);
+
+/** How many devices an account may have connected at once; 0 means no limit. */
+export const maxDevices = (user) => TIERS[tierOf(user.tier)].devices;
+
+// A device holds one of its account's slots for this long after its last
+// usage report (the apps report every minute while connected).
+export const DEVICE_ACTIVE = 5 * 60;
+// A subscription (iPhone, iPad, Mac: the service never hears from those
+// while they are connected) holds a slot for this long after a fetch.
+export const SUB_ACTIVE = 6 * 3600;
+
+/**
+ * What the app and the panels are told about an account. A device asking
+ * whether it may connect passes `others`, how many other devices hold one
+ * of the account's slots right now: it may not when they fill the plan. A
+ * page passes `active`, how many devices hold a slot, to show it.
+ */
+export function accountOf(user, now, { others = -1, active = -1 } = {}) {
   const p = rollPeriod(user, now);
+  const tier = tierOf(user.tier);
+  const limit = TIERS[tier].devices;
   let reason = "";
   if (user.disabled) reason = "disabled";
   else if (user.expires_at > 0 && now >= user.expires_at) reason = "expired";
   else if (user.quota_bytes > 0 && p.used_bytes >= user.quota_bytes) reason = "quota";
   else if (user.max_seconds > 0 && p.used_seconds >= user.max_seconds) reason = "time";
+  else if (limit > 0 && others >= limit) reason = "devices";
+  let devices = Math.max(active, 0);
+  if (others >= 0) devices = limit > 0 ? Math.min(others + (reason === "" ? 1 : 0), limit) : others + 1;
   return {
     username: user.username,
     allowed: reason === "",
     reason,
+    tier,
+    max_devices: limit,
+    devices,
     quota_bytes: user.quota_bytes,
     used_bytes: p.used_bytes,
     max_seconds: user.max_seconds,

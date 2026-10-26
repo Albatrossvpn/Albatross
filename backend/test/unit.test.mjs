@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DAY, accountOf, checkPassword, checkUsername, hashPassword, randomPassword, rollPeriod, safeEqual, sign, verify, verifyPassword } from "../src/lib.js";
+import { pool } from "../src/sub.js";
+import { DAY, TIERS, accountOf, checkPassword, checkUsername, hashPassword, maxDevices, randomPassword, rollPeriod, safeEqual, sign, tierOf, verify, verifyPassword } from "../src/lib.js";
 
 test("passwords are salted and verified", async () => {
   const a = await hashPassword("correct horse");
@@ -44,6 +45,33 @@ test("an account is allowed until a limit is reached, in a fixed order of reason
   assert.equal(accountOf(user({ expires_at: t }), t).reason, "expired");
   assert.equal(accountOf(user({ disabled: 1, used_bytes: 5000, expires_at: 1 }), t).reason, "disabled");
   assert.equal(accountOf(user({ quota_bytes: 0, max_seconds: 0, used_bytes: 1e12, used_seconds: 1e9 }), t).allowed, true, "zero means unlimited");
+});
+
+test("the plan says how many devices may hold a slot at once", () => {
+  const t = 10_100;
+  assert.deepEqual(Object.keys(TIERS), ["bronze", "silver", "gold", "vip"]);
+  assert.equal(tierOf("gold"), "gold");
+  assert.equal(tierOf("platinum"), "bronze", "an unknown plan is the first one");
+  assert.equal(tierOf(undefined), "bronze", "rows from before plans existed");
+  assert.equal(maxDevices({ tier: "vip" }), 0, "VIP: no limit");
+  // A device asking for a slot: refused once the others fill the plan.
+  const a = accountOf(user({ tier: "silver" }), t, { others: 1 });
+  assert.equal(a.allowed, true);
+  assert.deepEqual([a.tier, a.max_devices, a.devices], ["silver", 2, 2]);
+  const b = accountOf(user({ tier: "silver" }), t, { others: 2 });
+  assert.equal(b.reason, "devices");
+  assert.equal(b.devices, 2);
+  assert.equal(accountOf(user(), t, { others: 1 }).reason, "devices", "bronze: one device");
+  const v = accountOf(user({ tier: "vip" }), t, { others: 70 });
+  assert.equal(v.allowed, true);
+  assert.deepEqual([v.max_devices, v.devices], [0, 71]);
+  // The other limits come first.
+  assert.equal(accountOf(user({ used_bytes: 1000 }), t, { others: 5 }).reason, "quota");
+  // A page sees how many devices hold a slot and is never refused for it.
+  const w = accountOf(user(), t, { active: 1 });
+  assert.equal(w.allowed, true);
+  assert.equal(w.devices, 1);
+  assert.equal(accountOf(user(), t).devices, 0);
 });
 
 test("the allowance renews every period and the renewal date is reported", () => {
@@ -167,4 +195,22 @@ test("subscriptions: countries read from names, servers renamed, the edge first"
   assert.equal(h.get("Subscription-Userinfo"), "upload=0; download=5; total=100; expire=1700000000");
   assert.equal(h.get("Profile-Title"), "base64:" + btoa("Albatross Germany"));
   assert.equal(headers("x", { used_bytes: 0, quota_bytes: 0, expires_at: 0 }).get("Subscription-Userinfo"), "upload=0; download=0");
+});
+
+
+test("a subscription is topped up from the fresh list when the hot list is short, with Apple-usable servers only", () => {
+  const hot = ["vless://a@h1:443#Germany", "ss://YWVzOmJhc2U@h2:8388#US", "albatross://x@h3:1#own", "trojan://p@h4:443#Iran", "wireguard://k@h5:51820#NL"].join("\n");
+  const fresh = Array.from({ length: 500 }, (_, i) => `vmess://${Buffer.from(JSON.stringify({ add: "f" + i, ps: "FR " + i })).toString("base64")}`).join("\n");
+  const full = pool(hot, fresh, 2);
+  assert.deepEqual(full.map((e) => e.link.split("://")[0]), ["vless", "ss", "wireguard"], "enough hot servers: no top-up, own protocols and Iran left out, WireGuard kept");
+  let n = 0;
+  const seq = () => ((n += 0.37) % 1);
+  const topped = pool(hot, fresh, 10, seq);
+  assert.equal(topped.length, 10);
+  assert.equal(topped.filter((e) => e.link.startsWith("vmess://")).length, 7);
+  const other = pool(hot, fresh, 10);
+  assert.equal(other.length, 10);
+  assert.equal(pool(hot, "", 10).length, 3, "nothing fresh: the hot list alone");
+  const udp = pool("hysteria2://a@h:443#DE\nvless://b@h:443#US\ntuic://c@h:443#FR\nss://YWVzOmJhc2U@h2:8388#NL", "", 1);
+  assert.deepEqual(udp.map((e) => e.link.split("://")[0]), ["vless", "ss", "hysteria2", "tuic"], "UDP servers go last");
 });

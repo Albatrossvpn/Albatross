@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>DNSSettings</key>
+      <dict>
+        <key>DNSProtocol</key>
+        <string>HTTPS</string>
+        <key>ServerURL</key>
+        <string>https://cloudflare-dns.com/dns-query</string>
+        <key>ServerAddresses</key>
+        <array>
+          <string>1.1.1.1</string>
+          <string>1.0.0.1</string>
+          <string>2606:4700:4700::1111</string>
+          <string>2606:4700:4700::1001</string>
+        </array>
+      </dict>
+      <key>PayloadDescription</key>
+      <string>Encrypted DNS (Cloudflare) for every network</string>
+      <key>PayloadDisplayName</key>
+      <string>Encrypted DNS: Cloudflare</string>
+      <key>PayloadIdentifier</key>
+      <string>online.albatrossvpn.dns.cloudflare.settings</string>
+      <key>PayloadType</key>
+      <string>com.apple.dnsSettings.managed</string>
+      <key>PayloadUUID</key>
+      <string>a1b2c3d4-0000-4000-8000-000000000002</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>ProhibitDisablement</key>
+      <false/>
+    </dict>
+  </array>
+  <key>PayloadDescription</key>
+  <string>Looks names up over an encrypted connection to Cloudflare, so a network's resolver cannot answer with lies. Remove it any time in Settings, General, VPN &amp; Device Management.</string>
+  <key>PayloadDisplayName</key>
+  <string>Encrypted DNS (Cloudflare)</string>
+  <key>PayloadIdentifier</key>
+  <string>online.albatrossvpn.dns.cloudflare</string>
+  <key>PayloadRemovalDisallowed</key>
+  <false/>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>a1b2c3d4-0000-4000-8000-000000000012</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>

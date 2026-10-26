@@ -231,3 +231,8 @@ servernett
 shadowsocksshop
 skivpn
 spdnet
+# WireGuard and WARP configs (Oct 2026).
+WIRGUARD
+ConfigWireguard
+An0nymousTeam
+WireGuard_Vpn1
