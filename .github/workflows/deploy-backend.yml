@@ -150,7 +150,17 @@ jobs:
           }
           publish servers ../branch-servers hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt tor.json meta.json
           publish rules ../branch-rules ads.srs ads.json README.md LICENSE-GPL-3.0.txt LICENSE-AGPL-3.0.txt
-          publish main .. update.json
+          # The manifest only moves forward: a deploy from a branch behind
+          # main must not put an older manifest over the released one (the
+          # 1.0.0 release was undone that way for an evening). The stored
+          # copy's version is compared with this checkout's.
+          stored="$(curl -fsS --max-time 30 "$account/list/main/update.json" 2>/dev/null | jq -r '.latest_version // empty')"
+          mine="$(jq -r '.latest_version // empty' ../update.json)"
+          if [ -n "$stored" ] && [ "$(printf '%s\n%s\n' "$stored" "$mine" | sort -V | tail -1)" != "$mine" ]; then
+            echo "::notice::update.json kept as stored ($stored): this checkout's is older ($mine)."
+          else
+            publish main .. update.json
+          fi
 
   edge:
     # The edge: a Worker that carries the app's traffic (edge/README.md).
