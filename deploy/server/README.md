@@ -9,10 +9,10 @@ rest:
 |---|---|
 | VLESS + Reality + Vision | 443/tcp |
 | VLESS + XHTTP + Reality (Xray) | 8443/tcp |
-| Trojan + TLS | 2053/tcp |
-| VLESS + WebSocket + TLS | 2083/tcp |
-| VLESS + gRPC + TLS | 2087/tcp |
-| VMess + HTTPUpgrade + TLS | 2096/tcp |
+| Trojan + TLS | 2098/tcp |
+| VLESS + WebSocket + TLS (also through Cloudflare with `CDN_HOST`) | 2083/tcp |
+| VLESS + gRPC + TLS (also through Cloudflare with `CDN_HOST`) | 2087/tcp |
+| VMess + HTTPUpgrade + TLS (also through Cloudflare with `CDN_HOST`) | 2096/tcp |
 | AnyTLS | 8880/tcp |
 | Shadowsocks 2022 | 8388/tcp+udp |
 | Shadowsocks 2022 behind ShadowTLS v3 | 8445/tcp |
@@ -24,7 +24,7 @@ rest:
 | VMess (AEAD) + mKCP inside DNS queries (Xray xdns), with `DNS_TUNNEL` | 53/udp |
 | OpenVPN over TCP (own CA, client certificate, tls-crypt) | 2082/tcp |
 | SSH port forwarding (a tunnel-only user, host key in the link) | 22/tcp |
-| Trojan + WebSocket + TLS (Trojan-Go) | 2098/tcp |
+| Trojan + WebSocket + TLS (Trojan-Go; also through Cloudflare with `CDN_HOST`) | 2053/tcp |
 | NaiveProxy (Caddy with the forward proxy; HTTP/2 CONNECT) | 2052/tcp |
 | Juicity (QUIC, BBR) | 8446/udp |
 | Mieru (TCP) | 2086/tcp |
@@ -42,6 +42,17 @@ inside it. UDP 53 also reaches Hysteria 2, since it was the only UDP port
 left open in the June 2025 shutdown. The ICMP carrier is for the days when
 neither TCP nor UDP to foreign addresses gets out but ping still does: the
 session travels inside echo packets, slowly, but it connects.
+
+One address can be blocked at any time, so the server also offers its
+WebSocket, gRPC and HTTPUpgrade protocols through Cloudflare's edge when
+`CDN_HOST` names a proxied record pointing at it: those connections go to
+Cloudflare's addresses (the app picks the edge addresses that answer from
+inside the country), the server's own address never appears, and blocking
+it leaves them working. A machine with a public IPv6 address gets links
+at that address too (`…-v6`): a second address, which the filtering lists
+separately and which the mobile networks there reach. A probe of the
+Trojan port, or a browser on NaiveProxy's port, gets a plain web page
+instead of a closed connection.
 
 ## Setting one up
 
@@ -68,6 +79,13 @@ session travels inside echo packets, slowly, but it connects.
    comma-separated list: a name under `.ir` next to the foreign one keeps
    the tunnel reachable when the domestic resolvers only answer for
    domestic delegations; the script prints one link per name.
+   To offer the server through Cloudflare's edge as well, add a proxied
+   `A` record (orange cloud) such as `in.<domain>` pointing at the machine,
+   with the zone's SSL/TLS mode *Full* or *Full (strict)*, and run the
+   script with `CDN_HOST=in.<domain>` (remembered); the certificate then
+   covers that name too. The workflow *Cloudflare DNS for the own server*
+   (`.github/workflows/cloudflare-dns.yml`) makes both kinds of record
+   from the repository's Cloudflare token.
    It installs sing-box and Xray, makes the keys (kept in
    `/etc/albatross/secrets.env`, so running it again keeps the links),
    gets the certificate, opens the machine's own firewall, turns on BBR and

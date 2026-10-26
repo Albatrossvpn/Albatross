@@ -1,0 +1,83 @@
+name: Cloudflare DNS for the own server
+
+# Makes the records the project's own server needs in the project's
+# Cloudflare zone, by hand only: a proxied name for the protocols that
+# can go through Cloudflare's edge (deploy/server/install.sh CDN_HOST,
+# which hides the server's address), and the delegation of the DNS
+# tunnel's name to the server (DNS_TUNNEL). Nothing secret is printed:
+# the log is readable by whoever reads the repository's Actions.
+on:
+  workflow_dispatch:
+    inputs:
+      origin_ip:
+        description: The server's public IPv4 address
+        required: true
+        type: string
+      cdn_host:
+        description: "A proxied name for the server, e.g. in.example.com (empty: none)"
+        required: false
+        type: string
+        default: ""
+      dns_tunnel:
+        description: "The DNS tunnel's name, delegated to the server, e.g. t.example.com (empty: none)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  dns:
+    if: github.repository == 'Albatrossvpn/Albatross' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ORIGIN_IP: ${{ inputs.origin_ip }}
+      CDN_HOST: ${{ inputs.cdn_host }}
+      DNS_TUNNEL: ${{ inputs.dns_tunnel }}
+    steps:
+      - name: Records
+        run: |
+          set -euo pipefail
+          [ -n "$CF_TOKEN" ] || { echo "::error::The repository secret CLOUDFLARE_API_TOKEN is not set."; exit 1; }
+          api() { # method path [json]
+            curl -sS --max-time 30 -X "$1" "https://api.cloudflare.com/client/v4$2" \
+              -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" ${3:+--data "$3"}
+          }
+          # result <json> prints "<success> <error messages>".
+          result() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("success"), "; ".join(e.get("message","") for e in d.get("errors") or []))'; }
+          first_id() { python3 -c 'import json,sys; r=json.load(sys.stdin).get("result") or []; print(r[0]["id"] if r else "")'; }
+          name="${CDN_HOST:-$DNS_TUNNEL}"
+          [ -n "$name" ] || { echo "::error::Give cdn_host or dns_tunnel."; exit 1; }
+          # The zone is the last two labels of the name.
+          zone_name="$(printf '%s' "$name" | awk -F. '{print $(NF-1)"."$NF}')"
+          zone="$(api GET "/zones?name=$zone_name" | first_id)"
+          [ -n "$zone" ] || { echo "::error::The zone $zone_name is not in this Cloudflare account, or the token cannot read zones."; exit 1; }
+          echo "zone $zone_name found"
+          upsert() { # type name content proxied
+            local id body out
+            id="$(api GET "/zones/$zone/dns_records?type=$1&name=$2" | first_id)"
+            body="$(python3 -c 'import json,sys; print(json.dumps({"type": sys.argv[1], "name": sys.argv[2], "content": sys.argv[3], "proxied": sys.argv[4] == "true", "ttl": 1}))' "$1" "$2" "$3" "$4")"
+            if [ -n "$id" ]; then
+              out="$(api PUT "/zones/$zone/dns_records/$id" "$body" | result)"
+            else
+              out="$(api POST "/zones/$zone/dns_records" "$body" | result)"
+            fi
+            echo "$1 $2 -> $3 (proxied $4): $out"
+            case "$out" in True*) ;; *) exit 1 ;; esac
+          }
+          if [ -n "$CDN_HOST" ]; then
+            upsert A "$CDN_HOST" "$ORIGIN_IP" true
+            mode="$(api GET "/zones/$zone/settings/ssl" | python3 -c 'import json,sys; print((json.load(sys.stdin).get("result") or {}).get("value", "unknown"))')"
+            echo "SSL/TLS encryption mode of the zone: $mode"
+            case "$mode" in
+              full|strict) ;;
+              *) echo "::warning::The CDN name needs the zone's SSL/TLS mode to be Full or Full (strict) (Cloudflare dashboard: SSL/TLS, Overview); it is '$mode'." ;;
+            esac
+          fi
+          if [ -n "$DNS_TUNNEL" ]; then
+            upsert A "ns1.$zone_name" "$ORIGIN_IP" false
+            upsert NS "$DNS_TUNNEL" "ns1.$zone_name" false
+          fi
