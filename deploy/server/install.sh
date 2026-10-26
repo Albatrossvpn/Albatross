@@ -58,6 +58,7 @@ P_WS=2083            # VLESS + WebSocket + TLS
 P_GRPC=2087          # VLESS + gRPC + TLS
 P_UPGRADE=2096       # VMess + HTTPUpgrade + TLS
 P_ANYTLS=8880        # AnyTLS
+P_OVPN=2082          # OpenVPN over TCP (a certificate per client, tls-crypt)
 P_SS=8388            # Shadowsocks 2022 (TCP and UDP)
 P_STLS=8445          # Shadowsocks 2022 behind ShadowTLS v3 (TCP): a real TLS handshake with REALITY_DEST
 P_HY2=443            # Hysteria 2 + Salamander (UDP), hops over HOP_RANGE
@@ -89,7 +90,7 @@ arch() {
 install_cores() {
   local a; a="$(arch)"
   apt-get update -qq
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl unzip openssl certbot iptables-persistent >/dev/null
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl unzip openssl certbot iptables-persistent openvpn python3 >/dev/null
   local tmp; tmp="$(mktemp -d)"
   curl -fsSL -o "$tmp/sb.tgz" "https://github.com/SagerNet/sing-box/releases/download/v$SINGBOX_VERSION/sing-box-$SINGBOX_VERSION-linux-$a.tar.gz"
   tar -xzf "$tmp/sb.tgz" -C "$tmp" --strip-components=1
@@ -139,6 +140,7 @@ secrets() {
   # Servers set up before the ICMP carrier get its seed added.
   grep -q "^KCP_SEED=" "$f" || echo "KCP_SEED=$("$SB" generate rand --hex 8)" >>"$f"
   grep -q "^STLS_PASS=" "$f" || echo "STLS_PASS=$("$SB" generate rand --hex 16)" >>"$f"
+  grep -q "^SSH_PASS=" "$f" || echo "SSH_PASS=$("$SB" generate rand --hex 16)" >>"$f"
   # shellcheck disable=SC1090
   . "$f"
 }
@@ -326,7 +328,7 @@ free_port53() {
 firewall() {
   # Oracle's Ubuntu images reject everything but SSH in iptables; the
   # cloud's own security list must allow the same ports (see README).
-  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 80; do
+  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_OVPN 22 80; do
     iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$p" -j ACCEPT
   done
   for p in $P_SS $P_HY2 $P_TUIC $HOP_RANGE; do
@@ -360,6 +362,106 @@ EOF
   sysctl -q --system || true
 }
 
+# openvpn_setup runs OpenVPN over TCP on P_OVPN: a CA of its own, a
+# server certificate and one client certificate (the app's sing-box
+# carries it), the control channel wrapped with tls-crypt, AES-GCM data.
+# The app runs the profile through sing-box's openvpn-client.
+openvpn_setup() {
+  local d="$OUT/ovpn"
+  mkdir -p "$d"
+  chmod 700 "$d"
+  if [ ! -s "$d/ca.crt" ]; then
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+      -keyout "$d/ca.key" -out "$d/ca.crt" -subj "/CN=ca" 2>/dev/null
+    for who in server client; do
+      openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+        -keyout "$d/$who.key" -out "$d/$who.csr" -subj "/CN=$who" 2>/dev/null
+      printf 'extendedKeyUsage=%sAuth\nkeyUsage=digitalSignature,keyEncipherment\n' "$who" >"$d/$who.ext"
+      openssl x509 -req -in "$d/$who.csr" -CA "$d/ca.crt" -CAkey "$d/ca.key" -CAcreateserial \
+        -days 3650 -extfile "$d/$who.ext" -out "$d/$who.crt" 2>/dev/null
+      rm -f "$d/$who.csr" "$d/$who.ext"
+    done
+    openvpn --genkey secret "$d/tc.key" 2>/dev/null || openvpn --genkey --secret "$d/tc.key"
+  fi
+  mkdir -p /etc/openvpn/server
+  cat >/etc/openvpn/server/albatross.conf <<EOF
+port $P_OVPN
+proto tcp
+dev tun
+topology subnet
+server 10.9.0.0 255.255.255.0
+push "redirect-gateway def1 bypass-dhcp"
+push "dhcp-option DNS 1.1.1.1"
+push "dhcp-option DNS 8.8.8.8"
+ca $d/ca.crt
+cert $d/server.crt
+key $d/server.key
+dh none
+ecdh-curve prime256v1
+tls-crypt $d/tc.key
+tls-version-min 1.2
+cipher AES-256-GCM
+data-ciphers AES-256-GCM:AES-128-GCM
+auth SHA256
+keepalive 10 60
+persist-key
+persist-tun
+user nobody
+group nogroup
+verb 3
+explicit-exit-notify 0
+EOF
+  echo "net.ipv4.ip_forward = 1" >/etc/sysctl.d/99-albatross.conf
+  sysctl -q -w net.ipv4.ip_forward=1
+  local dev; dev="$(ip -4 route show default | awk '{print $5; exit}')"
+  iptables -t nat -C POSTROUTING -s 10.9.0.0/24 -o "$dev" -j MASQUERADE 2>/dev/null ||
+    iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o "$dev" -j MASQUERADE
+  systemctl enable --now openvpn-server@albatross >/dev/null 2>&1
+  systemctl restart openvpn-server@albatross
+}
+
+# ssh_setup adds a user for tunnelling only: a password, port forwarding,
+# no terminal (the app's sing-box opens an SSH session and carries the
+# traffic through its port forwarding). The host key goes in the link so
+# the app verifies the server.
+ssh_setup() {
+  id -u tunnel >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin tunnel
+  echo "tunnel:$SSH_PASS" | chpasswd
+  mkdir -p /etc/ssh/sshd_config.d
+  cat >/etc/ssh/sshd_config.d/albatross-tunnel.conf <<EOF
+Match User tunnel
+    PasswordAuthentication yes
+    KbdInteractiveAuthentication no
+    AllowTcpForwarding yes
+    PermitTTY no
+    X11Forwarding no
+    AllowAgentForwarding no
+    PermitTunnel no
+EOF
+  sshd -t && (systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true)
+}
+
+# ssh_hostkey prints the server's ed25519 host key as the link carries it.
+ssh_hostkey() { awk '{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null; }
+
+# ovpn_link prints the OpenVPN server as the app's own link form: the
+# node as JSON, base64url, after "albatross://" (internal/node Link).
+ovpn_link() {
+  local h="$1" d="$OUT/ovpn"
+  [ -s "$d/ca.crt" ] && [ -s "$d/client.crt" ] && [ -s "$d/client.key" ] && [ -s "$d/tc.key" ] || return 0
+  python3 - "$h" "$P_OVPN" "$d" <<'PY'
+import base64, json, sys
+host, port, d = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+def lines(name):
+    return [l for l in open(f"{d}/{name}").read().replace("\r", "").split("\n") if l.strip() and not l.startswith("#")]
+node = {"proto": "openvpn", "name": "Albatross-OpenVPN", "server": host, "port": port,
+        "ovpn": {"network": "tcp", "ca": lines("ca.crt"), "cert": lines("client.crt"), "key": lines("client.key"),
+                 "tls_crypt": lines("tc.key"), "cipher": "AES-256-GCM", "auth": "SHA256",
+                 "data_ciphers": ["AES-256-GCM", "AES-128-GCM"]}}
+print("albatross://" + base64.urlsafe_b64encode(json.dumps(node, separators=(",", ":")).encode()).decode().rstrip("="))
+PY
+}
+
 links() {
   local h="$1" n="Albatross"
   local hop; hop="${HOP_RANGE/:/-}"
@@ -379,6 +481,8 @@ ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_'
 ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_STLS?plugin=$(urlenc "shadow-tls;host=$REALITY_DEST;password=$STLS_PASS;version=3")#$n-ShadowTLS
 hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS&mport=$([ -n "$DNS_TUNNEL" ] || printf '%s,' "$P_HY2_DNS")$hop#$n-Hysteria2
 tuic://$UUID:$PASS@$DOMAIN:$P_TUIC?sni=$DOMAIN&alpn=h3&congestion_control=bbr#$n-TUIC
+$([ "$DRY_RUN" = 1 ] || printf 'ssh://tunnel:%s@%s:22?hk=%s#%s-SSH\n' "$SSH_PASS" "$h" "$(urlenc "$(ssh_hostkey)")" "$n")
+$(ovpn_link "$h")
 EOF
 }
 
@@ -728,6 +832,8 @@ main() {
   "$XRAY" run -test -c "$OUT/xray.json" >/dev/null
   if [ "$DRY_RUN" != 1 ]; then
     free_port53
+    openvpn_setup
+    ssh_setup
     firewall
     services
   fi
