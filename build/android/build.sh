@@ -158,9 +158,11 @@ gosrc() {
 }
 
 # sidecars <abi> builds or unpacks the helpers of the sidecar protocols
-# for one ABI. The Go ones are built from source for every ABI; NaiveProxy
-# comes out of its own Android plugin package (a Chromium build), and
-# WStunnel (Rust) publishes a 64-bit ARM Android build only.
+# for one ABI. The Go ones are built from source for every ABI (as Xray,
+# some depend on libraries that link into the standard library's
+# internals, hence -checklinkname=0); NaiveProxy comes out of its own
+# Android plugin package (a Chromium build), and WStunnel (Rust)
+# publishes a 64-bit ARM Android build only.
 sidecars() {
   local abi="$1" out="$jni/$1" src
   local lic="$app/src/main/assets/licenses"
@@ -170,16 +172,16 @@ sidecars() {
   cp "$tmp/naive-$abi/lib/$abi/libnaive.so" "$out/libnaive.so"
   printf 'NaiveProxy (https://github.com/klzgrad/naiveproxy) is under the BSD 3-Clause license.\n' > "$lic/naiveproxy-LICENSE.txt"
   src="$(gosrc juicity juicity/juicity "v$JUICITY_VERSION" ./cmd/client)"
-  (cd "$src" && gobuild "$abi" "$out/libjuicityclient.so" -ldflags "-s -w" ./cmd/client)
+  (cd "$src" && gobuild "$abi" "$out/libjuicityclient.so" -ldflags "-s -w -checklinkname=0" ./cmd/client)
   cp "$src/LICENSE" "$lic/juicity-LICENSE.txt" 2>/dev/null || printf 'Juicity (https://github.com/juicity/juicity) is under the GNU AGPL v3; its source is at that address.\n' > "$lic/juicity-LICENSE.txt"
   src="$(gosrc mieru enfein/mieru "v$MIERU_VERSION" ./cmd/mieru)"
-  (cd "$src" && gobuild "$abi" "$out/libmieru.so" -ldflags "-s -w" ./cmd/mieru)
+  (cd "$src" && gobuild "$abi" "$out/libmieru.so" -ldflags "-s -w -checklinkname=0" ./cmd/mieru)
   cp "$src/LICENSE" "$lic/mieru-LICENSE.txt" 2>/dev/null || printf 'Mieru (https://github.com/enfein/mieru) is under the GNU GPL v3; its source is at that address.\n' > "$lic/mieru-LICENSE.txt"
   src="$(gosrc brook txthinking/brook "v$BROOK_VERSION" ./cli/brook)"
-  (cd "$src" && gobuild "$abi" "$out/libbrook.so" -ldflags "-s -w" ./cli/brook)
+  (cd "$src" && gobuild "$abi" "$out/libbrook.so" -ldflags "-s -w -checklinkname=0" ./cli/brook)
   cp "$src/LICENSE" "$lic/brook-LICENSE.txt" 2>/dev/null || printf 'Brook (https://github.com/txthinking/brook) is under the GNU GPL v3; its source is at that address.\n' > "$lic/brook-LICENSE.txt"
   src="$(gosrc wireproxy-awg artem-russkikh/wireproxy-awg "$WIREPROXY_AWG_REF" .)"
-  (cd "$src" && gobuild "$abi" "$out/libwireproxyawg.so" -ldflags "-s -w" .)
+  (cd "$src" && gobuild "$abi" "$out/libwireproxyawg.so" -ldflags "-s -w -checklinkname=0" .)
   cp "$src/LICENSE" "$lic/wireproxy-awg-LICENSE.txt"
   if [ "$abi" = arm64-v8a ]; then
     fetch "$gh/erebe/wstunnel/releases/download/v$WSTUNNEL_VERSION/wstunnel_${WSTUNNEL_VERSION}_android_arm64.tar.gz" "$dl/wstunnel-$WSTUNNEL_VERSION-android.tgz"
