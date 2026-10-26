@@ -457,6 +457,18 @@ test("plans: as many devices as the plan allows may be connected at once", async
   assert.equal((await call("POST", "signup", { body: { username: "golden", password: "12345678" } })).body.account.tier, "gold");
 });
 
+test("encrypted DNS profiles for Apple devices are served as profiles", async () => {
+  for (const which of ["google", "cloudflare"]) {
+    const r = await fetch(BASE + "/api/v1/dns/" + which + ".mobileconfig");
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get("content-type"), /^application\/x-apple-aspen-config/);
+    const body = await r.text();
+    assert.match(body, /com\.apple\.dnsSettings\.managed/);
+    assert.match(body, which === "google" ? /dns\.google/ : /cloudflare-dns\.com/);
+  }
+  assert.equal((await fetch(BASE + "/api/v1/dns/other.mobileconfig")).status, 404);
+});
+
 test("copies older than the manifest's min_version are refused; the website never is", async () => {
   const put = (data) => fetch(BASE + "/api/v1/admin/list/main/update.json", {
     method: "PUT", headers: { Authorization: "Bearer " + admin, "Content-Type": "application/json" }, body: JSON.stringify(data),
