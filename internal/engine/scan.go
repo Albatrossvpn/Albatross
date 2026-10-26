@@ -70,6 +70,7 @@ func refreshEvery(s sources.Source, mobile bool) time.Duration {
 func (e *Engine) refreshLoop() {
 	defer e.wg.Done()
 	states := e.loadStates()
+	e.loadListKeys()
 	e.warmStart(states)
 	e.loadEdge()
 	states = nil
@@ -129,12 +130,15 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				text, ok := e.cachedText(srcs[i])
-				if !ok && srcs[i].Central && srcs[i].Tier == sources.TierPriority {
-					text, ok = sources.SnapshotFor(srcs[i]), true
+				src := srcs[i]
+				text, ok := e.cachedText(src)
+				if !ok && src.Central && src.Tier == sources.TierPriority {
+					// The bundled snapshot is plain text.
+					text, ok = sources.SnapshotFor(src), true
+					src.Keyed = false
 				}
 				if ok && text != "" {
-					e.ingest(i, srcs[i], text, states)
+					e.ingest(i, src, text, states)
 				}
 			}
 		}()
@@ -339,6 +343,11 @@ var parseSlots = make(chan struct{}, 2)
 func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint64][2]uint32) int {
 	if s.Sealed {
 		text = sources.Open(text)
+	}
+	if s.Keyed {
+		if text = e.openKeyed(text); text == "" {
+			return 0
+		}
 	}
 	if s.Hot && states == nil {
 		// The mark means "in the current hot list", not last week's.

@@ -4,7 +4,7 @@ import {
   DAY, DEFAULT_TIER, DEVICE_ACTIVE, SUB_ACTIVE, TIERS, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, maxDevices, versionLess,
   randomPassword, rollPeriod, safeEqual, sign, tag, tierOf, verify, verifyPassword,
 } from "./lib.js";
-import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
+import { LIST_KEYS, LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, subPool, subToken } from "./sub.js";
 
 const SESSION = 30 * DAY; // an app or browser session
@@ -80,6 +80,7 @@ async function route(request, env, url) {
     case "POST signup": return signup(request, env);
     case "GET me": return me(request, env);
     case "GET edge": return edge(request, env);
+    case "GET listkeys": return listKeys(request, env);
     case "GET devices": return devicesList(request, env);
     case "GET dns/google.mobileconfig": return dnsProfile("google");
     case "GET dns/cloudflare.mobileconfig": return dnsProfile("cloudflare");
@@ -472,6 +473,36 @@ async function edge(request, env) {
   const { user } = await authUser(request, env);
   const a = await viewOf(env, user, deviceOf(request), now());
   return json({ links: a.allowed ? edgeLinks(env.EDGE_HOST, env.EDGE_UUID) : [], reason: a.reason });
+}
+
+// How many of the collector's keys a signed-in app gets: enough for the
+// lists a cache may still serve (a collection every twenty minutes).
+const LIST_KEYS_GIVEN = 12;
+
+/**
+ * The keys that open the collector's sealed lists (cmd/collect -keys-out),
+ * for a signed-in user who may connect: the newest first. A copy of the
+ * app with the sign-in cut out gets none, and reads no list.
+ */
+async function listKeys(request, env) {
+  await requireCurrentClient(request, env);
+  const { user } = await authUser(request, env);
+  const a = await viewOf(env, user, deviceOf(request), now());
+  if (!a.allowed) return json({ keys: [], reason: a.reason });
+  let keys = [];
+  if (env.FILES) {
+    try {
+      const o = await env.FILES.get(LIST_KEYS);
+      const all = o ? await o.json() : [];
+      keys = (Array.isArray(all) ? all : [])
+        .filter((k) => Number.isSafeInteger(k.id) && typeof k.key === "string" && /^[0-9a-f]{64}$/.test(k.key))
+        .sort((x, y) => y.id - x.id)
+        .slice(0, LIST_KEYS_GIVEN);
+    } catch {
+      keys = [];
+    }
+  }
+  return json({ keys, reason: "" });
 }
 
 /**

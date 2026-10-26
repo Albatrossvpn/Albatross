@@ -146,3 +146,30 @@ func TestDomesticMirrors(t *testing.T) {
 		t.Fatal("domestic mirrors serve only the app's own files")
 	}
 }
+
+// A keyed list opens only with the key of its id; the collector's lists
+// are offered keyed.
+func TestKeyedLists(t *testing.T) {
+	k := ListKey{ID: 1761480000, Key: []byte(strings.Repeat("k", 32))}
+	sealed, err := SealKeyed(k, "vless://a@b:443#x\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id, ok := KeyedID(string(sealed)); !ok || id != k.ID {
+		t.Fatalf("id %d %v", id, ok)
+	}
+	if got := OpenKeyed([]ListKey{{ID: 1, Key: []byte(strings.Repeat("z", 32))}, k}, string(sealed)); got != "vless://a@b:443#x\n" {
+		t.Fatalf("opened %q", got)
+	}
+	if OpenKeyed([]ListKey{{ID: k.ID, Key: []byte(strings.Repeat("z", 32))}}, string(sealed)) != "" {
+		t.Fatal("opened with the wrong key")
+	}
+	if OpenKeyed([]ListKey{k}, "plain text") != "" || OpenKeyed(nil, string(sealed)) != "" {
+		t.Fatal("opened without a key")
+	}
+	for _, s := range Central(3) {
+		if s.Keyed != strings.HasSuffix(s.URL, KeyedSuffix) || (s.Hot && !s.Keyed) {
+			t.Fatalf("keyed flag and name disagree: %+v", s)
+		}
+	}
+}

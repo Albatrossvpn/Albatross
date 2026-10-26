@@ -225,6 +225,9 @@ var schemeRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]{1,20})://[^\s"'<>]{8,
 
 func main() {
 	out := flag.String("out", "servers", "output directory")
+	keysIn := flag.String("keys", "", "the list keys handed out so far (JSON), read to keep the recent ones")
+	keysOut := flag.String("keys-out", "", "where to write the list keys with this run's new one (JSON; outside -out, they are secret)")
+	plain := flag.Bool("plain", true, "also write the lists unsealed, for apps from before the sealed lists")
 	shards := flag.Int("shards", 8, "number of all-N.txt files")
 	probe := flag.Bool("probe", true, "drop servers whose address does not answer")
 	probeConc := flag.Int("probe-concurrency", 1500, "parallel reachability probes")
@@ -422,11 +425,30 @@ func main() {
 	}
 	m := meta{Updated: time.Now().UTC(), Sources: len(srcs), Reached: reached, Found: len(byKey), Dead: dead, Tested: len(tested), Passed: len(passed), Files: map[string]int{},
 		Schemes: schemes, Protocols: protocols, Channels: channels, Yield: yield}
+	// The lists go out sealed with this run's key (sources.SealKeyed),
+	// which the account service hands to signed-in users only; the plain
+	// copies stay while apps from before the sealed lists are around.
+	listKey, keys := newListKey(*keysIn, m.Updated)
 	write := func(name string, links []string) {
-		if err := os.WriteFile(filepath.Join(*out, name), []byte(strings.Join(links, "\n")+"\n"), 0o644); err != nil {
+		text := strings.Join(links, "\n") + "\n"
+		if *plain {
+			if err := os.WriteFile(filepath.Join(*out, name), []byte(text), 0o644); err != nil {
+				log.Fatal(err)
+			}
+		}
+		sealed, err := sources.SealKeyed(listKey, text)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(*out, name+sources.KeyedSuffix), sealed, 0o644); err != nil {
 			log.Fatal(err)
 		}
 		m.Files[name] = len(links)
+	}
+	if *keysOut != "" {
+		if err := writeListKeys(*keysOut, keys); err != nil {
+			log.Fatal(err)
+		}
 	}
 	write("fresh.txt", fresh)
 	// More than hotSize candidates, so what the probes inside the country

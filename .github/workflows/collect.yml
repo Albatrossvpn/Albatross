@@ -65,6 +65,9 @@ jobs:
             for f in sources.txt channels.txt; do
               npx wrangler r2 object get "albatross-files/list/servers/$f" --file "$RUNNER_TEMP/$f" --remote || echo "::warning::no discovered $f yet"
             done
+            # The keys the lists were sealed with so far (the account
+            # service hands them to signed-in users); this run adds one.
+            npx wrangler r2 object get albatross-files/private/listkeys.json --file "$RUNNER_TEMP/listkeys.json" --remote || echo "::notice::no list keys yet; starting the first"
           fi
       - name: Cores
         env:
@@ -89,11 +92,15 @@ jobs:
           GLOBALPING_TOKEN: ${{ secrets.GLOBALPING_TOKEN }}
           # Tags of the project's own probes inside the country (dashboard), comma separated.
           GLOBALPING_TAGS: ${{ vars.GLOBALPING_TAGS }}
+          LISTS_PLAIN: ${{ vars.LISTS_PLAIN }}
         # 15,000 real tests take a few minutes (most fail at once); the
         # address probe before them stops after ten (cmd/collect -probe-minutes).
         run: |
+          # The plain copies of the lists stay while apps from before the
+          # sealed lists are around (LISTS_PLAIN=0 ends them).
           go run ./cmd/collect -prev prev -real 15000 -probe-minutes 10 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" \
-            -sources "$RUNNER_TEMP/sources.txt" -channels "$RUNNER_TEMP/channels.txt" -out "$RUNNER_TEMP/servers"
+            -sources "$RUNNER_TEMP/sources.txt" -channels "$RUNNER_TEMP/channels.txt" -out "$RUNNER_TEMP/servers" \
+            -keys "$RUNNER_TEMP/listkeys.json" -keys-out "$RUNNER_TEMP/listkeys.new.json" -plain="${LISTS_PLAIN:-1}"
           # The discovered lists travel with the servers branch too.
           for f in sources.txt channels.txt; do [ -f "$RUNNER_TEMP/$f" ] && cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/servers/$f"; done; true
       # The collector itself, for a tester inside the country (deploy/tester).
@@ -127,9 +134,20 @@ jobs:
           files=()
           for f in hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt tor.json meta.json iran-tcp.json reach.json own-0.bin own-1.bin own-2.bin own-3.bin own-4.bin; do
             [ -f "$RUNNER_TEMP/servers/$f" ] && files+=("$RUNNER_TEMP/servers/$f")
+            [ -f "$RUNNER_TEMP/servers/$f.sealed" ] && files+=("$RUNNER_TEMP/servers/$f.sealed")
           done
           bash deploy/files/publish-lists.sh "$account" servers "${files[@]}"
           bash deploy/files/publish-lists.sh "$account" tools "$RUNNER_TEMP"/tools/collect-linux-*
+          # The lists' keys, for the account service only: outside list/,
+          # so they are never served as a file. The new lists are of no use
+          # to anyone until this is stored, so it must succeed.
+          . deploy/files/lib.sh
+          if have_wrangler; then
+            r2_put private/listkeys.json "$RUNNER_TEMP/listkeys.new.json" "application/json" "no-store"
+            echo "stored this run's list key"
+          else
+            echo "::error::the list keys could not be stored: the Cloudflare credentials are missing"; exit 1
+          fi
       # The next collection, right away: the lists stay as fresh as one
       # collection takes (about twenty minutes). GitHub lets a run start a
       # workflow_dispatch with its own token. A private repository has
