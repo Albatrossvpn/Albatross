@@ -61,7 +61,7 @@ func realTest(list []*entry, n int) (passed map[*entry]time.Duration, tested map
 			nodes = append(nodes, nd)
 		}
 		// Several cores at once, each holding a bounded share of the servers.
-		const perCore, cores = 250, 4
+		const perCore, cores = 120, 6
 		sem := make(chan struct{}, cores)
 		var wg sync.WaitGroup
 		for lo := 0; lo < len(nodes); lo += perCore {
@@ -72,9 +72,16 @@ func realTest(list []*entry, n int) (passed map[*entry]time.Duration, tested map
 				defer func() { <-sem; wg.Done() }()
 				t := &tester.Tester{Runtime: rt, Concurrency: 64, Timeout: 8 * time.Second}
 				err := t.Batch(ctx, "collect", part, func(r tester.Result) {
-					if r.OK && !r.Tampered {
+					switch {
+					case r.OK && !r.Tampered:
 						mu.Lock()
 						passed[byNode[r.Node]] = r.Delay
+						mu.Unlock()
+					case r.Err == "the core could not start":
+						// Nothing was learned about the server; it stays
+						// in fresh.txt rather than counting as failed.
+						mu.Lock()
+						delete(tested, byNode[r.Node])
 						mu.Unlock()
 					}
 				})
