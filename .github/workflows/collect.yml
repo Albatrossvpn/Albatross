@@ -88,9 +88,10 @@ jobs:
           GLOBALPING_TOKEN: ${{ secrets.GLOBALPING_TOKEN }}
           # Tags of the project's own probes inside the country (dashboard), comma separated.
           GLOBALPING_TAGS: ${{ vars.GLOBALPING_TAGS }}
-        # 5,000 real tests keep a run near ten minutes.
+        # 5,000 real tests keep a run near ten minutes; the address probe
+        # before them stops after ten (cmd/collect -probe-minutes).
         run: |
-          go run ./cmd/collect -prev prev -real 5000 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" \
+          go run ./cmd/collect -prev prev -real 5000 -probe-minutes 10 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" \
             -sources "$RUNNER_TEMP/sources.txt" -channels "$RUNNER_TEMP/channels.txt" -out "$RUNNER_TEMP/servers"
           # The discovered lists travel with the servers branch too.
           for f in sources.txt channels.txt; do [ -f "$RUNNER_TEMP/$f" ] && cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/servers/$f"; done; true

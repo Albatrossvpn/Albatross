@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { pool } from "../src/sub.js";
 import { DAY, TIERS, accountOf, checkPassword, checkUsername, hashPassword, maxDevices, randomPassword, rollPeriod, safeEqual, sign, tierOf, verify, verifyPassword } from "../src/lib.js";
 
 test("passwords are salted and verified", async () => {
@@ -194,4 +195,20 @@ test("subscriptions: countries read from names, servers renamed, the edge first"
   assert.equal(h.get("Subscription-Userinfo"), "upload=0; download=5; total=100; expire=1700000000");
   assert.equal(h.get("Profile-Title"), "base64:" + btoa("Albatross Germany"));
   assert.equal(headers("x", { used_bytes: 0, quota_bytes: 0, expires_at: 0 }).get("Subscription-Userinfo"), "upload=0; download=0");
+});
+
+
+test("a subscription is topped up from the fresh list when the hot list is short, with Apple-usable servers only", () => {
+  const hot = ["vless://a@h1:443#Germany", "ss://YWVzOmJhc2U@h2:8388#US", "albatross://x@h3:1#own", "trojan://p@h4:443#Iran", "wireguard://k@h5:51820#NL"].join("\n");
+  const fresh = Array.from({ length: 500 }, (_, i) => `vmess://${Buffer.from(JSON.stringify({ add: "f" + i, ps: "FR " + i })).toString("base64")}`).join("\n");
+  const full = pool(hot, fresh, 2);
+  assert.deepEqual(full.map((e) => e.link.split("://")[0]), ["vless", "ss"], "enough hot servers: no top-up, own protocols and Iran left out");
+  let n = 0;
+  const seq = () => ((n += 0.37) % 1);
+  const topped = pool(hot, fresh, 10, seq);
+  assert.equal(topped.length, 10);
+  assert.equal(topped.filter((e) => e.link.startsWith("vmess://")).length, 8);
+  const other = pool(hot, fresh, 10);
+  assert.equal(other.length, 10);
+  assert.equal(pool(hot, "", 10).length, 2, "nothing fresh: the hot list alone");
 });
