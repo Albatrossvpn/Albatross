@@ -143,12 +143,20 @@ function render(s) {
   $("update-modal").classList.toggle("hidden", !blocking);
   if (u) {
     var downloading = u.in_app && u.progress > 0 && u.progress < 100;
-    $("update-banner").textContent = downloading ? "Downloading version " + u.latest + "… " + u.progress + "%"
+    // What the download is doing: the percentage once bytes flow over a
+    // line of known length, else the step (connecting, another address,
+    // megabytes so far), so the user sees it is at work.
+    var doing = u.step || (u.progress + "%");
+    $("update-banner").textContent = downloading ? "Downloading version " + u.latest + " · " + doing
       : u.error ? u.error
       : "Version " + u.latest + " is available. Tap to " + (u.in_app ? "install" : "get") + " it." + (u.message ? " " + u.message : "");
     if (u.message) $("update-text").textContent = u.message;
-    $("update-get").textContent = downloading ? "Downloading… " + u.progress + "%" : u.error ? "Try again" : u.in_app ? "Install" : "Download";
+    $("update-get").textContent = downloading ? "Downloading… " + (u.step ? "" : u.progress + "%") : u.error ? "Try again" : u.in_app ? "Install" : "Download";
     $("update-get").disabled = downloading;
+    $("update-progress").classList.toggle("hidden", !downloading);
+    $("update-bar").style.width = (u.step && u.progress <= 1 ? 3 : u.progress) + "%";
+    $("update-bar").classList.toggle("busy", !!u.step);
+    $("update-step").textContent = downloading ? doing : "";
   }
 
   renderAccount(s.account);

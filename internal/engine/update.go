@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -95,11 +96,27 @@ type UpdateInfo struct {
 	Message  string `json:"message,omitempty"`
 	URL      string `json:"url"`
 	// InApp says the app downloads and installs the new version itself;
-	// Progress is the download's percentage while it runs.
+	// Progress is the download's percentage while it runs (1 from the
+	// moment it starts, so the user sees it is at work), and Step what it
+	// is doing when there is no percentage to show: connecting, trying
+	// another address, how much came through a line whose length is unknown.
 	InApp    bool   `json:"in_app"`
 	Progress int    `json:"progress"`
+	Step     string `json:"step,omitempty"`
 	Error    string `json:"error,omitempty"`
 	file     *UpdateFile
+}
+
+// setUpdateStep tells the UI what the download of version is doing.
+func (e *Engine) setUpdateStep(version, step string) {
+	e.mu.Lock()
+	if e.update != nil && e.update.Latest == version {
+		e.update.Step = step
+		if e.update.Progress == 0 {
+			e.update.Progress = 1
+		}
+	}
+	e.mu.Unlock()
 }
 
 // checkUpdate downloads the manifest (through the VPN when connected, else
@@ -273,7 +290,7 @@ func (e *Engine) GetUpdate() error {
 	}
 	e.updating = true
 	f, version := *u.file, u.Latest
-	u.Progress, u.Error = 0, ""
+	u.Progress, u.Error, u.Step = 1, "", "Starting the download…"
 	e.mu.Unlock()
 	path, err := e.downloadUpdate(f, version)
 	downloaded := err == nil
@@ -286,6 +303,7 @@ func (e *Engine) GetUpdate() error {
 		// Progress is reset on failure: left between 0 and 100 it shows as
 		// still downloading. The platform shows nothing itself, since a
 		// forced update retries in the background every few minutes.
+		e.update.Step = ""
 		switch {
 		case err == nil:
 			e.update.Progress = 100
@@ -373,12 +391,22 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 	} else {
 		urls = append(urls, dom...)
 	}
+	attempt := 0
 	for _, c := range clients {
 		isDirect := c == direct
 		c = withHeaderTimeout(c)
 		for _, u := range urls {
 			if !strings.HasPrefix(u, "https://") && !sources.IsDomestic(u) {
 				continue
+			}
+			attempt++
+			switch {
+			case attempt == 1 && !isDirect:
+				e.setUpdateStep(version, "Connecting to the download through the VPN…")
+			case attempt == 1:
+				e.setUpdateStep(version, "Connecting to the download…")
+			default:
+				e.setUpdateStep(version, fmt.Sprintf("Trying another address (%d)…", attempt))
 			}
 			uc := c
 			if isDirect && sources.IsWorker(u) {
@@ -479,13 +507,16 @@ func (e *Engine) fetchUpdate(c *http.Client, u, path, version string) (err error
 				return err
 			}
 			done += int64(n)
-			if total > 0 {
-				e.mu.Lock()
-				if e.update != nil && e.update.Latest == version {
-					e.update.Progress = int(done * 99 / total)
+			e.mu.Lock()
+			if e.update != nil && e.update.Latest == version {
+				if total > 0 {
+					e.update.Progress, e.update.Step = max(1, int(done*99/total)), ""
+				} else if done>>20 != (done-int64(n))>>20 {
+					// A line of unknown length: show what came through.
+					e.update.Step = fmt.Sprintf("Downloaded %d MB…", done>>20)
 				}
-				e.mu.Unlock()
 			}
+			e.mu.Unlock()
 		}
 		if rerr == io.EOF {
 			break

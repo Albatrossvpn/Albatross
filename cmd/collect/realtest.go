@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/Albatrossvpn/vp/internal/antiblock"
 	"github.com/Albatrossvpn/vp/internal/core"
 	"github.com/Albatrossvpn/vp/internal/node"
 	"github.com/Albatrossvpn/vp/internal/tester"
@@ -230,12 +232,20 @@ func checkIran(hot []*entry, prevDir, outDir string) ([]*entry, int, int) {
 			eps = append(eps, e.endpoint)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
-	defer cancel()
-	for ep, open := range iranReach(ctx, eps, gpProbes()) {
-		cache[ep] = iranSeen{Open: open, At: now.Unix()}
+	// Cloudflare edge addresses too: the apps reach the account service
+	// through whichever of them the network lets through (reach.json).
+	if edgeChecks > 0 {
+		eps = append(eps, edgeCandidates(cache, now)...)
+	}
+	if len(eps) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+		defer cancel()
+		for ep, open := range iranReach(ctx, eps, gpProbes()) {
+			cache[ep] = iranSeen{Open: open, At: now.Unix()}
+		}
 	}
 	saveIranCache(outDir, cache, now)
+	writeReach(outDir, cache, now)
 	seen := map[string]bool{}
 	checked, open := 0, 0
 	for _, e := range hot {
@@ -329,4 +339,71 @@ func orderFresh(fresh []*entry, passed map[*entry]time.Duration, tested map[*ent
 	}
 	crowdOrder(ok, passed, crowd)
 	return append(ok, untested...), failed
+}
+
+// edgeAddrs are Cloudflare edge addresses tried first for reach.json:
+// cloudflare.com's own and ones widely found open inside the country.
+// Beside them, each run has the scan (antiblock.Scanner) pick a few real
+// edges at random, so new open ranges are found over time.
+var edgeAddrs = []string{"104.16.132.229", "104.16.133.229", "188.114.96.3", "188.114.97.3", "104.16.123.96", "172.64.153.1", "104.21.16.1", "104.26.0.1", "162.159.128.1", "141.101.64.1"}
+
+// edgeChecks is how many edge addresses a run asks the probes inside about
+// (a variable so tests can turn the asking off).
+var edgeChecks = 30
+
+// edgeCandidates lists edge addresses (as host:443) to check from inside
+// this run: the fixed ones and a random sample of real edges, those not
+// checked lately first, at most edgeChecks.
+func edgeCandidates(cache map[string]iranSeen, now time.Time) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(ip string) {
+		ep := net.JoinHostPort(ip, "443")
+		if seen[ep] {
+			return
+		}
+		seen[ep] = true
+		if c, ok := cache[ep]; ok && now.Sub(time.Unix(c.At, 0)) < iranFresh {
+			return
+		}
+		if len(out) < edgeChecks {
+			out = append(out, ep)
+		}
+	}
+	for _, ip := range edgeAddrs {
+		add(ip)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	for _, c := range (&antiblock.Scanner{}).Scan(ctx, 120, 40) {
+		add(c.IP)
+	}
+	return out
+}
+
+// reachFile is reach.json: the edge addresses open from inside, for the
+// apps (internal/engine/reach.go).
+type reachFile struct {
+	Updated    time.Time `json:"updated"`
+	Cloudflare []string  `json:"cloudflare"`
+}
+
+func writeReach(dir string, cache map[string]iranSeen, now time.Time) {
+	if dir == "" {
+		return
+	}
+	var open []string
+	for ep, c := range cache {
+		host, port, err := net.SplitHostPort(ep)
+		if err != nil || port != "443" || !c.Open || now.Sub(time.Unix(c.At, 0)) > iranFresh || !antiblock.IsCloudflare(host) {
+			continue
+		}
+		open = append(open, host)
+	}
+	sort.Strings(open)
+	b, err := json.MarshalIndent(reachFile{Updated: now.UTC(), Cloudflare: open}, "", "  ")
+	if err == nil {
+		os.WriteFile(filepath.Join(dir, "reach.json"), b, 0o644)
+	}
+	log.Printf("reach.json: %d Cloudflare edge addresses open from Iran", len(open))
 }
