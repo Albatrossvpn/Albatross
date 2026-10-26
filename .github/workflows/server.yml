@@ -1,0 +1,36 @@
+name: Run on the relay server
+
+# Runs a shell script on the project's own server (the self-hosted runner
+# labelled "relay", deploy/server/README.md), by hand only, so the server
+# can be looked after without a terminal. The script's output is the job
+# log. Secrets never go in the script: the log is readable by whoever
+# reads the repository's Actions.
+on:
+  workflow_dispatch:
+    inputs:
+      script:
+        description: The shell script to run as root on the server
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-server
+  cancel-in-progress: false
+
+jobs:
+  run:
+    # Never from a pull request or a fork: only this repository's own
+    # manual dispatches reach the server.
+    if: github.repository == 'Albatrossvpn/Albatross' && github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, relay]
+    timeout-minutes: 30
+    steps:
+      - name: Run
+        env:
+          SCRIPT: ${{ inputs.script }}
+        run: |
+          printf '%s\n' "$SCRIPT" > "$RUNNER_TEMP/script.sh"
+          bash "$RUNNER_TEMP/script.sh"
