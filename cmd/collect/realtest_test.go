@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -161,5 +162,108 @@ func TestDiscoverMentions(t *testing.T) {
 	got := extraSources(filepath.Join(dir, "s.txt"), "sub")
 	if len(got) != 2 || got[1].URL != "https://c/d.txt" || got[0].Tier != 1 {
 		t.Fatalf("extra %v", got)
+	}
+}
+
+// The check from inside the country keeps its answers between runs: with
+// fresh answers for every address nothing is asked, what does not answer
+// inside is left out, and what does comes first.
+func TestCheckIranUsesItsCache(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().Unix()
+	cache := map[string]iranSeen{
+		"a:1": {Open: false, At: now - 60},
+		"b:1": {Open: true, At: now - 60},
+		"d:1": {Open: true, At: now - int64(iranKeep/time.Second) - 1}, // too old: dropped from the file
+	}
+	b, _ := json.Marshal(cache)
+	os.WriteFile(filepath.Join(dir, iranCacheName), b, 0o644)
+	a := &entry{link: "vless://a@a:1#A", endpoint: "a:1"}
+	bb := &entry{link: "vless://b@b:1#B", endpoint: "b:1"}
+	c := &entry{link: "hysteria2://c@c:1#C"} // no TCP endpoint: never checked, kept
+	// Nothing left to ask, and no edge addresses either: no probe is used.
+	defer func(n int) { edgeChecks = n }(edgeChecks)
+	edgeChecks = 0
+	kept, checked, open := checkIran([]*entry{a, bb, c}, dir, dir)
+	if got := links(kept); len(got) != 2 || got[0] != bb.link || got[1] != c.link {
+		t.Fatalf("kept %v", got)
+	}
+	if checked != 2 || open != 1 {
+		t.Fatalf("checked %d open %d", checked, open)
+	}
+	saved := loadIranCache(dir)
+	if _, ok := saved["d:1"]; ok || len(saved) != 2 {
+		t.Fatalf("saved %v", saved)
+	}
+}
+
+// Servers of a protocol the most shared lists lack are still among the
+// ones the real test covers, and the hot list keeps room for WireGuard.
+func TestRareProtocolsAreTestedAndKept(t *testing.T) {
+	var list []*entry
+	for i := 0; i < 50; i++ {
+		list = append(list, &entry{link: "vless://x@v" + string(rune('a'+i%26)) + ":1#" + string(rune('A'+i%26)), proto: "vless", pop: 100 - i})
+	}
+	for i := 0; i < 5; i++ {
+		list = append(list, &entry{link: "wireguard://k@w:" + string(rune('1'+i)) + "#W", proto: "wireguard", pop: 1})
+	}
+	promoteRare(list, 20, 3)
+	wg := 0
+	for _, e := range list[:20] {
+		if e.proto == "wireguard" {
+			wg++
+		}
+	}
+	if wg != 3 || len(list) != 55 {
+		t.Fatalf("%d wireguard among the first 20, %d entries", wg, len(list))
+	}
+	if list[0].proto != "vless" || list[0].pop != 100 {
+		t.Fatalf("the most shared server moved: %+v", list[0])
+	}
+
+	out := list[:4]
+	cands := list
+	got := reserveProto(append([]*entry(nil), out...), cands, "wireguard", 2)
+	wg = 0
+	for _, e := range got {
+		if e.proto == "wireguard" {
+			wg++
+		}
+	}
+	if len(got) != 4 || wg != 2 {
+		t.Fatalf("reserve: %d entries, %d wireguard", len(got), wg)
+	}
+	if got[0] != list[0] {
+		t.Fatal("the first server was replaced instead of the last")
+	}
+}
+
+// Every protocol with passing servers has at least protoReserve in the
+// hot list, even when the best half is all one protocol.
+func TestHotListHasEveryProtocol(t *testing.T) {
+	var ordered []*entry
+	passed := map[*entry]time.Duration{}
+	add := func(proto string, n int, d time.Duration) {
+		for i := 0; i < n; i++ {
+			e := &entry{link: proto + "://x@" + proto + string(rune('a'+i/26)) + string(rune('a'+i%26)) + ":1#X", proto: proto, endpoint: proto + string(rune('a'+i/26)) + string(rune('a'+i%26)) + ":1"}
+			ordered = append(ordered, e)
+			passed[e] = d
+		}
+	}
+	add("vless", 400, time.Millisecond)
+	add("trojan", 30, time.Second)
+	add("ss", 25, time.Second)
+	add("wireguard", 50, time.Second)
+	add("tuic", 3, time.Second)
+	hot := hotList(ordered, passed, 300, crowdStats{rates: map[uint64][2]float64{}})
+	if len(hot) != 300 {
+		t.Fatalf("%d hot", len(hot))
+	}
+	count := map[string]int{}
+	for _, e := range hot {
+		count[e.proto]++
+	}
+	if count["trojan"] < protoReserve || count["ss"] < protoReserve || count["wireguard"] < wgReserve || count["tuic"] != 3 {
+		t.Fatalf("protocol counts: %v", count)
 	}
 }

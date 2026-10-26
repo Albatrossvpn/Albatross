@@ -1,12 +1,12 @@
 name: Hot servers
 
-# Between full collections, re-test the servers the apps try first, so
-# hot.txt never lists servers that stopped working an hour ago.
+# Re-tests the servers the apps try first, by hand. It no longer runs on a
+# schedule: the full collection (collect.yml) tests and confirms every
+# server it publishes about once an hour, and this run, testing from the
+# same runners, has been keeping only a handful of them (5 to 11 of
+# hundreds) and so left users with almost nothing. Run it by hand to
+# diagnose that; it is not to shrink hot.txt between collections.
 on:
-  # Every six hours: a private repository has 2,000 free Actions minutes a
-  # month, and one run takes about four.
-  schedule:
-    - cron: "41 */6 * * *"
   workflow_dispatch:
 
 permissions:

@@ -1,10 +1,11 @@
 // The account service: the apps sign in and report use here, users see and
 // change their account on the website, the administrator manages everyone.
 import {
-  DAY, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, verify, verifyPassword,
+  DAY, DEFAULT_TIER, DEVICE_ACTIVE, SUB_ACTIVE, TIERS, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, maxDevices, versionLess,
+  randomPassword, rollPeriod, safeEqual, sign, tag, tierOf, verify, verifyPassword,
 } from "./lib.js";
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
-import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, hotList, parseList, readSubToken, subToken } from "./sub.js";
+import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, readSubToken, subPool, subToken } from "./sub.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -16,6 +17,7 @@ const DEFAULTS = {
   default_max_seconds: "0",
   default_valid_days: "0",
   default_reset_days: "0", // allowances renew only when the admin recharges them
+  default_tier: DEFAULT_TIER,
   download_windows: "",
   download_android: "",
 };
@@ -78,6 +80,9 @@ async function route(request, env, url) {
     case "POST signup": return signup(request, env);
     case "GET me": return me(request, env);
     case "GET edge": return edge(request, env);
+    case "GET devices": return devicesList(request, env);
+    case "GET dns/google.mobileconfig": return dnsProfile("google");
+    case "GET dns/cloudflare.mobileconfig": return dnsProfile("cloudflare");
     case "GET sub": return subInfo(request, env, url);
     case "POST usage": return usage(request, env);
     case "POST password": return changePassword(request, env);
@@ -95,6 +100,8 @@ async function route(request, env, url) {
   }
   const list = path.match(/^admin\/list\/(.+)$/);
   if (list && request.method === "PUT") return adminPutList(request, env, list[1]);
+  const dev = path.match(/^devices\/([a-z0-9]{1,64})$/);
+  if (dev && request.method === "DELETE") return deviceRemove(request, env, dev[1]);
   if (admin) {
     const id = Number(admin[1]);
     if (request.method === "PATCH" && !admin[2]) return adminUpdate(request, env, id);
@@ -224,8 +231,171 @@ async function publicInfo(env) {
     signup_open: s.signup_open === "1",
     turnstile_sitekey: env.TURNSTILE_SITEKEY || "",
     downloads: { windows: s.download_windows, android: s.download_android },
+    tiers: TIERS,
   });
 }
+
+// ---------- Encrypted DNS for Apple devices ----------
+//
+// On some networks the resolver answers for this service's names with a
+// lie, so the account page and the subscription never load there. A
+// configuration profile that sets DNS over HTTPS for the whole device
+// goes around that; Safari installs it from these addresses.
+
+const DNS_PROVIDERS = {
+  google: { name: "Google", url: "https://dns.google/dns-query", addrs: ["8.8.8.8", "8.8.4.4", "2001:4860:4860::8888", "2001:4860:4860::8844"], id: "google" },
+  cloudflare: { name: "Cloudflare", url: "https://cloudflare-dns.com/dns-query", addrs: ["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001"], id: "cloudflare" },
+};
+
+function dnsProfile(which) {
+  const p = DNS_PROVIDERS[which];
+  if (!p) throw new HttpError(404, "Not found.");
+  const xml = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const body = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>DNSSettings</key>
+      <dict>
+        <key>DNSProtocol</key>
+        <string>HTTPS</string>
+        <key>ServerURL</key>
+        <string>${xml(p.url)}</string>
+        <key>ServerAddresses</key>
+        <array>
+${p.addrs.map((a) => `          <string>${a}</string>`).join("\n")}
+        </array>
+      </dict>
+      <key>PayloadDescription</key>
+      <string>Encrypted DNS (${xml(p.name)}) for every network</string>
+      <key>PayloadDisplayName</key>
+      <string>Encrypted DNS: ${xml(p.name)}</string>
+      <key>PayloadIdentifier</key>
+      <string>online.albatrossvpn.dns.${p.id}.settings</string>
+      <key>PayloadType</key>
+      <string>com.apple.dnsSettings.managed</string>
+      <key>PayloadUUID</key>
+      <string>a1b2c3d4-0000-4000-8000-${p.id === "google" ? "000000000001" : "000000000002"}</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>ProhibitDisablement</key>
+      <false/>
+    </dict>
+  </array>
+  <key>PayloadDescription</key>
+  <string>Looks names up over an encrypted connection to ${xml(p.name)}, so a network's resolver cannot answer with lies. Remove it any time in Settings, General, VPN &amp; Device Management.</string>
+  <key>PayloadDisplayName</key>
+  <string>Encrypted DNS (${xml(p.name)})</string>
+  <key>PayloadIdentifier</key>
+  <string>online.albatrossvpn.dns.${p.id}</string>
+  <key>PayloadRemovalDisallowed</key>
+  <false/>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>a1b2c3d4-0000-4000-8000-${p.id === "google" ? "000000000011" : "000000000012"}</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>
+`;
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/x-apple-aspen-config; charset=utf-8",
+      "Content-Disposition": `attachment; filename="encrypted-dns-${p.id}.mobileconfig"`,
+      "Cache-Control": "public, max-age=86400",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+}
+
+// ---------- Devices ----------
+//
+// An account's plan says how many devices may be connected at once. Each
+// copy of the app names itself with a random number kept on the device
+// (X-Albatross-Device) and a word for what it is (X-Albatross-Device-Name).
+// A usage report, sent every minute while connected, claims one of the
+// account's slots for DEVICE_ACTIVE; a report that finds the other slots
+// taken is answered "devices" and the app disconnects. Signing in and
+// looking at the account claim nothing.
+
+/** The device an app's call names, or null for the website. */
+function deviceOf(request) {
+  if (request.headers.get("X-Albatross-Client") === "web") return null;
+  const id = (request.headers.get("X-Albatross-Device") || "").trim().toLowerCase();
+  const name = (request.headers.get("X-Albatross-Device-Name") || "").replace(/[^\x20-\x7e]/g, "").trim().slice(0, 40);
+  // A copy from before devices were counted (1.0.0) is one shared device.
+  if (!/^[0-9a-f]{16,64}$/.test(id)) return { id: "app", name: "" };
+  return { id, name };
+}
+
+// The names shown for the devices that have none of their own.
+const DEVICE_NAMES = { app: "Albatross app (older version)", sub: "iPhone, iPad and Mac (subscription)" };
+const deviceName = (d) => d.name || DEVICE_NAMES[d.device_id ?? d.id] || "Device";
+
+/** How many of the account's devices other than `id` hold a slot now. */
+async function busyDevices(env, user, id, t) {
+  const r = await env.DB.prepare("SELECT COUNT(*) AS n FROM devices WHERE user_id = ?1 AND device_id != ?2 AND active_until > ?3")
+    .bind(user.id, id, t).first();
+  return r.n;
+}
+
+const upsertDevice = (env, user, d, t, until) => env.DB.prepare(
+  `INSERT INTO devices (user_id, device_id, name, first_seen, last_seen, active_until) VALUES (?1, ?2, ?3, ?4, ?4, ?5)
+   ON CONFLICT (user_id, device_id) DO UPDATE SET last_seen = ?4, name = CASE WHEN ?3 = '' THEN name ELSE ?3 END,
+     active_until = CASE WHEN ?5 < 0 THEN active_until ELSE ?5 END`,
+).bind(user.id, d.id, d.name, t, until).run();
+
+/**
+ * The account as a caller sees it. A device is told whether a slot is
+ * free for it (and remembered, holding nothing); the website is told how
+ * many devices hold one.
+ */
+async function viewOf(env, user, d, t) {
+  if (!d) return accountOf(user, t, { active: await busyDevices(env, user, "", t) });
+  await upsertDevice(env, user, d, t, -1);
+  return accountOf(user, t, { others: await busyDevices(env, user, d.id, t) });
+}
+
+/**
+ * A device asks to hold one of its account's slots for `hold` seconds. It
+ * may while fewer than the plan's number of other devices hold one; a
+ * device that may not connect gives up the slot it held, so it never
+ * counts the devices that stay out.
+ */
+async function claimSlot(env, user, d, t, hold = DEVICE_ACTIVE) {
+  const a = accountOf(user, t, { others: await busyDevices(env, user, d.id, t) });
+  await upsertDevice(env, user, d, t, a.allowed ? t + hold : 0);
+  return a;
+}
+
+/** The devices this account has been used on, those holding a slot first. */
+async function devicesList(request, env) {
+  const { user } = await authUser(request, env);
+  const t = now();
+  const { results } = await env.DB.prepare(
+    "SELECT device_id, name, first_seen, last_seen, active_until FROM devices WHERE user_id = ?1 ORDER BY (active_until > ?2) DESC, last_seen DESC LIMIT 100",
+  ).bind(user.id, t).all();
+  return json({
+    tier: tierOf(user.tier),
+    max_devices: maxDevices(user),
+    devices: results.map((d) => ({ id: d.device_id, name: deviceName(d), first_seen: d.first_seen, last_seen: d.last_seen, active: d.active_until > t })),
+  });
+}
+
+/** Forgets a device; the slot it held is free at once. */
+async function deviceRemove(request, env, id) {
+  const { user } = await authUser(request, env);
+  const r = await env.DB.prepare("DELETE FROM devices WHERE user_id = ?1 AND device_id = ?2").bind(user.id, id).run();
+  if (!r.meta.changes) throw new HttpError(404, "No such device.");
+  return json({ ok: true });
+}
+
+const forgetDevices = (env, id) => env.DB.prepare("DELETE FROM devices WHERE user_id = ?1").bind(id).run();
 
 // ---------- Users ----------
 
@@ -247,7 +417,7 @@ async function login(request, env) {
   }
   // The username's count stays, so the other addresses guessing at it stay slowed.
   await forget(env, k.from);
-  return json({ token: await session(env, user), account: accountOf(user, now()) });
+  return json({ token: await session(env, user), account: await viewOf(env, user, deviceOf(request), now()) });
 }
 
 async function verifyTurnstile(request, env, token) {
@@ -276,10 +446,10 @@ async function signup(request, env) {
   const days = Number(s.default_valid_days);
   try {
     await env.DB.prepare(
-      `INSERT INTO users (username, pass_hash, created_at, quota_bytes, max_seconds, expires_at, reset_days, period_start)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?3)`,
+      `INSERT INTO users (username, pass_hash, created_at, quota_bytes, max_seconds, expires_at, reset_days, period_start, tier)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?3, ?8)`,
     ).bind(username.trim().toLowerCase(), await hashPassword(password), t, Number(s.default_quota_bytes), Number(s.default_max_seconds),
-      days > 0 ? t + days * DAY : 0, Number(s.default_reset_days)).run();
+      days > 0 ? t + days * DAY : 0, Number(s.default_reset_days), tierOf(s.default_tier)).run();
   } catch (e) {
     if (/UNIQUE/i.test(String(e))) throw new HttpError(409, "That username is taken.");
     throw e;
@@ -292,14 +462,15 @@ async function signup(request, env) {
 async function me(request, env) {
   await requireCurrentClient(request, env);
   const { user } = await authUser(request, env);
-  return json({ account: accountOf(user, now()), created_at: user.created_at, total_bytes: user.total_bytes, total_seconds: user.total_seconds });
+  const account = await viewOf(env, user, deviceOf(request), now());
+  return json({ account, created_at: user.created_at, total_bytes: user.total_bytes, total_seconds: user.total_seconds });
 }
 
 /** The edge's links for the signed-in user (edge/README.md); none while the account may not connect. */
 async function edge(request, env) {
   await requireCurrentClient(request, env);
   const { user } = await authUser(request, env);
-  const a = accountOf(user, now());
+  const a = await viewOf(env, user, deviceOf(request), now());
   return json({ links: a.allowed ? edgeLinks(env.EDGE_HOST, env.EDGE_UUID) : [], reason: a.reason });
 }
 
@@ -310,12 +481,12 @@ async function edge(request, env) {
 async function subInfo(request, env, url) {
   const { user } = await authUser(request, env);
   const t = now();
-  const a = accountOf(user, t);
-  const entries = parseList(await hotList(env));
+  const a = await viewOf(env, user, null, t);
+  const entries = await subPool(env);
   return json({
     url: `${url.origin}/sub/${await subToken(env, user, t)}`,
     countries: countriesOf(entries),
-    servers: entries.filter((e) => e.country !== "IR").length,
+    servers: entries.length,
     edge: edgeFor(env, a).length,
     brand: env.SITE_NAME || "Albatross",
   });
@@ -328,11 +499,16 @@ async function subscription(request, url, env) {
   const p = await readSubToken(env, url.pathname.slice("/sub/".length), t);
   const user = p && (await userById(env, p.u));
   if (!user || user.token_version !== p.v) return new Response("This subscription address is no longer valid. Sign in to your account for a new one.", { status: 401 });
-  const a = accountOf(user, t);
+  // The service never hears from these devices while they are connected,
+  // so the subscription holds one slot for a while after each fetch.
+  const a = await claimSlot(env, user, { id: "sub", name: "" }, t, SUB_ACTIVE);
+  if (a.reason === "devices") {
+    return new Response(`All ${a.max_devices} devices of this account are in use. Disconnect one, or remove it on your account page.`, { status: 403 });
+  }
   if (!a.allowed) return new Response("This account cannot connect right now (" + a.reason + ").", { status: 403 });
   const choice = String(url.searchParams.get("c") || "").toUpperCase().replace("EDGE", "edge");
   if (choice && choice !== "edge" && !/^[A-Z]{2}$/.test(choice)) return new Response("Not found", { status: 404 });
-  const entries = parseList(await hotList(env));
+  const entries = await subPool(env);
   const sub = buildSub(entries, choice, env.SITE_NAME || "Albatross", edgeFor(env, a));
   const h = subHeaders(sub.title, a);
   return new Response(request.method === "HEAD" ? null : sub.body, { status: 200, headers: h });
@@ -378,7 +554,8 @@ async function usage(request, env) {
   const fresh = await userById(env, user.id);
   // Sessions are renewed while they are in use.
   const renewed = payload.exp - t < SESSION / 2 ? await session(env, fresh) : token;
-  return json({ token: renewed, account: accountOf(fresh, t) });
+  const d = deviceOf(request);
+  return json({ token: renewed, account: d ? await claimSlot(env, fresh, d, t) : accountOf(fresh, t) });
 }
 
 async function changePassword(request, env) {
@@ -395,8 +572,9 @@ async function changePassword(request, env) {
   // Raising the version signs out every other device.
   await env.DB.prepare("UPDATE users SET pass_hash = ?1, token_version = token_version + 1 WHERE id = ?2")
     .bind(await hashPassword(new_password), user.id).run();
+  await forgetDevices(env, user.id);
   const fresh = await userById(env, user.id);
-  return json({ token: await session(env, fresh), account: accountOf(fresh, now()) });
+  return json({ token: await session(env, fresh), account: await viewOf(env, fresh, deviceOf(request), now()) });
 }
 
 // ---------- Administrator ----------
@@ -477,10 +655,11 @@ async function adminPutList(request, env, path) {
 }
 
 /** A user as the administrator sees them. */
-function adminView(u, t) {
-  const a = accountOf(u, t);
+function adminView(u, t, active = 0) {
+  const a = accountOf(u, t, { active });
   return {
     id: u.id, username: u.username, created_at: u.created_at, disabled: !!u.disabled, note: u.note,
+    tier: a.tier, max_devices: a.max_devices, devices: a.devices,
     quota_bytes: u.quota_bytes, max_seconds: u.max_seconds, expires_at: u.expires_at, reset_days: u.reset_days,
     used_bytes: a.used_bytes, used_seconds: a.used_seconds, resets_at: a.resets_at, status: a.allowed ? "active" : a.reason,
     total_bytes: u.total_bytes, total_seconds: u.total_seconds, last_seen: u.last_seen,
@@ -510,7 +689,15 @@ async function adminList(request, env, url) {
     "SELECT * FROM users WHERE username LIKE ?1 ESCAPE '\\' OR note LIKE ?1 ESCAPE '\\' ORDER BY id DESC LIMIT ?2 OFFSET ?3",
   ).bind(like, limit, offset).all();
   const t = now();
-  return json({ total: total.n, users: results.map((u) => adminView(u, t)) });
+  const active = new Map();
+  if (results.length) {
+    const ids = results.map((u) => u.id);
+    const rows = await env.DB.prepare(
+      `SELECT user_id, COUNT(*) AS n FROM devices WHERE active_until > ?1 AND user_id IN (${ids.map((_, i) => `?${i + 2}`).join(",")}) GROUP BY user_id`,
+    ).bind(t, ...ids).all();
+    for (const r of rows.results) active.set(r.user_id, r.n);
+  }
+  return json({ total: total.n, users: results.map((u) => adminView(u, t, active.get(u.id) || 0)) });
 }
 
 /** Limits from a request, as the values stored. */
@@ -527,6 +714,10 @@ function limitsFrom(b, base = {}) {
   num("expires_at", 4102444800);
   num("reset_days", 3650);
   if (b.note !== undefined) out.note = String(b.note).slice(0, 200);
+  if (b.tier !== undefined) {
+    if (!Object.hasOwn(TIERS, b.tier)) throw new HttpError(400, `The plan is one of ${Object.keys(TIERS).join(", ")}.`);
+    out.tier = b.tier;
+  }
   return { ...base, ...out };
 }
 
@@ -534,10 +725,10 @@ async function createUser(env, name, password, limits, t) {
   if (!checkUsername(name)) throw new HttpError(400, "Usernames have 3 to 32 letters, digits, dots, dashes or underscores.");
   try {
     await env.DB.prepare(
-      `INSERT INTO users (username, pass_hash, created_at, quota_bytes, max_seconds, expires_at, reset_days, period_start, note)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?3, ?8)`,
+      `INSERT INTO users (username, pass_hash, created_at, quota_bytes, max_seconds, expires_at, reset_days, period_start, note, tier)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?3, ?8, ?9)`,
     ).bind(name.trim().toLowerCase(), await hashPassword(password), t, limits.quota_bytes ?? 0, limits.max_seconds ?? 0,
-      limits.expires_at ?? 0, limits.reset_days ?? 0, limits.note ?? "").run();
+      limits.expires_at ?? 0, limits.reset_days ?? 0, limits.note ?? "", limits.tier ?? DEFAULT_TIER).run();
   } catch (e) {
     if (/UNIQUE/i.test(String(e))) throw new HttpError(409, `The username "${name}" is taken.`);
     throw e;
@@ -604,13 +795,16 @@ async function adminUpdate(request, env, id) {
   if (!sets.length) throw new HttpError(400, "Nothing to change.");
   vals.push(id);
   await env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?${vals.length}`).bind(...vals).run();
-  return json({ user: adminView(await userById(env, id), now()) });
+  if (b.sign_out || b.password !== undefined) await forgetDevices(env, id);
+  const t = now();
+  return json({ user: adminView(await userById(env, id), t, await busyDevices(env, { id }, "", t)) });
 }
 
 async function adminDelete(request, env, id) {
   await authAdmin(request, env);
   const r = await env.DB.prepare("DELETE FROM users WHERE id = ?1").bind(id).run();
   if (!r.meta.changes) throw new HttpError(404, "No such user.");
+  await forgetDevices(env, id);
   return json({ ok: true });
 }
 
@@ -627,7 +821,9 @@ async function adminSaveSettings(request, env) {
     if (b[k] === undefined) continue;
     let v = String(b[k]).slice(0, 500);
     if (k === "signup_open") v = b[k] === true || v === "1" ? "1" : "0";
-    else if (k.startsWith("download_")) {
+    else if (k === "default_tier") {
+      if (!Object.hasOwn(TIERS, v)) throw new HttpError(400, `The plan is one of ${Object.keys(TIERS).join(", ")}.`);
+    } else if (k.startsWith("download_")) {
       if (v && !/^https:\/\//.test(v)) throw new HttpError(400, "Download links must start with https://");
     } else if (!/^\d{1,16}$/.test(v)) throw new HttpError(400, `Bad value for ${k}.`);
     stmts.push(env.DB.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2").bind(k, v));

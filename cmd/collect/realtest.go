@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
+	"net"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/Albatrossvpn/vp/internal/antiblock"
 	"github.com/Albatrossvpn/vp/internal/core"
 	"github.com/Albatrossvpn/vp/internal/node"
 	"github.com/Albatrossvpn/vp/internal/tester"
@@ -35,7 +39,9 @@ func realTest(list []*entry, n int) (passed map[*entry]time.Duration, tested map
 		return nil, nil
 	}
 	defer os.RemoveAll(dir)
-	rt := &core.Runtime{Bin: core.Binaries{SingBox: sb, Xray: os.Getenv("XRAY")}, Dir: dir}
+	// Xray with 250 servers takes a while to come up on a busy runner;
+	// given 15 seconds it was given up on, and its servers never tested.
+	rt := &core.Runtime{Bin: core.Binaries{SingBox: sb, Xray: os.Getenv("XRAY")}, Dir: dir, StartWait: 60 * time.Second}
 	reps, siblings := byAddress(list)
 	passed = map[*entry]time.Duration{}
 	tested = map[*entry]bool{}
@@ -173,7 +179,74 @@ func hotList(ordered []*entry, passed map[*entry]time.Duration, max int, crowd c
 		}
 		protos = left
 	}
+	// Every protocol that has passing servers is in the hot list, with at
+	// least protoReserve of them (WireGuard more: it is fast where the
+	// filtering lets it through), so a user who picks any protocol, or a
+	// network that spares only one, finds servers.
+	var protoOrder []string
+	seenProto := map[string]bool{}
+	for _, e := range cands {
+		if !seenProto[e.proto] {
+			seenProto[e.proto] = true
+			protoOrder = append(protoOrder, e.proto)
+		}
+	}
+	for _, p := range protoOrder {
+		// Scaled to the list: a small list (tests) keeps its shares.
+		want := min(protoReserve, max/15)
+		if p == "wireguard" {
+			want = min(wgReserve, max/7)
+		}
+		if want > 0 {
+			out = reserveProto(out, cands, p, want)
+		}
+	}
 	return out
+}
+
+// protoReserve is how many servers of each protocol a 300-server hot list
+// carries at least when that many passed; wgReserve the same for WireGuard.
+const protoReserve, wgReserve = 20, 40
+
+// reserveProto makes sure out holds up to want servers of proto from
+// cands (in cands' order), replacing servers of other protocols from the
+// end of out when it is full.
+func reserveProto(out, cands []*entry, proto string, want int) []*entry {
+	in := map[*entry]bool{}
+	have := 0
+	for _, e := range out {
+		in[e] = true
+		if e.proto == proto {
+			have++
+		}
+	}
+	var extra []*entry
+	for _, e := range cands {
+		if have+len(extra) >= want {
+			break
+		}
+		if e.proto == proto && !in[e] {
+			extra = append(extra, e)
+		}
+	}
+	if len(extra) == 0 {
+		return out
+	}
+	// Room at the end: the last servers of other protocols go.
+	size := len(out)
+	kept := make([]*entry, 0, size)
+	drop := len(extra)
+	for i := len(out) - 1; i >= 0; i-- {
+		if drop > 0 && out[i].proto != proto {
+			drop--
+			continue
+		}
+		kept = append(kept, out[i])
+	}
+	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
+		kept[i], kept[j] = kept[j], kept[i]
+	}
+	return append(kept, extra...)
 }
 
 // confirm tests the servers that passed once more and keeps those that
@@ -206,24 +279,100 @@ func confirm(passed map[*entry]time.Duration) map[*entry]time.Duration {
 
 // checkIran reorders hot by reachability from inside Iran (see iranReach)
 // and returns how many addresses were checked and how many were open.
-func checkIran(hot []*entry) (checked, open int) {
+// checkIran asks probes inside the country which hot addresses answer
+// there, keeping the answers in iran-tcp.json (read from prevDir, written
+// to outDir) so a run spends its quota on addresses not checked lately.
+// It returns the hot list with what does not answer from inside left out,
+// those that do first, and how many addresses had an answer and answered.
+func checkIran(hot []*entry, prevDir, outDir string) ([]*entry, int, int) {
+	cache := loadIranCache(prevDir)
+	now := time.Now()
 	var eps []string
 	for _, e := range hot {
-		if e.endpoint != "" && len(eps) < iranChecks() {
+		if e.endpoint == "" {
+			continue
+		}
+		if c, ok := cache[e.endpoint]; ok && now.Sub(time.Unix(c.At, 0)) < iranFresh {
+			continue
+		}
+		if len(eps) < iranChecks() {
 			eps = append(eps, e.endpoint)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	seen := iranReach(ctx, eps, gpProbes())
-	for _, ok := range seen {
-		if ok {
-			open++
+	// Cloudflare edge addresses too: the apps reach the account service
+	// through whichever of them the network lets through (reach.json).
+	if edgeChecks > 0 {
+		eps = append(eps, edgeCandidates(cache, now)...)
+	}
+	if len(eps) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+		defer cancel()
+		for ep, open := range iranReach(ctx, eps, gpProbes()) {
+			cache[ep] = iranSeen{Open: open, At: now.Unix()}
 		}
 	}
-	iranFirst(hot, seen)
-	log.Printf("globalping: %d of %d hot addresses answer from Iran", open, len(seen))
-	return len(seen), open
+	saveIranCache(outDir, cache, now)
+	writeReach(outDir, cache, now)
+	seen := map[string]bool{}
+	checked, open := 0, 0
+	for _, e := range hot {
+		if c, ok := cache[e.endpoint]; ok && e.endpoint != "" && now.Sub(time.Unix(c.At, 0)) < iranFresh {
+			seen[e.endpoint] = c.Open
+			checked++
+			if c.Open {
+				open++
+			}
+		}
+	}
+	kept := hot[:0:0]
+	for _, e := range hot {
+		if o, ok := seen[e.endpoint]; !ok || o {
+			kept = append(kept, e)
+		}
+	}
+	iranFirst(kept, seen)
+	log.Printf("globalping: %d of %d hot addresses answer from Iran (%d asked this run); %d left out", open, checked, len(eps), len(hot)-len(kept))
+	return kept, checked, open
+}
+
+// iranSeen is one address's last answer from inside the country.
+type iranSeen struct {
+	Open bool  `json:"open"`
+	At   int64 `json:"at"`
+}
+
+// iranFresh is how long an answer from inside counts; iranKeep how long
+// it is kept in the file at all.
+const iranFresh, iranKeep = 3 * time.Hour, 24 * time.Hour
+
+const iranCacheName = "iran-tcp.json"
+
+func loadIranCache(dir string) map[string]iranSeen {
+	out := map[string]iranSeen{}
+	if dir == "" {
+		return out
+	}
+	b, err := os.ReadFile(filepath.Join(dir, iranCacheName))
+	if err != nil {
+		return out
+	}
+	json.Unmarshal(b, &out)
+	return out
+}
+
+func saveIranCache(dir string, cache map[string]iranSeen, now time.Time) {
+	if dir == "" {
+		return
+	}
+	for ep, c := range cache {
+		if now.Sub(time.Unix(c.At, 0)) > iranKeep {
+			delete(cache, ep)
+		}
+	}
+	b, err := json.Marshal(cache)
+	if err == nil {
+		os.WriteFile(filepath.Join(dir, iranCacheName), b, 0o644)
+	}
 }
 
 // iranChecks bounds the addresses checked from Iran per run, within the
@@ -257,4 +406,71 @@ func orderFresh(fresh []*entry, passed map[*entry]time.Duration, tested map[*ent
 	}
 	crowdOrder(ok, passed, crowd)
 	return append(ok, untested...), failed
+}
+
+// edgeAddrs are Cloudflare edge addresses tried first for reach.json:
+// cloudflare.com's own and ones widely found open inside the country.
+// Beside them, each run has the scan (antiblock.Scanner) pick a few real
+// edges at random, so new open ranges are found over time.
+var edgeAddrs = []string{"104.16.132.229", "104.16.133.229", "188.114.96.3", "188.114.97.3", "104.16.123.96", "172.64.153.1", "104.21.16.1", "104.26.0.1", "162.159.128.1", "141.101.64.1"}
+
+// edgeChecks is how many edge addresses a run asks the probes inside about
+// (a variable so tests can turn the asking off).
+var edgeChecks = 30
+
+// edgeCandidates lists edge addresses (as host:443) to check from inside
+// this run: the fixed ones and a random sample of real edges, those not
+// checked lately first, at most edgeChecks.
+func edgeCandidates(cache map[string]iranSeen, now time.Time) []string {
+	var out []string
+	seen := map[string]bool{}
+	add := func(ip string) {
+		ep := net.JoinHostPort(ip, "443")
+		if seen[ep] {
+			return
+		}
+		seen[ep] = true
+		if c, ok := cache[ep]; ok && now.Sub(time.Unix(c.At, 0)) < iranFresh {
+			return
+		}
+		if len(out) < edgeChecks {
+			out = append(out, ep)
+		}
+	}
+	for _, ip := range edgeAddrs {
+		add(ip)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	for _, c := range (&antiblock.Scanner{}).Scan(ctx, 120, 40) {
+		add(c.IP)
+	}
+	return out
+}
+
+// reachFile is reach.json: the edge addresses open from inside, for the
+// apps (internal/engine/reach.go).
+type reachFile struct {
+	Updated    time.Time `json:"updated"`
+	Cloudflare []string  `json:"cloudflare"`
+}
+
+func writeReach(dir string, cache map[string]iranSeen, now time.Time) {
+	if dir == "" {
+		return
+	}
+	var open []string
+	for ep, c := range cache {
+		host, port, err := net.SplitHostPort(ep)
+		if err != nil || port != "443" || !c.Open || now.Sub(time.Unix(c.At, 0)) > iranFresh || !antiblock.IsCloudflare(host) {
+			continue
+		}
+		open = append(open, host)
+	}
+	sort.Strings(open)
+	b, err := json.MarshalIndent(reachFile{Updated: now.UTC(), Cloudflare: open}, "", "  ")
+	if err == nil {
+		os.WriteFile(filepath.Join(dir, "reach.json"), b, 0o644)
+	}
+	log.Printf("reach.json: %d Cloudflare edge addresses open from Iran", len(open))
 }

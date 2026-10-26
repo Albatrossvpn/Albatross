@@ -64,6 +64,54 @@ export function parseList(text) {
   return out;
 }
 
+// The schemes the connection apps on Apple devices (V2Box, Streisand,
+// Shadowrocket, Hiddify, sing-box) take. The app's own protocols and
+// plain proxies are left out of a subscription.
+const APPLE_SCHEMES = new Set(["vmess", "vless", "trojan", "ss", "hysteria2", "hy2", "tuic", "wireguard", "wg"]);
+
+/** Whether a link is one the Apple apps can use. */
+export const forApple = (e) => APPLE_SCHEMES.has(e.link.slice(0, e.link.indexOf("://")).toLowerCase());
+
+// How many servers a subscription carries at least, and how far into the
+// fresh list the top-up looks.
+export const SUB_MIN = 40;
+const TOPUP_FROM = 400;
+
+/**
+ * The pool a subscription is built from: the hot list (tested through for
+ * real, in order) and, when it is short, a top-up from the fresh list
+ * (newly seen, their address answering), a different sample each time so
+ * that refreshing the subscription brings other servers to try. Servers
+ * inside the country and ones the Apple apps cannot use are left out.
+ */
+export function pool(hot, fresh, min = SUB_MIN, pick = Math.random) {
+  const seen = new Set();
+  const out = [];
+  for (const e of parseList(hot)) {
+    if (e.country !== "IR" && forApple(e) && !seen.has(e.link)) {
+      seen.add(e.link);
+      out.push(e);
+    }
+  }
+  if (out.length >= min) return tcpFirst(out);
+  const cands = [];
+  for (const e of parseList(fresh)) {
+    if (cands.length >= TOPUP_FROM) break;
+    if (e.country !== "IR" && forApple(e) && !seen.has(e.link)) cands.push(e);
+  }
+  // A random sample of the candidates, in their order.
+  const want = Math.min(min - out.length, cands.length);
+  const chosen = new Set();
+  while (chosen.size < want) chosen.add(Math.floor(pick() * cands.length) % cands.length);
+  for (const [i, e] of cands.entries()) if (chosen.has(i)) out.push(e);
+  return tcpFirst(out);
+}
+
+// UDP is throttled on many networks here: servers over it go after the rest.
+const UDP_SCHEMES = new Set(["hysteria2", "hy2", "tuic"]);
+const overUDP = (e) => UDP_SCHEMES.has(e.link.slice(0, e.link.indexOf("://")).toLowerCase());
+export const tcpFirst = (entries) => [...entries.filter((e) => !overUDP(e)), ...entries.filter(overUDP)];
+
 /** The countries in a list, most servers first. */
 export function countriesOf(entries) {
   const n = new Map();
@@ -114,14 +162,24 @@ export function headers(title, account, interval = 1) {
   return h;
 }
 
-/** The server list as the service has it: its own storage first, GitHub as the fallback. */
-export async function hotList(env) {
+/** A server list as the service has it: its own storage, or GitHub where there is none. */
+export async function listFile(env, name) {
   if (env.FILES) {
-    const o = await env.FILES.get("list/servers/hot.txt");
-    if (o) return o.text();
+    const o = await env.FILES.get("list/servers/" + name);
+    return o ? o.text() : "";
   }
-  const up = await fetch("https://raw.githubusercontent.com/Albatrossvpn/Albatross/servers/hot.txt", { cf: { cacheTtl: 600, cacheEverything: true } });
+  const up = await fetch("https://raw.githubusercontent.com/Albatrossvpn/Albatross/servers/" + name, { cf: { cacheTtl: 600, cacheEverything: true } });
   return up.ok ? up.text() : "";
+}
+
+export const hotList = (env) => listFile(env, "hot.txt");
+
+/** The servers a subscription offers right now (pool). */
+export async function subPool(env) {
+  const hot = await listFile(env, "hot.txt");
+  const entries = pool(hot, "");
+  if (entries.length >= SUB_MIN) return entries;
+  return pool(hot, await listFile(env, "fresh.txt"));
 }
 
 /** The edge's links for an account that may connect. */

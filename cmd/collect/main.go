@@ -41,9 +41,53 @@ import (
 // a few that work on its network, small enough to fetch in a moment.
 const hotSize = 300
 
+// hotSpare is how many more candidates than hotSize the hot list starts
+// with, for the ones the check from inside the country drops.
+const hotSpare = 150
+
 // newSize bounds new.txt: the latest additions to fresh.txt, which apps
 // fetch often instead of downloading all of fresh.txt again.
 const newSize = 4000
+
+// minProtoTests is how many servers of each protocol the real test covers
+// at least: the most shared servers are mostly VLESS, and a protocol the
+// filtering spares (WireGuard works well here) was hardly ever tested.
+const minProtoTests = 400
+
+// promoteRare moves servers of protocols that have fewer than min entries
+// among the first n of list forward into that range, keeping the order
+// otherwise, so the real test (which takes the first n) covers them.
+func promoteRare(list []*entry, n, min int) {
+	if n <= 0 || n >= len(list) {
+		return
+	}
+	have := map[string]int{}
+	for _, e := range list[:n] {
+		have[e.proto]++
+	}
+	var pulled []*entry
+	rest := make([]*entry, 0, len(list)-n)
+	for _, e := range list[n:] {
+		if have[e.proto] < min {
+			have[e.proto]++
+			pulled = append(pulled, e)
+		} else {
+			rest = append(rest, e)
+		}
+	}
+	if len(pulled) == 0 {
+		return
+	}
+	// The pulled servers take the places of the least shared in the head.
+	head := append([]*entry(nil), list[:n]...)
+	keep := n - len(pulled)
+	if keep < 0 {
+		keep = 0
+	}
+	out := append(append(append([]*entry(nil), head[:keep]...), pulled...), head[keep:]...)
+	out = append(out, rest...)
+	copy(list, out)
+}
 
 // newList is fresh minus what the last run published, newest first, with
 // the last new.txt's servers that are still listed after them.
@@ -117,8 +161,11 @@ func refreshHot(path, out string, n int, crowd crowdStats, report, tester string
 	}
 	crowdOrder(ok, passed, crowd)
 	copy(list, ok)
-	hot := hotList(list, passed, hotSize, crowd)
-	checkIran(hot)
+	hot := hotList(list, passed, hotSize+hotSpare, crowd)
+	hot, _, _ = checkIran(hot, out, out)
+	if len(hot) > hotSize {
+		hot = hot[:hotSize]
+	}
 	if len(hot) == 0 {
 		log.Print("nothing passed; hot.txt left as it was")
 		return
@@ -180,7 +227,8 @@ func main() {
 	out := flag.String("out", "servers", "output directory")
 	shards := flag.Int("shards", 8, "number of all-N.txt files")
 	probe := flag.Bool("probe", true, "drop servers whose address does not answer")
-	probeConc := flag.Int("probe-concurrency", 1000, "parallel reachability probes")
+	probeConc := flag.Int("probe-concurrency", 1500, "parallel reachability probes")
+	probeMinutes := flag.Int("probe-minutes", 10, "stop probing addresses after this long; the ones not reached in time are left out of this run (the servers seen before and the most shared go first)")
 	maxFresh := flag.Int("max-fresh", 60000, "most servers in fresh.txt; the rest go to the other files")
 	limit := flag.Int("limit", 0, "use only the first N sources (for tests)")
 	real := flag.Int("real", 8000, "connect through this many of the fresh servers with the cores in SING_BOX and XRAY; 0 skips")
@@ -311,7 +359,27 @@ func main() {
 	}
 	dead := 0
 	if *probe {
-		alive := probeAll(list, *probeConc)
+		// The discovered sources bring far more servers than can be probed
+		// in a run: the ones in the last published lists and the most
+		// shared go first, and the budget decides how far down it gets.
+		known := map[string]bool{}
+		if *prev != "" {
+			for _, name := range []string{"hot.txt", "fresh.txt", "new.txt"} {
+				for _, l := range readLines(filepath.Join(*prev, name)) {
+					if nd, err := node.ParseLink(l); err == nil && !nd.UDPBased() {
+						known[nd.Endpoint()] = true
+					}
+				}
+			}
+		}
+		sort.SliceStable(list, func(i, j int) bool {
+			a, b := known[list[i].endpoint], known[list[j].endpoint]
+			if a != b {
+				return a
+			}
+			return list[i].pop > list[j].pop
+		})
+		alive, probed := probeAll(list, *probeConc, time.Duration(*probeMinutes)*time.Minute)
 		kept := list[:0]
 		for _, e := range list {
 			if e.endpoint == "" || alive[e.endpoint] {
@@ -321,7 +389,7 @@ func main() {
 			}
 		}
 		list = kept
-		log.Printf("%d servers did not answer, %d kept", dead, len(list))
+		log.Printf("%d servers did not answer or were not reached in time (%d addresses probed), %d kept", dead, probed, len(list))
 	}
 	// Servers many lists carry tend to be the ones that keep working.
 	sort.Slice(list, func(i, j int) bool {
@@ -342,6 +410,7 @@ func main() {
 			restE = append(restE, e)
 		}
 	}
+	promoteRare(freshE, *real, minProtoTests)
 	passed, tested := realTest(freshE, *real)
 	passed = confirm(passed)
 	freshE, failedE := orderFresh(freshE, passed, tested, crowd)
@@ -360,8 +429,13 @@ func main() {
 		m.Files[name] = len(links)
 	}
 	write("fresh.txt", fresh)
-	hot := hotList(freshE, passed, hotSize, crowd)
-	m.IranChecked, m.IranOpen = checkIran(hot)
+	// More than hotSize candidates, so what the probes inside the country
+	// cannot reach is left out and the list is still full.
+	hot := hotList(freshE, passed, hotSize+hotSpare, crowd)
+	hot, m.IranChecked, m.IranOpen = checkIran(hot, *prev, *out)
+	if len(hot) > hotSize {
+		hot = hot[:hotSize]
+	}
 	write("hot.txt", links(hot))
 	if *prev != "" {
 		write("new.txt", newList(fresh, readLines(filepath.Join(*prev, "fresh.txt")), readLines(filepath.Join(*prev, "new.txt")), newSize))
@@ -431,8 +505,10 @@ func main() {
 	log.Printf("wrote %d fresh and %d other servers to %s", len(fresh), len(rest), *out)
 }
 
-// probeAll opens a TCP connection to every distinct address once.
-func probeAll(list []*entry, conc int) map[string]bool {
+// probeAll opens a TCP connection to every distinct address once, in
+// list order, for at most budget: what it did not get to counts as not
+// answering. It returns the addresses that answered and how many it tried.
+func probeAll(list []*entry, conc int, budget time.Duration) (alive map[string]bool, probed int) {
 	seen := map[string]bool{}
 	var eps []string
 	for _, e := range list {
@@ -441,13 +517,19 @@ func probeAll(list []*entry, conc int) map[string]bool {
 			eps = append(eps, e.endpoint)
 		}
 	}
-	log.Printf("probing %d addresses", len(eps))
-	alive := map[string]bool{}
+	log.Printf("probing %d addresses (up to %v)", len(eps), budget)
+	alive = map[string]bool{}
 	var mu sync.Mutex
 	sem := make(chan struct{}, conc)
 	var wg sync.WaitGroup
-	d := net.Dialer{Timeout: 4 * time.Second}
+	d := net.Dialer{Timeout: 3 * time.Second}
+	deadline := time.Now().Add(budget)
 	for _, ep := range eps {
+		if time.Now().After(deadline) {
+			log.Printf("probe budget spent after %d of %d addresses", probed, len(eps))
+			break
+		}
+		probed++
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(ep string) {
@@ -466,7 +548,7 @@ func probeAll(list []*entry, conc int) map[string]bool {
 		}(ep)
 	}
 	wg.Wait()
-	return alive
+	return alive, probed
 }
 
 // flagOf turns a country code into its flag emoji.
