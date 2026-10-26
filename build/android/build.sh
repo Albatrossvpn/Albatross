@@ -94,6 +94,20 @@ if bad:
 PY
 }
 
+# ship_prebuilt <file> <name> <abi> keeps a helper we only downloaded when
+# phones with 16 KB pages can load it, and otherwise leaves it out of the
+# APK: the upstream build is linked for 4 KB pages, the protocol then shows
+# as not installed on that ABI, and everything else still ships. (Building
+# the helper from source would fix it.)
+ship_prebuilt() {
+  if check_alignment "$1" 2>/dev/null; then
+    return 0
+  fi
+  echo "not shipped: $2 for $3 is linked for 4 KB pages, which phones with 16 KB pages refuse to load" >&2
+  rm -f "$1"
+  return 1
+}
+
 # smoke <name> <binary> <args...> runs a core built for this machine from
 # the same source and Go as the phone's, and fails the build if it crashes
 # at start (a dependency that checks Go's internals panics before main).
@@ -170,7 +184,9 @@ sidecars() {
   rm -rf "$tmp/naive-$abi" && mkdir -p "$tmp/naive-$abi"
   unzip -q -o "$dl/naive-$NAIVE_VERSION-$abi.apk" "lib/$abi/libnaive.so" -d "$tmp/naive-$abi"
   cp "$tmp/naive-$abi/lib/$abi/libnaive.so" "$out/libnaive.so"
-  printf 'NaiveProxy (https://github.com/klzgrad/naiveproxy) is under the BSD 3-Clause license.\n' > "$lic/naiveproxy-LICENSE.txt"
+  if ship_prebuilt "$out/libnaive.so" NaiveProxy "$abi"; then
+    printf 'NaiveProxy (https://github.com/klzgrad/naiveproxy) is under the BSD 3-Clause license.\n' > "$lic/naiveproxy-LICENSE.txt"
+  fi
   src="$(gosrc juicity juicity/juicity "v$JUICITY_VERSION" ./cmd/client)"
   (cd "$src" && gobuild "$abi" "$out/libjuicityclient.so" -ldflags "-s -w -checklinkname=0" ./cmd/client)
   cp "$src/LICENSE" "$lic/juicity-LICENSE.txt" 2>/dev/null || printf 'Juicity (https://github.com/juicity/juicity) is under the GNU AGPL v3; its source is at that address.\n' > "$lic/juicity-LICENSE.txt"
@@ -188,7 +204,9 @@ sidecars() {
     rm -rf "$tmp/wst-$abi" && mkdir -p "$tmp/wst-$abi"
     tar -xzf "$dl/wstunnel-$WSTUNNEL_VERSION-android.tgz" -C "$tmp/wst-$abi"
     cp "$(find "$tmp/wst-$abi" -type f -name wstunnel | head -1)" "$out/libwstunnel.so"
-    printf 'WStunnel (https://github.com/erebe/wstunnel) is under the BSD 3-Clause license.\n' > "$lic/wstunnel-LICENSE.txt"
+    if ship_prebuilt "$out/libwstunnel.so" WStunnel "$abi"; then
+      printf 'WStunnel (https://github.com/erebe/wstunnel) is under the BSD 3-Clause license.\n' > "$lic/wstunnel-LICENSE.txt"
+    fi
   fi
   chmod 755 "$out"/*.so
 }
