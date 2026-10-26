@@ -5,7 +5,7 @@ import {
   randomPassword, rollPeriod, safeEqual, sign, tag, tierOf, verify, verifyPassword,
 } from "./lib.js";
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
-import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, readSubToken, subPool, subToken } from "./sub.js";
+import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, subPool, subToken } from "./sub.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -487,7 +487,7 @@ async function subInfo(request, env, url) {
     url: `${url.origin}/sub/${await subToken(env, user, t)}`,
     countries: countriesOf(entries),
     servers: entries.length,
-    edge: edgeFor(env, a).length,
+    edge: (await edgeFor(env, a)).length,
     brand: env.SITE_NAME || "Albatross",
   });
 }
@@ -508,8 +508,8 @@ async function subscription(request, url, env) {
   if (!a.allowed) return new Response("This account cannot connect right now (" + a.reason + ").", { status: 403 });
   const choice = String(url.searchParams.get("c") || "").toUpperCase().replace("EDGE", "edge");
   if (choice && choice !== "edge" && !/^[A-Z]{2}$/.test(choice)) return new Response("Not found", { status: 404 });
-  const entries = await subPool(env);
-  const sub = buildSub(entries, choice, env.SITE_NAME || "Albatross", edgeFor(env, a));
+  const [entries, updated, edge] = await Promise.all([subPool(env), listUpdated(env), edgeFor(env, a)]);
+  const sub = buildSub(entries, choice, env.SITE_NAME || "Albatross", edge, updated);
   const h = subHeaders(sub.title, a);
   return new Response(request.method === "HEAD" ? null : sub.body, { status: 200, headers: h });
 }

@@ -371,7 +371,7 @@ test("subscriptions for other devices: one address per account, servers by count
   assert.equal(all.headers.get("profile-title"), "base64:" + btoa("Albatross All servers"));
   const links = atob(await all.text()).trim().split("\n");
   assert.equal(links.length, 3);
-  assert.equal(decodeURIComponent(links[0].split("#")[1]), "Albatross 🇩🇪 Germany 1");
+  assert.equal(decodeURIComponent(links[0].split("#")[1]), "Albatross 🇩🇪 Germany 1 · vless");
   assert.equal(links.some((l) => /Raydikalx|fast|no-country/.test(l)), false, "the servers' own names never show");
   const de = await fetch(info.body.url + "?c=de");
   assert.equal(atob(await de.text()).trim().split("\n").length, 1);
