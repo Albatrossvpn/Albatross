@@ -91,6 +91,8 @@ type Engine struct {
 	// badge is the plan last given to opt.Badge, badged whether any was.
 	badge  string
 	badged bool
+	// loginStep is what signing in is doing now, for the UI ("" when not).
+	loginStep string
 	// httpsOK is when a server last passed a test with a genuine
 	// certificate, which shows this device checks certificates correctly
 	// (see distrust).

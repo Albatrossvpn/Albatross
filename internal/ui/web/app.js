@@ -196,6 +196,10 @@ function planBadge(el, tier) {
 
 function renderAccount(a) {
   var needLogin = a.enabled && !a.signed_in;
+  // While signing in, what it is doing: finding a server to go through
+  // can take a while, and the user should know it is still at work.
+  $("login-progress").classList.toggle("hidden", !a.progress);
+  $("login-progress-text").textContent = a.progress || "";
   planBadge($("plan-chip"), a.signed_in ? a.tier : "");
   planBadge($("acc-plan"), a.signed_in ? a.tier : "");
   $("login").classList.toggle("hidden", !needLogin);
