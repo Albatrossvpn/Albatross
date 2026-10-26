@@ -2,31 +2,34 @@
   "download_url": "https://albatrossvpn.online/#download",
   "files": {
     "android-arm64-v8a": {
-      "sha256": "2870ef05be1198d20e5bb0090c4b98eceee99d3ab75be9d83e43d83b1db64d21",
+      "sha256": "eb5d1301fd56baa8e06006003e7cac041e2b641f7caed7c9e1b9ceb03759b767",
       "urls": [
-        "https://accounts.albatrossvpn.online/dl/v1.0.0/Albatross-1.0.0-android.apk",
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.0.0/Albatross-1.0.0-android.apk"
+        "https://albatrossvpn.online/download/Albatross-1.0.1-android.apk",
+        "https://accounts.albatrossvpn.online/dl/v1.0.1/Albatross-1.0.1-android.apk",
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.0.1/Albatross-1.0.1-android.apk"
       ]
     },
     "android-armeabi-v7a": {
-      "sha256": "2870ef05be1198d20e5bb0090c4b98eceee99d3ab75be9d83e43d83b1db64d21",
+      "sha256": "eb5d1301fd56baa8e06006003e7cac041e2b641f7caed7c9e1b9ceb03759b767",
       "urls": [
-        "https://accounts.albatrossvpn.online/dl/v1.0.0/Albatross-1.0.0-android.apk",
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.0.0/Albatross-1.0.0-android.apk"
+        "https://albatrossvpn.online/download/Albatross-1.0.1-android.apk",
+        "https://accounts.albatrossvpn.online/dl/v1.0.1/Albatross-1.0.1-android.apk",
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.0.1/Albatross-1.0.1-android.apk"
       ]
     },
     "windows": {
-      "sha256": "7e42ec74f072f2fc99f5968bed83ee3780b288c554d356a3b24c839860dcf536",
+      "sha256": "4f1fe151d1517d4cf06fbc4e51f51c1475f0344d4d157ef54320d08a3f3a973c",
       "urls": [
-        "https://accounts.albatrossvpn.online/dl/v1.0.0/Albatross-Setup-1.0.0.exe",
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.0.0/Albatross-Setup-1.0.0.exe"
+        "https://albatrossvpn.online/download/Albatross-Setup-1.0.1.exe",
+        "https://accounts.albatrossvpn.online/dl/v1.0.1/Albatross-Setup-1.0.1.exe",
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.0.1/Albatross-Setup-1.0.1.exe"
       ]
     }
   },
-  "latest_version": "1.0.0",
-  "message": "Albatross 1.0.0 is required and this version no longer connects. If the app does not update by itself: 1) Uninstall Albatross. 2) Download the new version with Get the update, or open https://accounts.albatrossvpn.online/dl/v1.0.0/Albatross-1.0.0-android.apk in your browser (Windows: Albatross-Setup-1.0.0.exe from https://albatrossvpn.online/#download). 3) Install it and sign in with the username and password you were given. Later updates install from inside the app.",
+  "latest_version": "1.0.1",
+  "message": "Albatross 1.0.1 is out. Versions older than 1.0.0 no longer connect; if yours is one of them and does not update by itself: 1) Uninstall Albatross. 2) Download the new version with Get the update, or open https://albatrossvpn.online/download/Albatross-1.0.1-android.apk in your browser (Windows: Albatross-Setup-1.0.1.exe from https://albatrossvpn.online/#download). 3) Install it and sign in with the username and password you were given. Later updates install from inside the app.",
   "min_version": "1.0.0",
   "require": "1.0.0",
-  "sig": "msc8w6LIJZE/pxRlJcD63faUA6+0t9fVyitCdwARjpr1H6HzeFyPXVBN549gdk76IrYIWuzwXGaTfEcsgsiYCg==",
-  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiMjg3MGVmMDViZTExOThkMjBlNWJiMDA5MGM0Yjk4ZWNlZWU5OWQzYWI3NWJlOWQ4M2U0M2Q4M2IxZGI2NGQyMSIsInVybHMiOlsiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjAuMC9BbGJhdHJvc3MtMS4wLjAtYW5kcm9pZC5hcGsiLCJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL0FsYmF0cm9zcy9yZWxlYXNlcy9kb3dubG9hZC92MS4wLjAvQWxiYXRyb3NzLTEuMC4wLWFuZHJvaWQuYXBrIl19LCJhbmRyb2lkLWFybWVhYmktdjdhIjp7InNoYTI1NiI6IjI4NzBlZjA1YmUxMTk4ZDIwZTViYjAwOTBjNGI5OGVjZWVlOTlkM2FiNzViZTlkODNlNDNkODNiMWRiNjRkMjEiLCJ1cmxzIjpbImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4wLjAvQWxiYXRyb3NzLTEuMC4wLWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9BbGJhdHJvc3MvcmVsZWFzZXMvZG93bmxvYWQvdjEuMC4wL0FsYmF0cm9zcy0xLjAuMC1hbmRyb2lkLmFwayJdfSwid2luZG93cyI6eyJzaGEyNTYiOiI3ZTQyZWM3NGYwNzJmMmZjOTlmNTk2OGJlZDgzZWUzNzgwYjI4OGM1NTRkMzU2YTNiMjRjODM5ODYwZGNmNTM2IiwidXJscyI6WyJodHRwczovL2FjY291bnRzLmFsYmF0cm9zc3Zwbi5vbmxpbmUvZGwvdjEuMC4wL0FsYmF0cm9zcy1TZXR1cC0xLjAuMC5leGUiLCJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL0FsYmF0cm9zcy9yZWxlYXNlcy9kb3dubG9hZC92MS4wLjAvQWxiYXRyb3NzLVNldHVwLTEuMC4wLmV4ZSJdfX0sImxhdGVzdF92ZXJzaW9uIjoiMS4wLjAiLCJtZXNzYWdlIjoiQWxiYXRyb3NzIDEuMC4wIGlzIHJlcXVpcmVkIGFuZCB0aGlzIHZlcnNpb24gbm8gbG9uZ2VyIGNvbm5lY3RzLiBJZiB0aGUgYXBwIGRvZXMgbm90IHVwZGF0ZSBieSBpdHNlbGY6IDEpIFVuaW5zdGFsbCBBbGJhdHJvc3MuIDIpIERvd25sb2FkIHRoZSBuZXcgdmVyc2lvbiB3aXRoIEdldCB0aGUgdXBkYXRlLCBvciBvcGVuIGh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4wLjAvQWxiYXRyb3NzLTEuMC4wLWFuZHJvaWQuYXBrIGluIHlvdXIgYnJvd3NlciAoV2luZG93czogQWxiYXRyb3NzLVNldHVwLTEuMC4wLmV4ZSBmcm9tIGh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS8jZG93bmxvYWQpLiAzKSBJbnN0YWxsIGl0IGFuZCBzaWduIGluIHdpdGggdGhlIHVzZXJuYW1lIGFuZCBwYXNzd29yZCB5b3Ugd2VyZSBnaXZlbi4gTGF0ZXIgdXBkYXRlcyBpbnN0YWxsIGZyb20gaW5zaWRlIHRoZSBhcHAuIiwibWluX3ZlcnNpb24iOiIxLjAuMCIsInJlcXVpcmUiOiIxLjAuMCJ9"
+  "sig": "7dvBf+SfaPCzxU3YX/seufud6HHa1LuenJkbz0rLM2sHd+BiATjsbOnm/6cNzR9QayfpwCVQC0gIhLQT8xefCA==",
+  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiZWI1ZDEzMDFmZDU2YmFhOGUwNjAwNjAwM2U3Y2FjMDQxZTJiNjQxZjdjYWVkN2M5ZTFiOWNlYjAzNzU5Yjc2NyIsInVybHMiOlsiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy0xLjAuMS1hbmRyb2lkLmFwayIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4wLjEvQWxiYXRyb3NzLTEuMC4xLWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9BbGJhdHJvc3MvcmVsZWFzZXMvZG93bmxvYWQvdjEuMC4xL0FsYmF0cm9zcy0xLjAuMS1hbmRyb2lkLmFwayJdfSwiYW5kcm9pZC1hcm1lYWJpLXY3YSI6eyJzaGEyNTYiOiJlYjVkMTMwMWZkNTZiYWE4ZTA2MDA2MDAzZTdjYWMwNDFlMmI2NDFmN2NhZWQ3YzllMWI5Y2ViMDM3NTliNzY3IiwidXJscyI6WyJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvZG93bmxvYWQvQWxiYXRyb3NzLTEuMC4xLWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjAuMS9BbGJhdHJvc3MtMS4wLjEtYW5kcm9pZC5hcGsiLCJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL0FsYmF0cm9zcy9yZWxlYXNlcy9kb3dubG9hZC92MS4wLjEvQWxiYXRyb3NzLTEuMC4xLWFuZHJvaWQuYXBrIl19LCJ3aW5kb3dzIjp7InNoYTI1NiI6IjRmMWZlMTUxZDE1MTdkNGNmMDZmYmM0ZTUxZjUxYzE0NzVmMDM0NGQ0ZDE1N2VmNTQzMjBkMDhhM2YzYTk3M2MiLCJ1cmxzIjpbImh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS9kb3dubG9hZC9BbGJhdHJvc3MtU2V0dXAtMS4wLjEuZXhlIiwiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjAuMS9BbGJhdHJvc3MtU2V0dXAtMS4wLjEuZXhlIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9BbGJhdHJvc3MvcmVsZWFzZXMvZG93bmxvYWQvdjEuMC4xL0FsYmF0cm9zcy1TZXR1cC0xLjAuMS5leGUiXX19LCJsYXRlc3RfdmVyc2lvbiI6IjEuMC4xIiwibWVzc2FnZSI6IkFsYmF0cm9zcyAxLjAuMSBpcyBvdXQuIFZlcnNpb25zIG9sZGVyIHRoYW4gMS4wLjAgbm8gbG9uZ2VyIGNvbm5lY3Q7IGlmIHlvdXJzIGlzIG9uZSBvZiB0aGVtIGFuZCBkb2VzIG5vdCB1cGRhdGUgYnkgaXRzZWxmOiAxKSBVbmluc3RhbGwgQWxiYXRyb3NzLiAyKSBEb3dubG9hZCB0aGUgbmV3IHZlcnNpb24gd2l0aCBHZXQgdGhlIHVwZGF0ZSwgb3Igb3BlbiBodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvZG93bmxvYWQvQWxiYXRyb3NzLTEuMC4xLWFuZHJvaWQuYXBrIGluIHlvdXIgYnJvd3NlciAoV2luZG93czogQWxiYXRyb3NzLVNldHVwLTEuMC4xLmV4ZSBmcm9tIGh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS8jZG93bmxvYWQpLiAzKSBJbnN0YWxsIGl0IGFuZCBzaWduIGluIHdpdGggdGhlIHVzZXJuYW1lIGFuZCBwYXNzd29yZCB5b3Ugd2VyZSBnaXZlbi4gTGF0ZXIgdXBkYXRlcyBpbnN0YWxsIGZyb20gaW5zaWRlIHRoZSBhcHAuIiwibWluX3ZlcnNpb24iOiIxLjAuMCIsInJlcXVpcmUiOiIxLjAuMCJ9"
 }
