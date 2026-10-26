@@ -26,7 +26,16 @@ type Binaries struct {
 	Tor      string
 	// Snowflake is the Snowflake proxy for "Help others" (tools/snowflake).
 	Snowflake string
+	// Sidecars are the helpers of the sidecar protocols, by program name
+	// (node.Sidecar); only those found.
+	Sidecars map[string]string
 }
+
+// Sidecar is the path of a sidecar helper, "" when it is not installed.
+func (b Binaries) Sidecar(name string) string { return b.Sidecars[name] }
+
+// sidecarNames are the helper programs Locate looks for.
+var sidecarNames = []string{"naive", "juicity-client", "mieru", "brook", "wstunnel", "wireproxy-awg"}
 
 // Locate finds the cores next to the app or in its data directory.
 func Locate(dirs ...string) Binaries {
@@ -62,7 +71,13 @@ func Locate(dirs ...string) Binaries {
 	if tor == "" {
 		tor = find("tor")
 	}
-	return Binaries{SingBox: find("sing-box"), Xray: find("xray"), WarpPlus: find("warp-plus"), Usque: find("usque"), Tor: tor, Snowflake: find("snowflake-helper")}
+	side := map[string]string{}
+	for _, name := range sidecarNames {
+		if p := find(name); p != "" {
+			side[name] = p
+		}
+	}
+	return Binaries{SingBox: find("sing-box"), Xray: find("xray"), WarpPlus: find("warp-plus"), Usque: find("usque"), Tor: tor, Snowflake: find("snowflake-helper"), Sidecars: side}
 }
 
 func fileExists(p string) bool {

@@ -35,6 +35,14 @@ set -euo pipefail
 
 SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
 XRAY_VERSION="${XRAY_VERSION:-26.10.21}"
+# The sidecar protocols: each runs on a server program of its own.
+GO_VERSION="${GO_VERSION:-1.26.10}"
+JUICITY_VERSION="${JUICITY_VERSION:-0.5.0}"
+MIERU_VERSION="${MIERU_VERSION:-3.39.0}"
+BROOK_VERSION="${BROOK_VERSION:-20270101}"
+WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
+# SIDECARS=0 skips them (sing-box and Xray alone, as before).
+SIDECARS="${SIDECARS:-1}"
 DRY_RUN="${DRY_RUN:-0}"
 OUT="${OUT:-/etc/albatross}"
 REALITY_DEST="${REALITY_DEST:-www.microsoft.com}"
@@ -59,6 +67,14 @@ P_GRPC=2087          # VLESS + gRPC + TLS
 P_UPGRADE=2096       # VMess + HTTPUpgrade + TLS
 P_ANYTLS=8880        # AnyTLS
 P_OVPN=2082          # OpenVPN over TCP (a certificate per client, tls-crypt)
+P_TGO=2098           # Trojan + WebSocket + TLS (what Trojan-Go clients speak)
+P_NAIVE=2052         # NaiveProxy: HTTP/2 CONNECT behind Caddy, looks like a web site
+P_MIERU=2086         # Mieru (TCP)
+P_BROOK=2095         # Brook over WebSocket + TLS
+P_WST=2097           # WStunnel: SOCKS5 inside WebSocket + TLS
+P_OC=2099            # OpenConnect (AnyConnect), TCP and UDP; for other clients, see links-external.txt
+P_JUICITY=8446       # Juicity (QUIC, UDP)
+P_AWG=8447           # AmneziaWG (UDP)
 P_SS=8388            # Shadowsocks 2022 (TCP and UDP)
 P_STLS=8445          # Shadowsocks 2022 behind ShadowTLS v3 (TCP): a real TLS handshake with REALITY_DEST
 P_HY2=443            # Hysteria 2 + Salamander (UDP), hops over HOP_RANGE
@@ -141,6 +157,7 @@ secrets() {
   grep -q "^KCP_SEED=" "$f" || echo "KCP_SEED=$("$SB" generate rand --hex 8)" >>"$f"
   grep -q "^STLS_PASS=" "$f" || echo "STLS_PASS=$("$SB" generate rand --hex 16)" >>"$f"
   grep -q "^SSH_PASS=" "$f" || echo "SSH_PASS=$("$SB" generate rand --hex 16)" >>"$f"
+  grep -q "^WST_PATH=" "$f" || echo "WST_PATH=$("$SB" generate rand --hex 12)" >>"$f"
   # shellcheck disable=SC1090
   . "$f"
 }
@@ -162,7 +179,7 @@ certificate() {
   ln -sf "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" "$CERT"
   ln -sf "/etc/letsencrypt/live/$DOMAIN/privkey.pem" "$KEY"
   mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-  printf '#!/bin/sh\nsystemctl restart albatross-sing-box albatross-xray\n' >/etc/letsencrypt/renewal-hooks/deploy/albatross
+  printf '#!/bin/sh\nsystemctl restart albatross-sing-box albatross-xray\nfor s in albatross-naive albatross-juicity albatross-brook albatross-wstunnel ocserv; do systemctl try-restart "$s" 2>/dev/null; done\n' >/etc/letsencrypt/renewal-hooks/deploy/albatross
   # Renewal needs port 80, which the HTTP inbound holds.
   mkdir -p /etc/letsencrypt/renewal-hooks/pre /etc/letsencrypt/renewal-hooks/post
   printf '#!/bin/sh\nsystemctl stop albatross-sing-box\n' >/etc/letsencrypt/renewal-hooks/pre/albatross
@@ -184,6 +201,9 @@ singbox_config() {
                          "private_key": "$REALITY_PRIVATE", "short_id": ["$SHORT_ID"]}}},
     {"type": "trojan", "tag": "trojan", "listen": "::", "listen_port": $P_TROJAN,
      "users": [{"password": "$PASS"}], $tls},
+    {"type": "trojan", "tag": "trojan-ws", "listen": "::", "listen_port": $P_TGO,
+     "users": [{"password": "$PASS"}], $tls,
+     "transport": {"type": "ws", "path": "$WS_PATH"}},
     {"type": "vless", "tag": "ws", "listen": "::", "listen_port": $P_WS,
      "users": [{"uuid": "$UUID"}], $tls,
      "transport": {"type": "ws", "path": "$WS_PATH"}},
@@ -328,10 +348,10 @@ free_port53() {
 firewall() {
   # Oracle's Ubuntu images reject everything but SSH in iptables; the
   # cloud's own security list must allow the same ports (see README).
-  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_OVPN 22 80; do
+  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_OVPN $P_TGO $P_NAIVE $P_MIERU $P_BROOK $P_WST $P_OC 22 80; do
     iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$p" -j ACCEPT
   done
-  for p in $P_SS $P_HY2 $P_TUIC $HOP_RANGE; do
+  for p in $P_SS $P_HY2 $P_TUIC $P_JUICITY $P_AWG $P_OC $HOP_RANGE; do
     iptables -C INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$p" -j ACCEPT
   done
   # Hysteria 2 port hopping: the whole range, and UDP 53, land on its one
@@ -483,7 +503,238 @@ hysteria2://$PASS@$DOMAIN:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS
 tuic://$UUID:$PASS@$DOMAIN:$P_TUIC?sni=$DOMAIN&alpn=h3&congestion_control=bbr#$n-TUIC
 $([ "$DRY_RUN" = 1 ] || printf 'ssh://tunnel:%s@%s:22?hk=%s#%s-SSH\n' "$SSH_PASS" "$h" "$(urlenc "$(ssh_hostkey)")" "$n")
 $(ovpn_link "$h")
+trojan-go://$PASS@$DOMAIN:$P_TGO?security=tls&sni=$DOMAIN&type=ws&host=$DOMAIN&path=$(urlenc "$WS_PATH")#$n-TrojanGo
+$(sidecar_links "$h")
 EOF
+}
+
+# sidecar_links prints the links of the sidecar protocols that are set up.
+sidecar_links() {
+  local h="$1" n="Albatross"
+  [ "$SIDECARS" = 1 ] || return 0
+  echo "naive+https://albatross:$PASS@$DOMAIN:$P_NAIVE#$n-Naive"
+  echo "juicity://$UUID:$PASS@$DOMAIN:$P_JUICITY?congestion_control=bbr&sni=$DOMAIN#$n-Juicity"
+  echo "mieru://albatross:$PASS@$h:$P_MIERU?protocol=tcp&mtu=1400#$n-Mieru"
+  echo "brook://wssserver?wssserver=$(urlenc "wss://$DOMAIN:$P_BROOK/ws")&password=$PASS&name=$n-Brook"
+  echo "wstunnel://$DOMAIN:$P_WST?path=$WST_PATH#$n-WStunnel"
+  awg_link "$h"
+}
+
+# sidecar_setup installs and runs the server side of the sidecar
+# protocols. Each has its own program; Go builds the two that publish no
+# server binary (Caddy with NaiveProxy's forward proxy, AmneziaWG).
+sidecar_setup() {
+  local a; a="$(arch)"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git build-essential ocserv >/dev/null
+  local tmp; tmp="$(mktemp -d)"
+  if [ ! -x /usr/local/go/bin/go ] || ! /usr/local/go/bin/go version | grep -q "go$GO_VERSION "; then
+    curl -fsSL -o "$tmp/go.tgz" "https://go.dev/dl/go$GO_VERSION.linux-$a.tar.gz"
+    rm -rf /usr/local/go && tar -C /usr/local -xzf "$tmp/go.tgz"
+  fi
+  export PATH="/usr/local/go/bin:/root/go/bin:$PATH" GOFLAGS=-buildvcs=false GOTOOLCHAIN=auto
+  # NaiveProxy's server is Caddy with klzgrad's forward proxy.
+  if [ ! -x /usr/local/bin/caddy-naive ]; then
+    go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest >/dev/null
+    xcaddy build --with github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@naive --output /usr/local/bin/caddy-naive >/dev/null
+  fi
+  mkdir -p /var/www/albatross-naive
+  cat >"$OUT/Caddyfile" <<EOF
+{
+  order forward_proxy before file_server
+  auto_https off
+  admin off
+}
+:$P_NAIVE {
+  tls $CERT $KEY
+  forward_proxy {
+    basic_auth albatross $PASS
+    hide_ip
+    hide_via
+    probe_resistance
+  }
+  file_server {
+    root /var/www/albatross-naive
+  }
+}
+EOF
+  # Juicity.
+  local ja=x86_64; [ "$a" = arm64 ] && ja=arm64
+  curl -fsSL -o "$tmp/j.zip" "https://github.com/juicity/juicity/releases/download/v$JUICITY_VERSION/juicity-linux-$ja.zip"
+  unzip -q -o "$tmp/j.zip" juicity-server -d "$tmp"
+  install -m 755 "$tmp/juicity-server" /usr/local/bin/juicity-server
+  cat >"$OUT/juicity.json" <<EOF
+{"listen": ":$P_JUICITY", "users": {"$UUID": "$PASS"}, "certificate": "$CERT", "private_key": "$KEY",
+ "congestion_control": "bbr", "log_level": "warn", "disable_outbound_udp443": true}
+EOF
+  # Mieru (its server is mita, a package of its own with a service).
+  curl -fsSL -o "$tmp/mita.deb" "https://github.com/enfein/mieru/releases/download/v$MIERU_VERSION/mita_${MIERU_VERSION}_$a.deb"
+  DEBIAN_FRONTEND=noninteractive dpkg -i "$tmp/mita.deb" >/dev/null
+  cat >"$OUT/mita.json" <<EOF
+{"portBindings": [{"port": $P_MIERU, "protocol": "TCP"}], "users": [{"name": "albatross", "password": "$PASS"}],
+ "loggingLevel": "WARN", "mtu": 1400, "dns": {"dualStack": "PREFER_IPv4"}}
+EOF
+  systemctl enable --now mita >/dev/null 2>&1 || true
+  sleep 2
+  mita apply config "$OUT/mita.json"
+  mita stop >/dev/null 2>&1 || true
+  mita start
+  # Brook.
+  curl -fsSL -o "$tmp/brook" "https://github.com/txthinking/brook/releases/download/v$BROOK_VERSION/brook_linux_$a"
+  install -m 755 "$tmp/brook" /usr/local/bin/brook
+  # WStunnel.
+  curl -fsSL -o "$tmp/wst.tgz" "https://github.com/erebe/wstunnel/releases/download/v$WSTUNNEL_VERSION/wstunnel_${WSTUNNEL_VERSION}_linux_$a.tar.gz"
+  tar -xzf "$tmp/wst.tgz" -C "$tmp" wstunnel
+  install -m 755 "$tmp/wstunnel" /usr/local/bin/wstunnel
+  # AmneziaWG: the userspace implementation and its tools, from source.
+  if [ ! -x /usr/local/bin/amneziawg-go ]; then
+    git clone -q --depth 1 https://github.com/amnezia-vpn/amneziawg-go "$tmp/awg-go"
+    (cd "$tmp/awg-go" && go build -trimpath -o /usr/local/bin/amneziawg-go .)
+  fi
+  if ! command -v awg >/dev/null; then
+    git clone -q --depth 1 https://github.com/amnezia-vpn/amneziawg-tools "$tmp/awg-tools"
+    make -s -C "$tmp/awg-tools/src" >/dev/null && make -s -C "$tmp/awg-tools/src" install >/dev/null
+  fi
+  awg_setup
+  openconnect_setup
+  rm -rf "$tmp"
+  sidecar_services
+}
+
+# awg_setup writes the AmneziaWG interface: one peer (the app), the junk
+# and header parameters picked once and kept with the keys.
+awg_setup() {
+  local d="$OUT/awg"
+  mkdir -p "$d" && chmod 700 "$d"
+  if [ ! -s "$d/params.env" ]; then
+    awg genkey >"$d/server.key"; awg pubkey <"$d/server.key" >"$d/server.pub"
+    awg genkey >"$d/client.key"; awg pubkey <"$d/client.key" >"$d/client.pub"
+    chmod 600 "$d"/*.key
+    python3 - >"$d/params.env" <<'PY2'
+import random
+r = random.SystemRandom()
+h = r.sample(range(5, 2**31), 4)
+print(f"JC={r.randint(4, 8)}\nJMIN=40\nJMAX=70\nS1={r.randint(15, 60)}\nS2={r.randint(15, 60)}")
+print("H1=%d\nH2=%d\nH3=%d\nH4=%d" % tuple(h))
+PY2
+  fi
+  # shellcheck disable=SC1090
+  . "$d/params.env"
+  local dev; dev="$(ip -4 route show default | awk '{print $5; exit}')"
+  mkdir -p /etc/amnezia/amneziawg
+  cat >/etc/amnezia/amneziawg/awg0.conf <<EOF
+[Interface]
+PrivateKey = $(cat "$d/server.key")
+Address = 10.10.0.1/24
+ListenPort = $P_AWG
+Jc = $JC
+Jmin = $JMIN
+Jmax = $JMAX
+S1 = $S1
+S2 = $S2
+H1 = $H1
+H2 = $H2
+H3 = $H3
+H4 = $H4
+PostUp = iptables -t nat -A POSTROUTING -s 10.10.0.0/24 -o $dev -j MASQUERADE
+PostDown = iptables -t nat -D POSTROUTING -s 10.10.0.0/24 -o $dev -j MASQUERADE
+
+[Peer]
+PublicKey = $(cat "$d/client.pub")
+AllowedIPs = 10.10.0.2/32
+EOF
+  chmod 600 /etc/amnezia/amneziawg/awg0.conf
+  echo "net.ipv4.ip_forward = 1" >/etc/sysctl.d/99-albatross.conf
+  sysctl -q -w net.ipv4.ip_forward=1
+}
+
+# awg_link prints the AmneziaWG link: the client key, the server's public
+# key and the parameters the interface uses.
+awg_link() {
+  local d="$OUT/awg"
+  [ -s "$d/params.env" ] && [ -s "$d/client.key" ] || return 0
+  # shellcheck disable=SC1090
+  . "$d/params.env"
+  printf 'amneziawg://%s@%s:%s?publickey=%s&address=10.10.0.2%%2F32&mtu=1280&jc=%s&jmin=%s&jmax=%s&s1=%s&s2=%s&h1=%s&h2=%s&h3=%s&h4=%s#Albatross-AmneziaWG\n' \
+    "$(urlenc "$(cat "$d/client.key")")" "$1" "$P_AWG" "$(urlenc "$(cat "$d/server.pub")")" "$JC" "$JMIN" "$JMAX" "$S1" "$S2" "$H1" "$H2" "$H3" "$H4"
+}
+
+# openconnect_setup runs ocserv (AnyConnect) with a password user. The app
+# has no OpenConnect client (it needs a system tunnel the phone does not
+# give); the link in links-external.txt is for the official clients.
+openconnect_setup() {
+  cat >/etc/ocserv/ocserv.conf <<EOF
+auth = "plain[passwd=/etc/ocserv/ocpasswd]"
+tcp-port = $P_OC
+udp-port = $P_OC
+run-as-user = ocserv
+run-as-group = ocserv
+socket-file = /run/ocserv.socket
+server-cert = $CERT
+server-key = $KEY
+isolate-workers = true
+max-clients = 0
+max-same-clients = 0
+keepalive = 32400
+dpd = 90
+mobile-dpd = 1800
+switch-to-tcp-timeout = 25
+try-mtu-discovery = true
+cert-user-oid = 0.9.2342.19200300.100.1.1
+tls-priorities = "NORMAL:%SERVER_PRECEDENCE:%COMPAT:-VERS-SSL3.0:-VERS-TLS1.0:-VERS-TLS1.1"
+auth-timeout = 240
+min-reauth-time = 300
+max-ban-score = 80
+ban-reset-time = 300
+cookie-timeout = 300
+deny-roaming = false
+rekey-time = 172800
+rekey-method = ssl
+use-occtl = true
+pid-file = /run/ocserv.pid
+log-level = 1
+device = vpns
+predictable-ips = true
+default-domain = $DOMAIN
+ipv4-network = 10.11.0.0
+ipv4-netmask = 255.255.255.0
+tunnel-all-dns = true
+dns = 1.1.1.1
+dns = 8.8.8.8
+ping-leases = false
+cisco-client-compat = true
+dtls-legacy = true
+EOF
+  printf '%s\n%s\n' "$PASS" "$PASS" | ocpasswd -c /etc/ocserv/ocpasswd albatross
+  local dev; dev="$(ip -4 route show default | awk '{print $5; exit}')"
+  iptables -t nat -C POSTROUTING -s 10.11.0.0/24 -o "$dev" -j MASQUERADE 2>/dev/null ||
+    iptables -t nat -A POSTROUTING -s 10.11.0.0/24 -o "$dev" -j MASQUERADE
+  echo "openconnect://albatross:$PASS@$DOMAIN:$P_OC" >"$OUT/links-external.txt"
+  chmod 600 "$OUT/links-external.txt"
+}
+
+# sidecar_services writes and starts one unit per sidecar program.
+sidecar_services() {
+  unit() { # name description command
+    cat >"/etc/systemd/system/albatross-$1.service" <<EOF
+[Unit]
+Description=Albatross server ($2)
+After=network-online.target
+[Service]
+ExecStart=$3
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+[Install]
+WantedBy=multi-user.target
+EOF
+  }
+  unit naive "NaiveProxy, Caddy" "/usr/local/bin/caddy-naive run --config $OUT/Caddyfile --adapter caddyfile"
+  unit juicity "Juicity" "/usr/local/bin/juicity-server run -c $OUT/juicity.json"
+  unit brook "Brook" "/usr/local/bin/brook wssserver --domainaddress $DOMAIN:$P_BROOK --cert $CERT --certkey $KEY --password $PASS"
+  unit wstunnel "WStunnel" "/usr/local/bin/wstunnel server --restrict-http-upgrade-path-prefix $WST_PATH --tls-certificate $CERT --tls-private-key $KEY wss://[::]:$P_WST"
+  systemctl daemon-reload
+  systemctl enable --now albatross-naive albatross-juicity albatross-brook albatross-wstunnel awg-quick@awg0 ocserv >/dev/null 2>&1
+  systemctl restart albatross-naive albatross-juicity albatross-brook albatross-wstunnel awg-quick@awg0 ocserv
 }
 
 # dns_links prints one DNS tunnel link per tunnel name.
@@ -834,6 +1085,10 @@ main() {
     free_port53
     openvpn_setup
     ssh_setup
+    if [ "$SIDECARS" = 1 ]; then
+      log "Installing the sidecar protocols (NaiveProxy, Juicity, Mieru, Brook, WStunnel, AmneziaWG, OpenConnect)"
+      sidecar_setup
+    fi
     firewall
     services
   fi

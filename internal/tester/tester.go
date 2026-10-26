@@ -196,9 +196,9 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 			proxy := &url.URL{Scheme: "http", User: url.UserPassword(tag, pass), Host: "127.0.0.1:" + strconv.Itoa(port)}
 			limit := timeout
 			switch {
-			case n.Engine() == node.EngineWarpPlus, n.DNSTunnel():
-				// warp-plus negotiates first; a DNS tunnel moves
-				// a few hundred bytes per query.
+			case n.Engine() == node.EngineWarpPlus, n.Engine() == node.EngineSidecar, n.DNSTunnel():
+				// warp-plus and the sidecars negotiate first; a DNS
+				// tunnel moves a few hundred bytes per query.
 				limit = 3 * timeout
 			case n.ICMP():
 				limit = 2 * timeout

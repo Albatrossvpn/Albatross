@@ -31,3 +31,23 @@ func TestXrayPortsNeedLogin(t *testing.T) {
 		t.Fatal("two sets share a password")
 	}
 }
+
+// A sidecar node without its helper running gets a discard port, so the
+// set still builds and the node simply fails its test.
+func TestSidecarOutboundIsSocks(t *testing.T) {
+	n, err := node.ParseLink("mieru://carol:pw@5.6.7.8:2086?protocol=tcp#M")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := BuildSet([]*node.Node{n}, BuildOptions{warpPorts: map[*node.Node]int{n: 21080}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := set.Outbounds[0].(map[string]any)
+	if out["type"] != "socks" || out["server_port"] != 21080 || out["tag"] != set.Tags[0] {
+		t.Fatalf("outbound %v", out)
+	}
+	if Locate(t.TempDir()).Sidecar("mieru") != "" {
+		t.Fatal("found a helper in an empty directory")
+	}
+}
