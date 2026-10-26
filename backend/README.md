@@ -33,6 +33,7 @@ The Worker answers only on its custom domain (`routes` in `wrangler.toml`), neve
 | Secrets | |
 |---|---|
 | `CLOUDFLARE_API_TOKEN` | an API token with *Workers Scripts: Edit*, *D1: Edit* and *Zone: Workers Routes: Edit* (the *Edit Cloudflare Workers* template works) |
+| `Cloudflare_API_edit` | optional: a token with *Zone: Zone Settings: Edit* and *Zone: Zone: Read* on the domain, which the deploy uses to keep Encrypted Client Hello and HTTP/3 off (browsers inside Iran cannot open a Cloudflare site with either on); without it the deploy tries the token above and warns when it may not |
 | `CLOUDFLARE_ACCOUNT_ID` | shown on the Cloudflare dashboard's Workers page |
 | `TOKEN_SECRET` | a long random string (32+ characters) that signs sessions; changing it signs everyone out |
 | `EDGE_EPOCH` (variable, optional) | a number, default `1`; change it to retire the edge's links handed out so far (edge/README.md) |
