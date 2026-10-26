@@ -118,6 +118,11 @@ test("edge links name the edge on Cloudflare's TLS ports, or none without an edg
     assert.equal(u.searchParams.get("path"), "/0f1e2d3c4b5a?ed=2560");
   }
   assert.deepEqual(new Set(links.map((l) => new URL(l).port)), new Set(["443", "2053", "8443"]));
+  const byAddr = edgeLinks("edge.example.org", uuid, ["104.16.1.2", "not an address", "188.114.96.3"]);
+  assert.equal(byAddr.length, 5, "one more link per clean address");
+  assert.equal(new URL(byAddr[3]).hostname, "104.16.1.2");
+  assert.equal(new URL(byAddr[3]).searchParams.get("sni"), "edge.example.org");
+  assert.equal(new URL(byAddr[4]).hostname, "188.114.96.3");
   assert.deepEqual(edgeLinks("", uuid), []);
   assert.deepEqual(edgeLinks("edge.example.org", ""), []);
   assert.deepEqual(edgeLinks("edge.example.org", "not-a-uuid"), []);
@@ -179,15 +184,17 @@ test("subscriptions: countries read from names, servers renamed, the edge first"
   const links = atob(all.body).trim().split("\n");
   assert.equal(links.length, 5, "every server but the home country's, after the edge");
   assert.equal(links[0], "vless://e@edge:443?type=ws#Albatross%20Edge%201");
-  assert.equal(nameOf(links[1]), "Albatross 🇺🇸 United States 1");
-  assert.equal(nameOf(links[3]), "Albatross Server 3", "a server without a country keeps no name of its own");
-  assert.equal(nameOf(links[4]), "Albatross 🇯🇵 Japan 4");
+  assert.equal(nameOf(links[1]), "Albatross 🇺🇸 United States 1 · vless");
+  assert.equal(nameOf(links[3]), "Albatross Server 3 · shadowsocks", "a server without a country keeps no name of its own");
+  assert.equal(nameOf(links[4]), "Albatross 🇯🇵 Japan 4 · vmess");
   assert.ok(links[4].startsWith("vmess://"));
   assert.equal(all.title, "Albatross All servers");
 
   const de = build(entries, "DE", "Albatross", edge);
-  assert.deepEqual(atob(de.body).trim().split("\n").map(nameOf), ["Albatross 🇩🇪 Germany 1"]);
+  assert.deepEqual(atob(de.body).trim().split("\n").map(nameOf), ["Albatross 🇩🇪 Germany 1 · trojan"]);
   assert.equal(de.title, "Albatross Germany");
+  assert.equal(build(entries, "DE", "Albatross", edge, "2026-10-26T11:05:09Z").title, "Albatross Germany · 26 Oct 11:05 UTC");
+  assert.equal(build(entries, "DE", "Albatross", edge, "junk").title, "Albatross Germany");
   assert.equal(atob(build(entries, "edge", "Albatross", edge).body).trim().split("\n").length, 1);
   assert.equal(rename("ss://x@y:1#old", "new name"), "ss://x@y:1#new%20name");
 

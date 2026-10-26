@@ -125,7 +125,7 @@ export function countriesOf(entries) {
  * country's, "edge" the project's own edge. Each server is named after the
  * service; the servers' own names and sources never show.
  */
-export function build(entries, choice, brand, edge) {
+export function build(entries, choice, brand, edge, updated = "") {
   let list = entries;
   let label = "All servers";
   if (choice === "edge") {
@@ -140,9 +140,26 @@ export function build(entries, choice, brand, edge) {
   if (!choice || choice === "edge") for (const [i, l] of edge.entries()) links.push(rename(l, `${brand} Edge ${i + 1}`));
   for (const [i, e] of list.entries()) {
     const where = e.country ? `${flag(e.country)} ${COUNTRIES[e.country] || e.country}` : "Server";
-    links.push(rename(e.link, `${brand} ${where} ${i + 1}`));
+    links.push(rename(e.link, `${brand} ${where} ${i + 1} · ${protoOf(e.link)}`));
   }
-  return { title: `${brand} ${label}`, body: b64(links.join("\n") + "\n"), count: links.length };
+  // The title carries the list's time, so a refresh visibly brings a newer list.
+  const when = stamp(updated);
+  return { title: `${brand} ${label}${when ? " · " + when : ""}`, body: b64(links.join("\n") + "\n"), count: links.length };
+}
+
+/** The protocol a link's scheme names, as the apps show it. */
+export function protoOf(link) {
+  const s = link.slice(0, link.indexOf("://")).toLowerCase();
+  return { ss: "shadowsocks", hy2: "hysteria2", wg: "wireguard" }[s] || s;
+}
+
+/** "26 Oct 11:05 UTC" for an ISO time, or "" when there is none. */
+export function stamp(iso) {
+  const t = iso ? new Date(iso) : null;
+  if (!t || Number.isNaN(t.getTime())) return "";
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const two = (n) => String(n).padStart(2, "0");
+  return `${t.getUTCDate()} ${months[t.getUTCMonth()]} ${two(t.getUTCHours())}:${two(t.getUTCMinutes())} UTC`;
 }
 
 /** The headers client apps read: the allowance and the name. */
@@ -174,6 +191,16 @@ export async function listFile(env, name) {
 
 export const hotList = (env) => listFile(env, "hot.txt");
 
+/** When the lists were last published (meta.json), as an ISO time, or "". */
+export async function listUpdated(env) {
+  try {
+    const m = JSON.parse((await listFile(env, "meta.json")) || "{}");
+    return typeof m.updated === "string" ? m.updated : "";
+  } catch {
+    return "";
+  }
+}
+
 /** The servers a subscription offers right now (pool). */
 export async function subPool(env) {
   const hot = await listFile(env, "hot.txt");
@@ -182,7 +209,26 @@ export async function subPool(env) {
   return pool(hot, await listFile(env, "fresh.txt"));
 }
 
-/** The edge's links for an account that may connect. */
-export const edgeFor = (env, account) => (account.allowed ? edgeLinks(env.EDGE_HOST, env.EDGE_UUID) : []);
+// How many clean Cloudflare addresses a subscription carries the edge on.
+const EDGE_ADDRS = 3;
+
+/** Clean Cloudflare addresses found open from inside the country (reach.json), a sample of n. */
+export async function cleanEdges(env, n = EDGE_ADDRS, pick = Math.random) {
+  try {
+    const r = JSON.parse((await listFile(env, "reach.json")) || "{}");
+    const all = Array.isArray(r.cloudflare) ? r.cloudflare.filter((a) => typeof a === "string" && /^[0-9.]+$/.test(a)) : [];
+    const out = [];
+    while (out.length < n && all.length > 0) out.push(all.splice(Math.floor(pick() * all.length) % all.length, 1)[0]);
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** The edge's links for an account that may connect, by name and by clean addresses. */
+export async function edgeFor(env, account) {
+  if (!account.allowed) return [];
+  return edgeLinks(env.EDGE_HOST, env.EDGE_UUID, await cleanEdges(env));
+}
 
 export { accountOf };
