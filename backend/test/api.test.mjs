@@ -406,6 +406,22 @@ test("subscriptions for other devices: one address per account, servers by count
   assert.equal((await fetch(fresh)).status, 403);
 });
 
+test("the plan follows the data allowance unless one is chosen", async () => {
+  const admin = (await call("POST", "admin/login", { body: { username: ADMIN.username, password: ADMIN.password } })).body.token;
+  const gb = 1024 ** 3;
+  let r = await call("POST", "admin/users", { token: admin, body: { username: "auto-1", password: "auto-pass-123", quota_bytes: 200 * gb } });
+  assert.equal(r.body.user.tier, "gold", "200 GB earns Gold");
+  const id = r.body.user.id;
+  r = await call("PATCH", `admin/users/${id}`, { token: admin, body: { quota_bytes: 1 * gb } });
+  assert.equal(r.body.user.tier, "bronze", "the plan follows a changed allowance");
+  r = await call("PATCH", `admin/users/${id}`, { token: admin, body: { quota_bytes: 1 * gb, tier: "silver" } });
+  assert.equal(r.body.user.tier, "silver", "a chosen plan wins");
+  r = await call("PATCH", `admin/users/${id}`, { token: admin, body: { quota_bytes: 0, tier: "auto" } });
+  assert.equal(r.body.user.tier, "vip", "no limit is VIP");
+  r = await call("POST", "admin/users", { token: admin, body: { username: "auto-2", password: "auto-pass-123", quota_bytes: 10 * gb } });
+  assert.equal(r.body.user.tier, "silver");
+});
+
 test("plans: as many devices as the plan allows may be connected at once", async () => {
   const dev = (n, name = "Windows") => ({ "X-Albatross-Device": n.repeat(16), "X-Albatross-Device-Name": name });
   assert.equal((await call("POST", "admin/users", { token: admin, body: { username: "planned", password: "plan-pass-123", tier: "platinum" } })).status, 400);
