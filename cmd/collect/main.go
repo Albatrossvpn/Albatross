@@ -8,6 +8,7 @@
 //	fresh.txt       servers from tested lists, Telegram and VPN Gate
 //	all-1.txt ...   everything else, best first, split into -shards files
 //	meta.json       when it ran and how many servers each file holds
+//	source-stats.json  what the real tests showed about each source (lanes.go)
 //	tor.json        Tor's current bridges (built-in and recommended for Iran)
 //
 // Servers whose address does not answer at all are left out (UDP-based
@@ -22,6 +23,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -191,6 +193,12 @@ type entry struct {
 	endpoint string // "" for UDP-based servers
 	proto    string
 	key      uint64 // node.Key64 of the server's key
+	// lane marks a server put forward by a source on probation or proven
+	// (lanes.go); dud counts the dud sources that carry it; dead says its
+	// address did not answer the probe.
+	lane bool
+	dud  int
+	dead bool
 }
 
 type meta struct {
@@ -219,6 +227,8 @@ type meta struct {
 	// Iran; IranOpen of them answered there.
 	IranChecked int `json:"iran_checked"`
 	IranOpen    int `json:"iran_open"`
+	// Lanes counts the sources per lane (lanes.go).
+	Lanes map[string]int `json:"lanes,omitempty"`
 }
 
 var schemeRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]{1,20})://[^\s"'<>]{8,}`)
@@ -287,13 +297,15 @@ func main() {
 	reached := 0
 	schemes, channels, yield := map[string]int{}, map[string]int{}, map[string]int{}
 	seenLinks := map[uint64]bool{}
+	// The usable servers of each source, for the lanes (lanes.go).
+	perSrc := make([][]*entry, len(srcs))
 	ctx := context.Background()
 	sem := make(chan struct{}, 32)
 	var wg sync.WaitGroup
-	for _, s := range srcs {
+	for i, s := range srcs {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(s sources.Source) {
+		go func(i int, s sources.Source) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			res := f.Fetch(ctx, s)
@@ -329,6 +341,7 @@ func main() {
 			}
 			reached++
 			usable := 0
+			here := map[uint64]bool{}
 			for _, n := range nodes {
 				if n.Engine() == node.EngineNone {
 					continue
@@ -345,16 +358,31 @@ func main() {
 				}
 				e.pop++
 				e.fresh = e.fresh || fresh
+				if !here[k] {
+					here[k] = true
+					perSrc[i] = append(perSrc[i], e)
+				}
 			}
 			if s.Kind == sources.KindTelegram {
 				channels[s.URL] = usable
 			} else {
 				yield[s.Label()] = usable
 			}
-		}(s)
+		}(i, s)
 	}
 	wg.Wait()
 	log.Printf("%d of %d sources reached, %d servers", reached, len(srcs), len(byKey))
+
+	// Lanes: a source nobody has measured yet is on probation, one whose
+	// servers pass is proven; both put a random sample of their servers
+	// first in the probe and into a reserved share of the real test.
+	ids := make([]string, len(srcs))
+	for i, s := range srcs {
+		ids[i] = s.ID
+	}
+	stats := loadStats(*prev)
+	plan := planLanes(ids, perSrc, stats, rand.New(rand.NewSource(time.Now().UnixNano())))
+	log.Printf("lanes: %d sources on probation, %d proven, %d duds, %d normal; %d servers put forward", plan.counts["probation"], plan.counts["proven"], plan.counts["dud"], plan.counts["normal"], plan.counts["marked"])
 
 	list := make([]*entry, 0, len(byKey))
 	for _, e := range byKey {
@@ -376,6 +404,9 @@ func main() {
 			}
 		}
 		sort.SliceStable(list, func(i, j int) bool {
+			if list[i].lane != list[j].lane {
+				return list[i].lane
+			}
 			a, b := known[list[i].endpoint], known[list[j].endpoint]
 			if a != b {
 				return a
@@ -388,6 +419,7 @@ func main() {
 			if e.endpoint == "" || alive[e.endpoint] {
 				kept = append(kept, e)
 			} else {
+				e.dead = true
 				dead++
 			}
 		}
@@ -405,14 +437,25 @@ func main() {
 	for _, e := range list {
 		protocols[e.proto]++
 	}
-	var freshE, restE []*entry
+	// The lanes' share of the real test goes first, then the usual
+	// order; a server only dud sources carry stops costing test budget.
+	laneSel := plan.pick(perSrc, *real/laneShare)
+	inLane := map[*entry]bool{}
+	for _, e := range laneSel {
+		inLane[e] = true
+	}
+	freshE := append([]*entry(nil), laneSel...)
+	var restE []*entry
 	for _, e := range list {
-		if e.fresh && len(freshE) < *maxFresh {
+		switch {
+		case inLane[e]:
+		case e.fresh && e.dud < e.pop && len(freshE)-len(laneSel) < *maxFresh:
 			freshE = append(freshE, e)
-		} else {
+		default:
 			restE = append(restE, e)
 		}
 	}
+	log.Printf("lanes: %d servers reserved in the real test", len(laneSel))
 	promoteRare(freshE, *real, minProtoTests)
 	passed, tested := realTest(freshE, *real)
 	passed = confirm(passed)
@@ -424,7 +467,12 @@ func main() {
 		log.Fatal(err)
 	}
 	m := meta{Updated: time.Now().UTC(), Sources: len(srcs), Reached: reached, Found: len(byKey), Dead: dead, Tested: len(tested), Passed: len(passed), Files: map[string]int{},
-		Schemes: schemes, Protocols: protocols, Channels: channels, Yield: yield}
+		Schemes: schemes, Protocols: protocols, Channels: channels, Yield: yield,
+		Lanes: plan.counts}
+	// What the real tests showed about each source is kept in a file of its
+	// own, for the next run (lanes.go): meta.json is read by the account
+	// service on every request and stays small.
+	newStats := updateStats(stats, ids, perSrc, tested, passed, time.Now())
 	// The lists go out sealed with this run's key (sources.SealKeyed),
 	// which the account service hands to signed-in users only; the plain
 	// copies stay while apps from before the sealed lists are around.
@@ -531,6 +579,10 @@ func main() {
 	}
 	b, _ := json.MarshalIndent(m, "", "  ")
 	if err := os.WriteFile(filepath.Join(*out, "meta.json"), b, 0o644); err != nil {
+		log.Fatal(err)
+	}
+	sb, _ := json.Marshal(newStats)
+	if err := os.WriteFile(filepath.Join(*out, statsFile), sb, 0o644); err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("wrote %d fresh and %d other servers to %s", len(fresh), len(rest), *out)
