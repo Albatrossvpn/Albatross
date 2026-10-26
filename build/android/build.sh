@@ -12,6 +12,13 @@ SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
 XRAY_VERSION="${XRAY_VERSION:-26.10.21}"
 WARPPLUS_VERSION="${WARPPLUS_VERSION:-1.2.6}"
 USQUE_VERSION="${USQUE_VERSION:-4.2.1}"
+# The sidecar protocols' helpers (internal/node/sidecar.go).
+NAIVE_VERSION="${NAIVE_VERSION:-v154.0.8037.49-5}"
+JUICITY_VERSION="${JUICITY_VERSION:-0.5.0}"
+MIERU_VERSION="${MIERU_VERSION:-3.39.0}"
+BROOK_VERSION="${BROOK_VERSION:-20270101}"
+WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
+WIREPROXY_AWG_REF="${WIREPROXY_AWG_REF:-master}"
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
@@ -138,6 +145,52 @@ usqsrc() {
   echo "$src"
 }
 
+# gosrc <name> <repo> <ref> <package> clones a Go program's source once and
+# checks that a build for this machine starts (see smoke).
+gosrc() {
+  local src="$tmp/$1-src"
+  if [ ! -d "$src" ]; then
+    git clone -q --depth 1 --branch "$3" "$gh/$2" "$src"
+    (cd "$src" && CGO_ENABLED=0 GOTOOLCHAIN=auto go build -trimpath -buildvcs=false -o "$tmp/$1-host" "$4")
+    smoke "$1" "$tmp/$1-host" --help
+  fi
+  echo "$src"
+}
+
+# sidecars <abi> builds or unpacks the helpers of the sidecar protocols
+# for one ABI. The Go ones are built from source for every ABI; NaiveProxy
+# comes out of its own Android plugin package (a Chromium build), and
+# WStunnel (Rust) publishes a 64-bit ARM Android build only.
+sidecars() {
+  local abi="$1" out="$jni/$1" src
+  local lic="$app/src/main/assets/licenses"
+  fetch "$gh/klzgrad/naiveproxy/releases/download/$NAIVE_VERSION/naiveproxy-plugin-$NAIVE_VERSION-$abi.apk" "$dl/naive-$NAIVE_VERSION-$abi.apk"
+  rm -rf "$tmp/naive-$abi" && mkdir -p "$tmp/naive-$abi"
+  unzip -q -o "$dl/naive-$NAIVE_VERSION-$abi.apk" "lib/$abi/libnaive.so" -d "$tmp/naive-$abi"
+  cp "$tmp/naive-$abi/lib/$abi/libnaive.so" "$out/libnaive.so"
+  printf 'NaiveProxy (https://github.com/klzgrad/naiveproxy) is under the BSD 3-Clause license.\n' > "$lic/naiveproxy-LICENSE.txt"
+  src="$(gosrc juicity juicity/juicity "v$JUICITY_VERSION" ./cmd/client)"
+  (cd "$src" && gobuild "$abi" "$out/libjuicityclient.so" -ldflags "-s -w" ./cmd/client)
+  cp "$src/LICENSE" "$lic/juicity-LICENSE.txt" 2>/dev/null || printf 'Juicity (https://github.com/juicity/juicity) is under the GNU AGPL v3; its source is at that address.\n' > "$lic/juicity-LICENSE.txt"
+  src="$(gosrc mieru enfein/mieru "v$MIERU_VERSION" ./cmd/mieru)"
+  (cd "$src" && gobuild "$abi" "$out/libmieru.so" -ldflags "-s -w" ./cmd/mieru)
+  cp "$src/LICENSE" "$lic/mieru-LICENSE.txt" 2>/dev/null || printf 'Mieru (https://github.com/enfein/mieru) is under the GNU GPL v3; its source is at that address.\n' > "$lic/mieru-LICENSE.txt"
+  src="$(gosrc brook txthinking/brook "v$BROOK_VERSION" ./cli/brook)"
+  (cd "$src" && gobuild "$abi" "$out/libbrook.so" -ldflags "-s -w" ./cli/brook)
+  cp "$src/LICENSE" "$lic/brook-LICENSE.txt" 2>/dev/null || printf 'Brook (https://github.com/txthinking/brook) is under the GNU GPL v3; its source is at that address.\n' > "$lic/brook-LICENSE.txt"
+  src="$(gosrc wireproxy-awg artem-russkikh/wireproxy-awg "$WIREPROXY_AWG_REF" .)"
+  (cd "$src" && gobuild "$abi" "$out/libwireproxyawg.so" -ldflags "-s -w" .)
+  cp "$src/LICENSE" "$lic/wireproxy-awg-LICENSE.txt"
+  if [ "$abi" = arm64-v8a ]; then
+    fetch "$gh/erebe/wstunnel/releases/download/v$WSTUNNEL_VERSION/wstunnel_${WSTUNNEL_VERSION}_android_arm64.tar.gz" "$dl/wstunnel-$WSTUNNEL_VERSION-android.tgz"
+    rm -rf "$tmp/wst-$abi" && mkdir -p "$tmp/wst-$abi"
+    tar -xzf "$dl/wstunnel-$WSTUNNEL_VERSION-android.tgz" -C "$tmp/wst-$abi"
+    cp "$(find "$tmp/wst-$abi" -type f -name wstunnel | head -1)" "$out/libwstunnel.so"
+    printf 'WStunnel (https://github.com/erebe/wstunnel) is under the BSD 3-Clause license.\n' > "$lic/wstunnel-LICENSE.txt"
+  fi
+  chmod 755 "$out"/*.so
+}
+
 # sing-box's own Android builds are linked for 4 KB memory pages, which
 # phones with 16 KB pages refuse to run: every ABI is built from its source
 # with the tags and flags of its release builds (release/ in its tree).
@@ -190,6 +243,7 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
   us="$(usqsrc)"
   (cd "$us" && gobuild "$abi" "$out/libusque.so" -ldflags "-s -w" .)
   cp "$us/LICENSE.md" "$app/src/main/assets/licenses/usque-LICENSE.txt"
+  sidecars "$abi"
   chmod 755 "$out"/*.so
 }
 cores arm64-v8a arm64 Xray-android-arm64-v8a.zip warp-plus_android-arm64.zip

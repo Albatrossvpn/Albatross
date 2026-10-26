@@ -72,8 +72,8 @@ type BuildOptions struct {
 	LocalDNS string
 	// OnLine, when set, receives every line the cores of this run print.
 	OnLine func(core, line string)
-	// warpPorts maps warp-plus nodes to the SOCKS port their process
-	// listens on; nodes without a port are left out.
+	// warpPorts maps warp-plus and sidecar nodes to the SOCKS port their
+	// process listens on; nodes without a port are left out.
 	warpPorts map[*node.Node]int
 }
 
@@ -88,7 +88,7 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 		case node.EngineXray:
 			xrayNodes = append(xrayNodes, i)
 			continue
-		case node.EngineWarpPlus:
+		case node.EngineWarpPlus, node.EngineSidecar:
 			wpNodes = append(wpNodes, i)
 			continue
 		}
@@ -345,14 +345,21 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 	return nil, fmt.Errorf("too many rejected servers")
 }
 
-// startWarpPlus launches one warp-plus process per warp-plus node, in
+// sidecarNode reports whether a node runs on a process of its own (a
+// warp-plus method or a sidecar protocol) that sing-box reaches over SOCKS.
+func sidecarNode(n *node.Node) bool {
+	e := n.Engine()
+	return e == node.EngineWarpPlus || e == node.EngineSidecar
+}
+
+// startWarpPlus launches one process per warp-plus and sidecar node, in
 // parallel, and waits for each to open its SOCKS port. warp-plus only
 // listens once its tunnel is up, so this also tests the method. Tor nodes
 // share one tor process instead; release lets go of it.
 func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Process, map[*node.Node]int, []*node.Node, []*node.Node, func()) {
 	var idx []int
 	for i, n := range nodes {
-		if n.Engine() == node.EngineWarpPlus {
+		if sidecarNode(n) {
 			idx = append(idx, i)
 		}
 	}
@@ -366,6 +373,19 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 		var wg sync.WaitGroup
 		for k, i := range idx {
 			n := nodes[i]
+			if n.Engine() == node.EngineSidecar {
+				if r.Bin.Sidecar(n.Sidecar()) == "" {
+					continue
+				}
+				wg.Add(1)
+				go func(i, port int) {
+					defer wg.Done()
+					if p := r.startSidecar(ctx, n, port); p != nil {
+						procs[i] = p
+					}
+				}(i, ports[k])
+				continue
+			}
 			if n.WPMode == "tor" {
 				wg.Add(1)
 				go func(i int) {
@@ -423,7 +443,7 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 	held := 0
 	k := 0
 	for i, n := range nodes {
-		if n.Engine() != node.EngineWarpPlus {
+		if !sidecarNode(n) {
 			keep = append(keep, n)
 			continue
 		}
@@ -561,6 +581,37 @@ func (r *Runtime) startUsque(ctx context.Context, n *node.Node, port int) *Proce
 		return nil
 	}
 	if err := p.WaitListening(ctx, bind, 75*time.Second); err != nil {
+		p.Stop()
+		return nil
+	}
+	return p
+}
+
+// startSidecar runs the helper program of a sidecar protocol as a SOCKS5
+// proxy on port, with its configuration files in a directory of the
+// node's own, and waits for the port.
+func (r *Runtime) startSidecar(ctx context.Context, n *node.Node, port int) *Process {
+	name := n.Sidecar()
+	dir := filepath.Join(r.Dir, "sidecar", name+"-"+n.Key()[:12])
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil
+	}
+	args, env, files := n.SidecarArgs(port, dir)
+	for f, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte(body), 0o600); err != nil {
+			return nil
+		}
+	}
+	var onLine func(string)
+	if r.OnLine != nil {
+		onLine = func(l string) { r.OnLine(name, l) }
+	}
+	p, err := Start(name, r.Bin.Sidecar(name), args, env, onLine)
+	if err != nil {
+		return nil
+	}
+	bind := "127.0.0.1:" + strconv.Itoa(port)
+	if err := p.WaitListening(ctx, bind, sidecarBudget(ctx, 45*time.Second)); err != nil {
 		p.Stop()
 		return nil
 	}

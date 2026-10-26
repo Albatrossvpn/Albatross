@@ -8,6 +8,13 @@ SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
 XRAY_VERSION="${XRAY_VERSION:-26.10.21}"
 WARPPLUS_VERSION="${WARPPLUS_VERSION:-1.2.6}"
 USQUE_VERSION="${USQUE_VERSION:-4.2.1}"
+# The sidecar protocols' helpers (internal/node/sidecar.go).
+NAIVE_VERSION="${NAIVE_VERSION:-v154.0.8037.49-5}"
+JUICITY_VERSION="${JUICITY_VERSION:-0.5.0}"
+MIERU_VERSION="${MIERU_VERSION:-3.39.0}"
+BROOK_VERSION="${BROOK_VERSION:-20270101}"
+WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
+WIREPROXY_AWG_REF="${WIREPROXY_AWG_REF:-master}"
 # The TUN driver sing-box loads on Windows for the whole-device mode; it
 # must sit next to sing-box.exe. Prebuilt by WireGuard, checked by hash.
 WINTUN_VERSION="${WINTUN_VERSION:-0.14.1}"
@@ -63,6 +70,33 @@ git clone -q --depth 1 --branch "v$USQUE_VERSION" https://github.com/Diniboy1123
 (cd "$tmp/usque" && GOTOOLCHAIN=auto GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w" -o "$out/core/usque.exe" .)
 cp "$tmp/usque/LICENSE.md" "$out/licenses/usque-LICENSE.txt"
 bash "$root/build/tor.sh" windows-x86_64 "$out/core" "$dl"
+# The sidecar helpers: one program per protocol, each a SOCKS5 proxy the
+# engine chains through sing-box (internal/core/build.go startSidecar).
+fetch "https://github.com/klzgrad/naiveproxy/releases/download/$NAIVE_VERSION/naiveproxy-$NAIVE_VERSION-win-x64.zip" "$dl/naive-$NAIVE_VERSION.zip"
+unzip -q -o "$dl/naive-$NAIVE_VERSION.zip" -d "$tmp/naive"
+cp "$(find "$tmp/naive" -iname 'naive.exe' | head -1)" "$out/core/naive.exe"
+cp "$(find "$tmp/naive" -iname 'LICENSE*' | head -1)" "$out/licenses/naiveproxy-LICENSE.txt"
+fetch "https://github.com/juicity/juicity/releases/download/v$JUICITY_VERSION/juicity-windows-x86_64.zip" "$dl/juicity-$JUICITY_VERSION.zip"
+unzip -q -o "$dl/juicity-$JUICITY_VERSION.zip" -d "$tmp/juicity"
+cp "$(find "$tmp/juicity" -iname 'juicity-client.exe' | head -1)" "$out/core/juicity-client.exe"
+cp "$(find "$tmp/juicity" -iname 'LICENSE*' | head -1)" "$out/licenses/juicity-LICENSE.txt" 2>/dev/null ||
+  printf 'Juicity (https://github.com/juicity/juicity) is under the GNU AGPL v3; its source is at that address.\n' > "$out/licenses/juicity-LICENSE.txt"
+fetch "https://github.com/enfein/mieru/releases/download/v$MIERU_VERSION/mieru_${MIERU_VERSION}_windows_amd64.zip" "$dl/mieru-$MIERU_VERSION.zip"
+unzip -q -o "$dl/mieru-$MIERU_VERSION.zip" -d "$tmp/mieru"
+cp "$(find "$tmp/mieru" -iname 'mieru.exe' | head -1)" "$out/core/mieru.exe"
+printf 'Mieru (https://github.com/enfein/mieru) is under the GNU GPL v3; its source is at that address.\n' > "$out/licenses/mieru-LICENSE.txt"
+fetch "https://github.com/txthinking/brook/releases/download/v$BROOK_VERSION/brook_windows_amd64.exe" "$dl/brook-$BROOK_VERSION.exe"
+cp "$dl/brook-$BROOK_VERSION.exe" "$out/core/brook.exe"
+printf 'Brook (https://github.com/txthinking/brook) is under the GNU GPL v3; its source is at that address.\n' > "$out/licenses/brook-LICENSE.txt"
+fetch "https://github.com/erebe/wstunnel/releases/download/v$WSTUNNEL_VERSION/wstunnel_${WSTUNNEL_VERSION}_windows_amd64.tar.gz" "$dl/wstunnel-$WSTUNNEL_VERSION.tgz"
+mkdir -p "$tmp/wst" && tar -xzf "$dl/wstunnel-$WSTUNNEL_VERSION.tgz" -C "$tmp/wst"
+cp "$(find "$tmp/wst" -iname 'wstunnel.exe' | head -1)" "$out/core/wstunnel.exe"
+printf 'WStunnel (https://github.com/erebe/wstunnel) is under the BSD 3-Clause license.\n' > "$out/licenses/wstunnel-LICENSE.txt"
+# AmneziaWG as a SOCKS5 proxy: wireproxy's AmneziaWG fork, built from its
+# source (it publishes no binaries).
+git clone -q --depth 1 --branch "$WIREPROXY_AWG_REF" https://github.com/artem-russkikh/wireproxy-awg "$tmp/wpawg"
+(cd "$tmp/wpawg" && GOTOOLCHAIN=auto GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w" -o "$out/core/wireproxy-awg.exe" .)
+cp "$tmp/wpawg/LICENSE" "$out/licenses/wireproxy-awg-LICENSE.txt"
 # The Snowflake proxy for "Help others" is its own module: its library
 # needs a newer Go than the app.
 (cd "$root/tools/snowflake" && GOTOOLCHAIN="${SNOWFLAKE_GO:-go1.26.10}" GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
@@ -79,6 +113,12 @@ Bundled components (see the licenses folder):
   warp-plus $WARPPLUS_VERSION   https://github.com/bepass-org/warp-plus (MIT)
   usque $USQUE_VERSION          https://github.com/Diniboy1123/usque (MIT)
   Wintun $WINTUN_VERSION           https://www.wintun.net (prebuilt binaries license; the TUN driver of the whole-device mode)
+  NaiveProxy $NAIVE_VERSION  https://github.com/klzgrad/naiveproxy (BSD-3-Clause)
+  Juicity $JUICITY_VERSION          https://github.com/juicity/juicity (AGPL-3.0; source at that address)
+  Mieru $MIERU_VERSION           https://github.com/enfein/mieru (GPL-3.0; source at that address)
+  Brook $BROOK_VERSION          https://github.com/txthinking/brook (GPL-3.0; source at that address)
+  WStunnel $WSTUNNEL_VERSION         https://github.com/erebe/wstunnel (BSD-3-Clause)
+  wireproxy-awg             https://github.com/artem-russkikh/wireproxy-awg (ISC; AmneziaWG as a SOCKS proxy)
   Tor Expert Bundle         https://www.torproject.org (BSD-3-Clause; transports under their own licenses)
   Snowflake proxy           https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/snowflake (BSD-3-Clause)
   Twemoji country flags     https://github.com/talkjs/country-flag-emoji-polyfill (CC-BY 4.0 graphics by Twitter)

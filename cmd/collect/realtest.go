@@ -53,7 +53,9 @@ func realTest(list []*entry, n int) (passed map[*entry]time.Duration, tested map
 		var nodes []*node.Node
 		for _, e := range es {
 			nd, err := node.ParseLink(e.link)
-			if err != nil || nd.Proto == "warpplus" {
+			if err != nil || nd.Proto == "warpplus" || nd.Engine() == node.EngineSidecar {
+				// Sidecar protocols need helpers the collector lacks:
+				// they stay untested rather than failing.
 				continue
 			}
 			byNode[nd] = e
