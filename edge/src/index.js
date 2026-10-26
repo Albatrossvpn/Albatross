@@ -5,7 +5,7 @@
 // only for DNS (port 53), answered over DNS over HTTPS. Anything that is
 // not a WebSocket upgrade gets an ordinary "not found" page.
 import { connect } from "cloudflare:sockets";
-import { decodeEarly, forbidden, parseHeader, relays } from "./vless.js";
+import { decodeEarly, forbidden, parseHeader, relayTarget, relays } from "./vless.js";
 
 export default {
   async fetch(request, env) {
@@ -67,8 +67,8 @@ async function relay(ws, early, uuidHex, relayList) {
 async function tcp(ws, reader, h, reply, relayList) {
   const targets = [{ hostname: h.host, port: h.port }];
   for (const r of relayList) {
-    const m = /^\[?([^\]]+)\]?(?::(\d+))?$/.exec(r);
-    if (m) targets.push({ hostname: m[1], port: m[2] ? Number(m[2]) : h.port });
+    const t = relayTarget(r, h.port);
+    if (t) targets.push(t);
   }
   let sock = null;
   let writer = null;

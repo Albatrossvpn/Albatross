@@ -302,6 +302,7 @@ func (e *Engine) Logout() {
 	}
 	e.Disconnect()
 	e.acct.Logout()
+	forgetListKeys()
 	e.updateBadge()
 }
 
