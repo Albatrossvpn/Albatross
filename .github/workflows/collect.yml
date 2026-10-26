@@ -5,10 +5,9 @@ name: Collect servers
 # instead of hundreds of sources (see cmd/collect).
 on:
   schedule:
-    # Every 5 minutes. A run takes longer than that, so the "due" job lets a
-    # scheduled run through only when no other run is collecting: the list
-    # is rebuilt back to back, as fresh as a full collection can be.
-    # GitHub may still delay or drop some of these; the next one fills in.
+    # A safety net: each run starts the next one itself (the last step),
+    # since GitHub delays and drops most of these scheduled runs. A run
+    # that fails before that step, or a stopped chain, is picked up here.
     - cron: "*/5 * * * *"
   # A change to the collector or its lists publishes at once instead of
   # waiting for the schedule, which GitHub may also delay or skip.
@@ -19,6 +18,8 @@ on:
 
 permissions:
   contents: write
+  # To start the next collection itself (the last step).
+  actions: write
 
 # One collection at a time; a newer one waits instead of overlapping.
 concurrency:
@@ -129,3 +130,13 @@ jobs:
           done
           bash deploy/files/publish-lists.sh "$account" servers "${files[@]}"
           bash deploy/files/publish-lists.sh "$account" tools "$RUNNER_TEMP"/tools/collect-linux-*
+      # The next collection, right away: the lists stay as fresh as one
+      # collection takes (about twenty minutes). GitHub lets a run start a
+      # workflow_dispatch with its own token. A private repository has
+      # 2,000 free minutes a month, which this would spend in days, so
+      # there the chain runs only when the variable COLLECT_CONTINUOUS is 1.
+      - name: Start the next collection
+        if: always() && (github.event.repository.private == false || vars.COLLECT_CONTINUOUS == '1')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run collect.yml --ref "${GITHUB_REF_NAME}" || echo "::warning::the next collection could not be started; the schedule will"
