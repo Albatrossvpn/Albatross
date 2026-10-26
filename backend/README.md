@@ -11,10 +11,11 @@ A Cloudflare Worker with a D1 database. It serves the account pages (user accoun
 
 ## What it does
 
-- **Users** have a username and a password (stored as a salted PBKDF2-SHA256 hash), a data allowance, a time allowance, a renewal period and an end date. Zero means no limit.
-- **The apps** sign in and then report bytes and seconds used every minute. The answer says whether the user may go on; the app disconnects when not.
+- **Users** have a username and a password (stored as a salted PBKDF2-SHA256 hash), a plan, a data allowance, a time allowance, a renewal period and an end date. Zero means no limit.
+- **Plans** say how many devices may be connected with one account at the same time: Bronze 1, Silver 2, Gold 4, VIP 8 (`TIERS` in `src/lib.js`). New accounts are Bronze unless the administrator picks another plan or changes the default for sign-ups.
+- **The apps** sign in and then report bytes and seconds used every minute. The answer says whether the user may go on; the app disconnects when not. Each copy names its device with a random number kept on the device (`X-Albatross-Device`) and a word for its kind (`X-Albatross-Device-Name`): a report holds one of the account's device slots for five minutes, and a report that finds the other slots taken is answered `devices`, so that copy disconnects while the others stay. Copies from before 1.0.1 send no device number and share one slot. The subscription for Apple devices (`/sub/<token>`) holds a slot for six hours after each fetch, since the service never hears from those devices while they are connected.
 - **The administrator** (`/admin`) creates users one by one or in bulk, changes limits, resets usage and passwords, turns accounts on and off, signs users out, searches, and sets the defaults for self-service sign-ups, the download links and whether sign-ups are open (closed by default).
-- **Users** (`/account`) see their usage, renewal and end dates, can change their password and find the download links.
+- **Users** (`/account`) see their plan, usage, renewal and end dates, the devices their account has been used on (and can remove one, which frees its slot at once), can change their password and find the download links. Changing the password, or the administrator signing the user out, forgets the devices.
 
 Only usernames and counters are stored. There is no email address. Failed sign-ins are counted per username and per one-way tag of the network address (no addresses), and dropped after a day. Sign-in is limited per address, where an IPv6 /64 counts as one address: 40 failures in 15 minutes, 8 for one username, and only 3 once that username has 8 failures from all addresses. A username with 100 failures from all addresses is closed for 15 minutes. Administrator sign-in is limited to 10 per address.
 

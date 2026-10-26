@@ -152,6 +152,12 @@ label.check { display: flex; align-items: center; gap: 10px; margin-bottom: 14px
 .pill { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 700; background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 .pill.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
 .pill.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+/* Plans */
+.pill.plan { color: #fff; margin-right: 6px; }
+.pill.plan.bronze { background: #a4683a; }
+.pill.plan.silver { background: #6f7a8a; }
+.pill.plan.gold { background: #b8860b; }
+.pill.plan.vip { background: #5b3fd6; }
 .meter { margin-top: 16px; }
 .meter .top { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 7px; color: var(--muted); }
 .meter .top b { color: var(--text); }

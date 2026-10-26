@@ -193,6 +193,10 @@ function renderAccount(a) {
   meter("acc-data", a.used_bytes, a.quota_bytes, fmtBytes);
   meter("acc-time", a.used_seconds, a.max_seconds, fmtTime);
   var dates = [];
+  if (a.max_devices) {
+    var plan = { bronze: "Bronze", silver: "Silver", gold: "Gold", vip: "VIP" }[a.tier] || a.tier || "";
+    dates.push((plan ? plan + " plan: " : "") + a.devices + " of " + a.max_devices + (a.max_devices === 1 ? " device" : " devices") + " connected");
+  }
   if (a.resets_at) dates.push("Renews " + fmtDate(a.resets_at));
   if (a.expires_at) dates.push("Expires " + fmtDate(a.expires_at));
   if (!a.quota_bytes && !a.max_seconds && !a.expires_at) dates.push("No limits on this account");
