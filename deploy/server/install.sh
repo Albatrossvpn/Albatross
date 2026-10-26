@@ -8,6 +8,11 @@
 # Optional environment:
 #   DOMAIN   a name pointing at this machine; default <ip>.sslip.io
 #   EMAIL    for Let's Encrypt; default none
+#   CDN_HOST a name proxied by Cloudflare (orange cloud) that points at
+#            this machine (.github/workflows/cloudflare-dns.yml makes it):
+#            the WebSocket, gRPC and HTTPUpgrade servers are then also
+#            offered through Cloudflare's edge, where this address never
+#            shows and blocking it changes nothing; remembered
 #   DRY_RUN  1 = only write the configs into $OUT (for tests)
 #
 # At the end it prints one share link per protocol and saves them in
@@ -54,6 +59,7 @@ REALITY_DEST="${REALITY_DEST:-www.microsoft.com}"
 # whose delegation the domestic resolvers keep answering in a shutdown);
 # the server answers all of them and prints one link per name.
 DNS_TUNNEL="${DNS_TUNNEL:-}"
+CDN_HOST="${CDN_HOST:-}"
 # MIRROR_PORT is where mirror mode serves; it is not among the relay's
 # forwarded ports, so both can run on one machine.
 MIRROR_PORT="${MIRROR_PORT:-8081}"
@@ -61,13 +67,13 @@ MIRROR_PORT="${MIRROR_PORT:-8081}"
 # Ports. Each protocol has its own so one being blocked leaves the rest.
 P_REALITY=443        # VLESS + Reality + Vision (TCP)
 P_XHTTP=8443         # VLESS + XHTTP + Reality (Xray, TCP)
-P_TROJAN=2053        # Trojan + TLS
+P_TROJAN=2098        # Trojan + TLS (TCP)
 P_WS=2083            # VLESS + WebSocket + TLS
 P_GRPC=2087          # VLESS + gRPC + TLS
 P_UPGRADE=2096       # VMess + HTTPUpgrade + TLS
 P_ANYTLS=8880        # AnyTLS
 P_OVPN=2082          # OpenVPN over TCP (a certificate per client, tls-crypt)
-P_TGO=2098           # Trojan + WebSocket + TLS (what Trojan-Go clients speak)
+P_TGO=2053           # Trojan + WebSocket + TLS (what Trojan-Go clients speak; a Cloudflare port)
 P_NAIVE=2052         # NaiveProxy: HTTP/2 CONNECT behind Caddy, looks like a web site
 P_MIERU=2086         # Mieru (TCP)
 P_BROOK=2095         # Brook over WebSocket + TLS
@@ -75,6 +81,7 @@ P_WST=2097           # WStunnel: SOCKS5 inside WebSocket + TLS
 P_OC=2099            # OpenConnect (AnyConnect), TCP and UDP; for other clients, see links-external.txt
 P_JUICITY=8446       # Juicity (QUIC, UDP)
 P_AWG=8447           # AmneziaWG (UDP)
+P_DECOY=18080        # loopback: the web page probes of the TLS ports get
 P_SS=8388            # Shadowsocks 2022 (TCP and UDP)
 P_STLS=8445          # Shadowsocks 2022 behind ShadowTLS v3 (TCP): a real TLS handshake with REALITY_DEST
 P_HY2=443            # Hysteria 2 + Salamander (UDP), hops over HOP_RANGE
@@ -125,6 +132,14 @@ public_ip() {
   curl -fsS4 --max-time 10 https://api.ipify.org || curl -fsS4 --max-time 10 https://ifconfig.me
 }
 
+# public_ip6 prints the machine's global IPv6 address, if it has one that
+# reaches the internet.
+public_ip6() {
+  local a
+  a="$(ip -6 addr show scope global 2>/dev/null | awk '/inet6/ && !/temporary|deprecated/ {sub("/.*", "", $2); print $2; exit}')"
+  [ -n "$a" ] && curl -fsS6 --max-time 8 https://api64.ipify.org >/dev/null 2>&1 && echo "$a" || true
+}
+
 # Secrets are made once and kept, so running the script again (to update
 # the cores) keeps every link working.
 secrets() {
@@ -153,6 +168,9 @@ secrets() {
   if [ -n "$DNS_TUNNEL" ]; then
     sed -i '/^DNS_TUNNEL=/d' "$f" && echo "DNS_TUNNEL=$DNS_TUNNEL" >>"$f"
   fi
+  if [ -n "$CDN_HOST" ]; then
+    sed -i '/^CDN_HOST=/d' "$f" && echo "CDN_HOST=$CDN_HOST" >>"$f"
+  fi
   # Servers set up before the ICMP carrier get its seed added.
   grep -q "^KCP_SEED=" "$f" || echo "KCP_SEED=$("$SB" generate rand --hex 8)" >>"$f"
   grep -q "^STLS_PASS=" "$f" || echo "STLS_PASS=$("$SB" generate rand --hex 16)" >>"$f"
@@ -172,10 +190,16 @@ certificate() {
   fi
   # A real certificate, so the app checks it like any HTTPS site: no
   # "insecure" links that anyone in the middle could impersonate.
-  local args=(certonly --standalone --non-interactive --agree-tos -d "$DOMAIN" --keep-until-expiring)
+  local args=(certonly --standalone --non-interactive --agree-tos --cert-name "$DOMAIN" -d "$DOMAIN" --keep-until-expiring)
+  # The CDN name goes on the same certificate: Cloudflare checks it
+  # against the name it connects for.
+  [ -z "$CDN_HOST" ] || args+=(-d "$CDN_HOST" --expand)
   if [ -n "${EMAIL:-}" ]; then args+=(-m "$EMAIL"); else args+=(--register-unsafely-without-email); fi
   iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+  # On a rerun the HTTP inbound holds port 80, which the validation needs.
+  systemctl stop albatross-sing-box 2>/dev/null || true
   certbot "${args[@]}"
+  systemctl start albatross-sing-box 2>/dev/null || true
   ln -sf "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" "$CERT"
   ln -sf "/etc/letsencrypt/live/$DOMAIN/privkey.pem" "$KEY"
   mkdir -p /etc/letsencrypt/renewal-hooks/deploy
@@ -200,7 +224,8 @@ singbox_config() {
              "reality": {"enabled": true, "handshake": {"server": "$REALITY_DEST", "server_port": 443},
                          "private_key": "$REALITY_PRIVATE", "short_id": ["$SHORT_ID"]}}},
     {"type": "trojan", "tag": "trojan", "listen": "::", "listen_port": $P_TROJAN,
-     "users": [{"password": "$PASS"}], $tls},
+     "users": [{"password": "$PASS"}], $tls,
+     "fallback": {"server": "127.0.0.1", "server_port": $P_DECOY}},
     {"type": "trojan", "tag": "trojan-ws", "listen": "::", "listen_port": $P_TGO,
      "users": [{"password": "$PASS"}], $tls,
      "transport": {"type": "ws", "path": "$WS_PATH"}},
@@ -371,6 +396,16 @@ firewall() {
   # The ICMP carrier: echo requests must get in (the cloud's security
   # list too).
   iptables -C INPUT -p icmp --icmp-type echo-request -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp --icmp-type echo-request -j ACCEPT
+  # The same ports over IPv6, where the machine has an address.
+  if command -v ip6tables >/dev/null; then
+    for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_OVPN $P_TGO $P_NAIVE $P_MIERU $P_BROOK $P_WST $P_OC 22 80; do
+      ip6tables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p tcp --dport "$p" -j ACCEPT
+    done
+    for p in $P_SS $P_HY2 $P_TUIC $P_JUICITY $P_AWG $P_OC; do
+      ip6tables -C INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p udp --dport "$p" -j ACCEPT
+    done
+    ip6tables -C INPUT -p ipv6-icmp -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p ipv6-icmp -j ACCEPT
+  fi
   netfilter-persistent save >/dev/null 2>&1 || true
   # Faster on lossy, long routes such as Iran to Europe.
   cat >/etc/sysctl.d/90-albatross.conf <<EOF
@@ -504,8 +539,71 @@ tuic://$UUID:$PASS@$DOMAIN:$P_TUIC?sni=$DOMAIN&alpn=h3&congestion_control=bbr#$n
 $([ "$DRY_RUN" = 1 ] || printf 'ssh://tunnel:%s@%s:22?hk=%s#%s-SSH\n' "$SSH_PASS" "$h" "$(urlenc "$(ssh_hostkey)")" "$n")
 $(ovpn_link "$h")
 trojan-go://$PASS@$DOMAIN:$P_TGO?security=tls&sni=$DOMAIN&type=ws&host=$DOMAIN&path=$(urlenc "$WS_PATH")#$n-TrojanGo
+$(cdn_links)
 $(sidecar_links "$h")
+$(v6_links)
 EOF
+}
+
+# decoy_setup serves a plain web page on the loopback: what a probe of
+# the Trojan port gets instead of a closed connection (sing-box's
+# fallback), and what NaiveProxy's Caddy shows to a browser. A proxy
+# server that answers like a web site is one marker fewer for scanners.
+decoy_setup() {
+  mkdir -p /var/www/albatross-decoy
+  [ -s /var/www/albatross-decoy/index.html ] || cat >/var/www/albatross-decoy/index.html <<'EOF'
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Welcome</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:system-ui,sans-serif;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#f6f7f9;color:#222}main{text-align:center;padding:2rem}h1{font-weight:600}p{color:#666}</style>
+</head><body><main><h1>Welcome</h1><p>This site is being set up. Please check back later.</p></main></body></html>
+EOF
+  cat >/etc/systemd/system/albatross-decoy.service <<EOF
+[Unit]
+Description=Albatross server (decoy web page)
+After=network-online.target
+[Service]
+ExecStart=/usr/bin/python3 -m http.server $P_DECOY --bind 127.0.0.1 --directory /var/www/albatross-decoy
+Restart=always
+RestartSec=3
+DynamicUser=yes
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable --now albatross-decoy >/dev/null 2>&1
+  systemctl restart albatross-decoy
+}
+
+# v6_links prints, when the machine has a public IPv6 address, the server
+# at that address too (the TLS protocols keep the name as SNI): a second
+# address, which the filtering lists separately and which the mobile
+# networks here reach.
+v6_links() {
+  [ -n "$IP6" ] || return 0
+  local h="[$IP6]" n="Albatross-v6"
+  echo "vless://$UUID@$h:$P_REALITY?security=reality&sni=$REALITY_DEST&fp=chrome&pbk=$REALITY_PUBLIC&sid=$SHORT_ID&flow=xtls-rprx-vision&type=tcp#$n-Reality"
+  echo "trojan://$PASS@$h:$P_TROJAN?security=tls&sni=$DOMAIN&fp=chrome&type=tcp#$n-Trojan"
+  echo "hysteria2://$PASS@$h:$P_HY2?sni=$DOMAIN&obfs=salamander&obfs-password=$OBFS#$n-Hysteria2"
+  echo "ss://$(printf '%s' "2022-blake3-aes-256-gcm:$SS_KEY" | base64 -w0 | tr '+/' '-_' | tr -d '=')@$h:$P_SS#$n-SS2022"
+  vmess_link "$IP6" "$P_HTTP" "" "$n-HTTP80"
+  [ "$DRY_RUN" = 1 ] || printf 'ssh://tunnel:%s@%s:22?hk=%s#%s-SSH\n' "$SSH_PASS" "$h" "$(urlenc "$(ssh_hostkey)")" "$n"
+  [ "$SIDECARS" = 1 ] && echo "mieru://albatross:$PASS@$h:$P_MIERU?protocol=tcp&mtu=1400#$n-Mieru"
+  awg_link "$h"
+}
+
+# cdn_links prints, when CDN_HOST is set, the links that go through
+# Cloudflare's edge: the same WebSocket, gRPC and HTTPUpgrade servers,
+# reached at the CDN's addresses (the app picks edge addresses that
+# answer from inside the country), so this machine's own address is
+# never in the connection and blocking it changes nothing for them.
+cdn_links() {
+  [ -n "$CDN_HOST" ] || return 0
+  local c="$CDN_HOST" n="Albatross-CDN"
+  echo "vless://$UUID@$c:$P_WS?security=tls&sni=$c&fp=chrome&type=ws&host=$c&path=$(urlenc "$WS_PATH")#$n-WS"
+  echo "vless://$UUID@$c:$P_GRPC?security=tls&sni=$c&fp=chrome&type=grpc&serviceName=$GRPC_NAME#$n-gRPC"
+  vmess_link "$c" "$P_UPGRADE" tls "$n-HTTPUpgrade"
+  echo "trojan://$PASS@$c:$P_TGO?security=tls&sni=$c&fp=chrome&type=ws&host=$c&path=$(urlenc "$WS_PATH")#$n-TrojanWS"
 }
 
 # sidecar_links prints the links of the sidecar protocols that are set up.
@@ -531,13 +629,18 @@ sidecar_setup() {
     curl -fsSL -o "$tmp/go.tgz" "https://go.dev/dl/go$GO_VERSION.linux-$a.tar.gz"
     rm -rf /usr/local/go && tar -C /usr/local -xzf "$tmp/go.tgz"
   fi
-  export PATH="/usr/local/go/bin:/root/go/bin:$PATH" GOFLAGS=-buildvcs=false GOTOOLCHAIN=auto
+  # The builds below (Caddy, AmneziaWG) need more memory than a small
+  # machine has: a swap file, and one compile at a time.
+  if [ ! -e /swapfile ] && [ "$(swapon --noheadings --show 2>/dev/null | wc -l)" = 0 ]; then
+    fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile &&
+      grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >>/etc/fstab
+  fi
+  export PATH="/usr/local/go/bin:/root/go/bin:$PATH" GOFLAGS="-buildvcs=false -p=1" GOTOOLCHAIN=auto GOGC=40
   # NaiveProxy's server is Caddy with klzgrad's forward proxy.
   if [ ! -x /usr/local/bin/caddy-naive ]; then
     go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest >/dev/null
     xcaddy build --with github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@naive --output /usr/local/bin/caddy-naive >/dev/null
   fi
-  mkdir -p /var/www/albatross-naive
   cat >"$OUT/Caddyfile" <<EOF
 {
   order forward_proxy before file_server
@@ -553,7 +656,7 @@ sidecar_setup() {
     probe_resistance
   }
   file_server {
-    root /var/www/albatross-naive
+    root /var/www/albatross-decoy
   }
 }
 EOF
@@ -1073,8 +1176,9 @@ main() {
     install_cores
   fi
   IP="${IP:-$(public_ip)}"
+  IP6="${IP6:-$(public_ip6)}"
   DOMAIN="${DOMAIN:-${IP//./-}.sslip.io}"
-  log "Server address: $IP ($DOMAIN)"
+  log "Server address: $IP ($DOMAIN)${IP6:+, IPv6 $IP6}${CDN_HOST:+, through Cloudflare as $CDN_HOST}"
   secrets
   certificate
   singbox_config
@@ -1085,6 +1189,7 @@ main() {
     free_port53
     openvpn_setup
     ssh_setup
+    decoy_setup
     if [ "$SIDECARS" = 1 ]; then
       log "Installing the sidecar protocols (NaiveProxy, Juicity, Mieru, Brook, WStunnel, AmneziaWG, OpenConnect)"
       sidecar_setup
