@@ -46,6 +46,9 @@ const (
 	directWait = 20 * time.Second
 	// How long connecting tries servers to recheck an account at its limit.
 	limitSync = 25 * time.Second
+	// How long a call goes through servers alone before a direct call is
+	// made as well.
+	directAfter = 5 * time.Second
 )
 
 // AccountState is the signed-in user's account as the UI shows it.
@@ -135,10 +138,12 @@ func (e *Engine) Login(username, password string) error {
 }
 
 // tunnelFirst runs call through the VPN, or while it is down through
-// working servers for up to wait, and only then directly: a direct call
-// shows the network that this device talks to the service (ECH hides the
-// name where it works, see ech.go). The service is also filtered in many
-// places.
+// working servers for up to wait and, from directAfter on or as soon as
+// the servers fail, directly as well: the first to get through wins. A
+// direct call shows the network that this device talks to the service
+// (ECH hides the name where it works, see ech.go), which is why the
+// servers get a head start; but the service is filtered in many places,
+// and signing in has to work on every network (reach.go).
 func (e *Engine) tunnelFirst(ctx context.Context, wait time.Duration, call func(context.Context) error) error {
 	if e.proxyClient() != nil {
 		return call(ctx)
@@ -151,13 +156,50 @@ func (e *Engine) tunnelFirst(ctx context.Context, wait time.Duration, call func(
 			}
 		}
 	}
-	vctx, cancel := context.WithTimeout(ctx, wait)
-	err := e.viaServer(vctx, call)
-	cancel()
-	if !errors.Is(err, account.ErrUnreachable) && !errors.Is(err, context.DeadlineExceeded) && !account.Busy(err) {
-		return err
+	unreachable := func(err error) bool {
+		return errors.Is(err, account.ErrUnreachable) || errors.Is(err, context.DeadlineExceeded) || account.Busy(err)
 	}
-	return call(account.WithClient(ctx, e.privateDirect))
+	vctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	done := make(chan error, 2)
+	go func() { done <- e.viaServer(vctx, call) }()
+	direct := false
+	startDirect := func() {
+		if direct {
+			return
+		}
+		direct = true
+		if e.cf != nil && len(e.cf.Best()) == 0 && e.cf.Age() > 10*time.Minute {
+			// Edge addresses the network lets through, for the direct
+			// call's later tries.
+			go e.cf.Scan(ctx, 60, 4)
+		}
+		go func() { done <- call(account.WithClient(ctx, e.privateDirect)) }()
+	}
+	delay := time.NewTimer(directAfter)
+	defer delay.Stop()
+	var last error
+	for pending := 1; pending > 0; {
+		select {
+		case <-delay.C:
+			if !direct {
+				startDirect()
+				pending++
+			}
+		case err := <-done:
+			pending--
+			if !unreachable(err) {
+				cancel()
+				return err
+			}
+			last = err
+			if !direct {
+				startDirect()
+				pending++
+			}
+		}
+	}
+	return last
 }
 
 // viaServer runs call through working servers, one after another, until

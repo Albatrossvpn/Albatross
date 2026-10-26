@@ -118,20 +118,21 @@ export function rollPeriod(user, now) {
 
 /**
  * The plans an account can be on, and how many devices each may have
- * connected at the same time. An account's plan is its `tier` column.
+ * connected at the same time (0: as many as they like). An account's plan
+ * is its `tier` column.
  */
 export const TIERS = {
   bronze: { name: "Bronze", devices: 1 },
   silver: { name: "Silver", devices: 2 },
   gold: { name: "Gold", devices: 4 },
-  vip: { name: "VIP", devices: 8 },
+  vip: { name: "VIP", devices: 0 },
 };
 export const DEFAULT_TIER = "bronze";
 
 /** The plan a stored tier names; an unknown one is the default plan. */
 export const tierOf = (tier) => (Object.hasOwn(TIERS, tier) ? tier : DEFAULT_TIER);
 
-/** How many devices an account may have connected at once. */
+/** How many devices an account may have connected at once; 0 means no limit. */
 export const maxDevices = (user) => TIERS[tierOf(user.tier)].devices;
 
 // A device holds one of its account's slots for this long after its last
@@ -156,9 +157,9 @@ export function accountOf(user, now, { others = -1, active = -1 } = {}) {
   else if (user.expires_at > 0 && now >= user.expires_at) reason = "expired";
   else if (user.quota_bytes > 0 && p.used_bytes >= user.quota_bytes) reason = "quota";
   else if (user.max_seconds > 0 && p.used_seconds >= user.max_seconds) reason = "time";
-  else if (others >= limit) reason = "devices";
+  else if (limit > 0 && others >= limit) reason = "devices";
   let devices = Math.max(active, 0);
-  if (others >= 0) devices = Math.min(others + (reason === "" ? 1 : 0), limit);
+  if (others >= 0) devices = limit > 0 ? Math.min(others + (reason === "" ? 1 : 0), limit) : others + 1;
   return {
     username: user.username,
     allowed: reason === "",

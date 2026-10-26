@@ -209,7 +209,15 @@ func New(opt Options) (*Engine, error) {
 		MaxIdleConnsPerHost: 4,
 		IdleConnTimeout:     30 * time.Second,
 	}}
-	e.privateDirect, e.warmPrivate = newPrivateDirect(direct)
+	e.privateDirect, e.warmPrivate = newPrivateDirect(direct, newReachStore(e.dir, func() []string {
+		var out []string
+		if e.cf != nil {
+			for _, c := range e.cf.Best() {
+				out = append(out, c.IP)
+			}
+		}
+		return out
+	}))
 	e.fetcher = &sources.Fetcher{Direct: direct, Proxy: e.proxyClient, Private: e.privateDirect, CacheDir: filepath.Join(e.dir, "cache")}
 	if urls := accountURLs(opt); len(urls) > 0 {
 		e.acct = account.New(urls, account.SessionPath(e.dir), e.accountHTTP)

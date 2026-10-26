@@ -81,11 +81,11 @@ const statusPill = (u) =>
 
 let tiers = {};
 const planName = (tier) => (tiers[tier] ? tiers[tier].name : tier);
-const planCell = (u) => `${planBadge(u.tier, planName(u.tier))}<div class="muted small">${u.devices} of ${u.max_devices} ${u.max_devices === 1 ? "device" : "devices"}</div>`;
+const planCell = (u) => `${planBadge(u.tier, planName(u.tier))}<div class="muted small">${u.max_devices ? `${u.devices} of ${u.max_devices}` : u.devices} ${u.devices === 1 && !u.max_devices ? "device" : "devices"}</div>`;
 
 /** Fills every plan selector from the service's list of plans. */
 function fillPlans() {
-  const opts = Object.entries(tiers).map(([k, t]) => `<option value="${esc(k)}">${esc(t.name)} · ${t.devices} ${t.devices === 1 ? "device" : "devices"}</option>`).join("");
+  const opts = Object.entries(tiers).map(([k, t]) => `<option value="${esc(k)}">${esc(t.name)} · ${t.devices ? `${t.devices} ${t.devices === 1 ? "device" : "devices"}` : "any number of devices"}</option>`).join("");
   for (const id of ["u-tier", "b-tier", "t-tier"]) $("#" + id).innerHTML = opts;
 }
 
