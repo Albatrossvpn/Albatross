@@ -173,16 +173,16 @@ func Central(install uint32) []Source {
 		// own-0.bin holds the relays inside the country (deploy/server
 		// relay mode), which every install must know: in a shutdown they
 		// are the only way out.
-		add("own-0.bin", TierPriority)
-		out[len(out)-1].Sealed, out[len(out)-1].Relay = true, true
+		add("own-0.bin"+KeyedSuffix, TierPriority)
+		out[len(out)-1].Sealed, out[len(out)-1].Keyed, out[len(out)-1].Relay = true, true, true
 		// Each install reads two of the OwnBuckets parts of the project's
 		// own servers, so whoever unpacks one app learns only those, and
 		// which part gets blocked shows which part leaked.
 		a := install % OwnBuckets
 		b := (a + 1 + (install/OwnBuckets)%(OwnBuckets-1)) % OwnBuckets
 		for _, k := range []uint32{a, b} {
-			add(fmt.Sprintf("own-%d.bin", k+1), TierPriority)
-			out[len(out)-1].Sealed = true
+			add(fmt.Sprintf("own-%d.bin", k+1)+KeyedSuffix, TierPriority)
+			out[len(out)-1].Sealed, out[len(out)-1].Keyed = true, true
 		}
 	}
 	// hot.txt is the few hundred servers that passed the collector's real

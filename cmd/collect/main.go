@@ -476,14 +476,29 @@ func main() {
 		// own-0.bin: the relays inside the country (OWN_RELAYS, one link
 		// per line), unsharded, so every install knows them. Written even
 		// when empty, so the fetch never fails.
+		// An own list goes out sealed with the build key and, on top, with
+		// this run's list key, so only a signed-in app opens it; the plain
+		// build-key copy stays for the apps from before the list keys.
+		writeOwn := func(name, text string) {
+			sealed, err := sources.Seal(k, text)
+			if err != nil {
+				log.Fatal(err)
+			}
+			if *plain {
+				if err := os.WriteFile(filepath.Join(*out, name), sealed, 0o644); err != nil {
+					log.Fatal(err)
+				}
+			}
+			keyed, err := sources.SealKeyed(listKey, string(sealed))
+			if err != nil {
+				log.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(*out, name+sources.KeyedSuffix), keyed, 0o644); err != nil {
+				log.Fatal(err)
+			}
+		}
 		relays := strings.Fields(os.Getenv("OWN_RELAYS"))
-		sealed, err := sources.Seal(k, strings.Join(relays, "\n")+"\n")
-		if err != nil {
-			log.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(*out, "own-0.bin"), sealed, 0o644); err != nil {
-			log.Fatal(err)
-		}
+		writeOwn("own-0.bin", strings.Join(relays, "\n")+"\n")
 		m.Files["own-0.bin"] = len(relays)
 		// Split into sources.OwnBuckets parts; each app reads two. With
 		// fewer servers than parts, each part gets one of them.
@@ -498,14 +513,8 @@ func main() {
 			if len(part) == 0 {
 				part = []string{links[b%len(links)]}
 			}
-			sealed, err := sources.Seal(k, strings.Join(part, "\n")+"\n")
-			if err != nil {
-				log.Fatal(err)
-			}
 			name := fmt.Sprintf("own-%d.bin", b+1)
-			if err := os.WriteFile(filepath.Join(*out, name), sealed, 0o644); err != nil {
-				log.Fatal(err)
-			}
+			writeOwn(name, strings.Join(part, "\n")+"\n")
 			m.Files[name] = len(part)
 		}
 	}

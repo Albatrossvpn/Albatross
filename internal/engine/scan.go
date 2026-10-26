@@ -341,13 +341,15 @@ var parseSlots = make(chan struct{}, 2)
 
 // ingest parses a source body and adds its nodes to the pool.
 func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint64][2]uint32) int {
-	if s.Sealed {
-		text = sources.Open(text)
-	}
+	// A keyed list opens with the list key first; an own list is then
+	// still sealed with the build key.
 	if s.Keyed {
 		if text = e.openKeyed(text); text == "" {
 			return 0
 		}
+	}
+	if s.Sealed {
+		text = sources.Open(text)
 	}
 	if s.Hot && states == nil {
 		// The mark means "in the current hot list", not last week's.
