@@ -98,9 +98,13 @@ type Engine struct {
 	// (see distrust).
 	httpsOK time.Time
 	fetcher *sources.Fetcher
-	// privateDirect makes direct calls to the account service (ech.go).
+	// privateDirect makes direct calls to the account service (ech.go);
+	// reach knows the ways to it (reach.go), reachAt when its hints from
+	// the collector were last fetched.
 	privateDirect *http.Client
 	warmPrivate   func(host string)
+	reach         *reachStore
+	reachAt       time.Time
 	tester        *tester.Tester
 	resolver      *antiblock.Resolver
 	cf            *antiblock.Scanner
@@ -211,7 +215,7 @@ func New(opt Options) (*Engine, error) {
 		MaxIdleConnsPerHost: 4,
 		IdleConnTimeout:     30 * time.Second,
 	}}
-	e.privateDirect, e.warmPrivate = newPrivateDirect(direct, newReachStore(e.dir, func() []string {
+	e.reach = newReachStore(e.dir, func() []string {
 		var out []string
 		if e.cf != nil {
 			for _, c := range e.cf.Best() {
@@ -219,7 +223,8 @@ func New(opt Options) (*Engine, error) {
 			}
 		}
 		return out
-	}))
+	})
+	e.privateDirect, e.warmPrivate = newPrivateDirect(direct, e.reach)
 	e.fetcher = &sources.Fetcher{Direct: direct, Proxy: e.proxyClient, Private: e.privateDirect, CacheDir: filepath.Join(e.dir, "cache")}
 	if urls := accountURLs(opt); len(urls) > 0 {
 		e.acct = account.New(urls, account.SessionPath(e.dir), e.accountHTTP)
@@ -250,6 +255,7 @@ func New(opt Options) (*Engine, error) {
 func (e *Engine) Start() {
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	e.updateBadge()
+	go e.refreshReach(e.ctx)
 	// A crash left the system pointing at our dead proxy: at today's port,
 	// or at the one in use then, which an automatic port change (another
 	// program took the port) may have made different.

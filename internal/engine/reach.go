@@ -31,12 +31,32 @@ type ways struct {
 	At   int64  `json:"at"`
 }
 
-// reachStore remembers how each name was reached, in dir/reach.json.
+// reachStore remembers how each name was reached, in dir/reach.json, and
+// holds the edge addresses the collector found open from inside the
+// country (its reach.json, see setHints).
 type reachStore struct {
 	path  string
 	clean func() []string // edge addresses the network lets through, best first
 	mu    sync.Mutex
 	known map[string]ways
+	hints []string
+}
+
+// setHints takes the edge addresses the collector found open from inside
+// the country; they are tried before the local scan's.
+func (s *reachStore) setHints(ips []string) {
+	if s == nil {
+		return
+	}
+	var ok []string
+	for _, ip := range ips {
+		if a, err := netip.ParseAddr(ip); err == nil && !bogus(a) {
+			ok = append(ok, ip)
+		}
+	}
+	s.mu.Lock()
+	s.hints = ok
+	s.mu.Unlock()
 }
 
 func newReachStore(dir string, clean func() []string) *reachStore {
@@ -152,11 +172,21 @@ func (s *reachStore) tries(host string, rec httpsRecord, ask func() []string) []
 		}
 	}
 	var clean []string
-	if s != nil && s.clean != nil {
-		clean = s.clean()
+	if s != nil {
+		s.mu.Lock()
+		hints := append([]string(nil), s.hints...)
+		s.mu.Unlock()
+		rand.Shuffle(len(hints), func(i, j int) { hints[i], hints[j] = hints[j], hints[i] })
+		if len(hints) > 3 {
+			hints = hints[:3]
+		}
+		clean = append(clean, hints...)
+		if s.clean != nil {
+			clean = append(clean, s.clean()...)
+		}
 	}
-	if len(clean) > 3 {
-		clean = clean[:3]
+	if len(clean) > 5 {
+		clean = clean[:5]
 	}
 	known := append([]string(nil), edgeAddrs...)
 	rand.Shuffle(len(known), func(i, j int) { known[i], known[j] = known[j], known[i] })

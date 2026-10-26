@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Albatrossvpn/vp/internal/account"
 	"github.com/Albatrossvpn/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // AccountURL is the account service, set at build time with
@@ -206,6 +208,7 @@ func (e *Engine) tunnelFirst(ctx context.Context, wait time.Duration, call func(
 			// call's later tries.
 			go e.cf.Scan(ctx, 60, 4)
 		}
+		go e.refreshReach(ctx)
 		e.setStepIf(stepFinding, stepDirect)
 		go func() { done <- call(account.WithClient(ctx, e.privateDirect)) }()
 	}
@@ -478,5 +481,43 @@ func (e *Engine) applyGrace(shut bool) {
 		e.logf("info", "The account service cannot be reached from this network; the account stays usable for 14 days.")
 	} else {
 		e.acct.SetGrace(account.Grace)
+	}
+}
+
+// reachSource is the collector's list of Cloudflare edge addresses that
+// answer from inside the country (cmd/collect, reach.json), served from
+// GitHub's CDN and the list mirrors like every other list.
+var reachSource = sources.Source{ID: "__reach__", Kind: sources.KindSubscription, URL: sources.CentralBase + "reach.json"}
+
+// reachEvery is how often the hints are fetched again.
+const reachEvery = 3 * time.Hour
+
+// refreshReach gives the reach store the collector's hints, from the
+// cache when they are recent, else fetched; it never waits long.
+func (e *Engine) refreshReach(ctx context.Context) {
+	if e.reach == nil || e.fetcher == nil {
+		return
+	}
+	e.mu.Lock()
+	recent := time.Since(e.reachAt) < reachEvery
+	e.reachAt = time.Now()
+	e.mu.Unlock()
+	apply := func(text string) bool {
+		var f struct {
+			Cloudflare []string `json:"cloudflare"`
+		}
+		if json.Unmarshal([]byte(text), &f) != nil || len(f.Cloudflare) == 0 {
+			return false
+		}
+		e.reach.setHints(f.Cloudflare)
+		return true
+	}
+	if b, ok := e.fetcher.Cached(reachSource); ok && apply(string(b)) && (recent || time.Since(e.fetcher.CachedAt(reachSource)) < reachEvery) {
+		return
+	}
+	fctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if res := e.fetcher.Fetch(fctx, reachSource); res.Err == nil && res.Text != "" {
+		apply(res.Text)
 	}
 }

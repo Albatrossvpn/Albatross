@@ -181,9 +181,9 @@ func TestCheckIranUsesItsCache(t *testing.T) {
 	a := &entry{link: "vless://a@a:1#A", endpoint: "a:1"}
 	bb := &entry{link: "vless://b@b:1#B", endpoint: "b:1"}
 	c := &entry{link: "hysteria2://c@c:1#C"} // no TCP endpoint: never checked, kept
-	// Nothing left to ask: an empty quota keeps the probes out of the test.
-	t.Setenv("GLOBALPING_TAGS", "")
-	t.Setenv("GLOBALPING_TOKEN", "")
+	// Nothing left to ask, and no edge addresses either: no probe is used.
+	defer func(n int) { edgeChecks = n }(edgeChecks)
+	edgeChecks = 0
 	kept, checked, open := checkIran([]*entry{a, bb, c}, dir, dir)
 	if got := links(kept); len(got) != 2 || got[0] != bb.link || got[1] != c.link {
 		t.Fatalf("kept %v", got)
