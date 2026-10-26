@@ -487,7 +487,7 @@ async function subInfo(request, env, url) {
     url: `${url.origin}/sub/${await subToken(env, user, t)}`,
     countries: countriesOf(entries),
     servers: entries.length,
-    edge: edgeFor(env, a).length,
+    edge: (await edgeFor(env, a)).length,
     brand: env.SITE_NAME || "Albatross",
   });
 }
@@ -508,8 +508,8 @@ async function subscription(request, url, env) {
   if (!a.allowed) return new Response("This account cannot connect right now (" + a.reason + ").", { status: 403 });
   const choice = String(url.searchParams.get("c") || "").toUpperCase().replace("EDGE", "edge");
   if (choice && choice !== "edge" && !/^[A-Z]{2}$/.test(choice)) return new Response("Not found", { status: 404 });
-  const [entries, updated] = await Promise.all([subPool(env), listUpdated(env)]);
-  const sub = buildSub(entries, choice, env.SITE_NAME || "Albatross", edgeFor(env, a), updated);
+  const [entries, updated, edge] = await Promise.all([subPool(env), listUpdated(env), edgeFor(env, a)]);
+  const sub = buildSub(entries, choice, env.SITE_NAME || "Albatross", edge, updated);
   const h = subHeaders(sub.title, a);
   return new Response(request.method === "HEAD" ? null : sub.body, { status: 200, headers: h });
 }

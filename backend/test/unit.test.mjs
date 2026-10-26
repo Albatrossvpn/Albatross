@@ -118,6 +118,11 @@ test("edge links name the edge on Cloudflare's TLS ports, or none without an edg
     assert.equal(u.searchParams.get("path"), "/0f1e2d3c4b5a?ed=2560");
   }
   assert.deepEqual(new Set(links.map((l) => new URL(l).port)), new Set(["443", "2053", "8443"]));
+  const byAddr = edgeLinks("edge.example.org", uuid, ["104.16.1.2", "not an address", "188.114.96.3"]);
+  assert.equal(byAddr.length, 5, "one more link per clean address");
+  assert.equal(new URL(byAddr[3]).hostname, "104.16.1.2");
+  assert.equal(new URL(byAddr[3]).searchParams.get("sni"), "edge.example.org");
+  assert.equal(new URL(byAddr[4]).hostname, "188.114.96.3");
   assert.deepEqual(edgeLinks("", uuid), []);
   assert.deepEqual(edgeLinks("edge.example.org", ""), []);
   assert.deepEqual(edgeLinks("edge.example.org", "not-a-uuid"), []);
