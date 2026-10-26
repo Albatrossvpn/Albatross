@@ -209,7 +209,26 @@ export async function subPool(env) {
   return pool(hot, await listFile(env, "fresh.txt"));
 }
 
-/** The edge's links for an account that may connect. */
-export const edgeFor = (env, account) => (account.allowed ? edgeLinks(env.EDGE_HOST, env.EDGE_UUID) : []);
+// How many clean Cloudflare addresses a subscription carries the edge on.
+const EDGE_ADDRS = 3;
+
+/** Clean Cloudflare addresses found open from inside the country (reach.json), a sample of n. */
+export async function cleanEdges(env, n = EDGE_ADDRS, pick = Math.random) {
+  try {
+    const r = JSON.parse((await listFile(env, "reach.json")) || "{}");
+    const all = Array.isArray(r.cloudflare) ? r.cloudflare.filter((a) => typeof a === "string" && /^[0-9.]+$/.test(a)) : [];
+    const out = [];
+    while (out.length < n && all.length > 0) out.push(all.splice(Math.floor(pick() * all.length) % all.length, 1)[0]);
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/** The edge's links for an account that may connect, by name and by clean addresses. */
+export async function edgeFor(env, account) {
+  if (!account.allowed) return [];
+  return edgeLinks(env.EDGE_HOST, env.EDGE_UUID, await cleanEdges(env));
+}
 
 export { accountOf };
