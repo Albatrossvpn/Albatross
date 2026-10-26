@@ -8,6 +8,10 @@ SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
 XRAY_VERSION="${XRAY_VERSION:-26.10.21}"
 WARPPLUS_VERSION="${WARPPLUS_VERSION:-1.2.6}"
 USQUE_VERSION="${USQUE_VERSION:-4.2.1}"
+# The TUN driver sing-box loads on Windows for the whole-device mode; it
+# must sit next to sing-box.exe. Prebuilt by WireGuard, checked by hash.
+WINTUN_VERSION="${WINTUN_VERSION:-0.14.1}"
+WINTUN_SHA256="07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51"
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -40,6 +44,13 @@ unzip -q -o "$dl/sing-box-$SINGBOX_VERSION.zip" -d "$tmp/sb"
 cp "$tmp"/sb/*/sing-box.exe "$out/core/"
 cp "$tmp"/sb/*/libcronet.dll "$out/core/" 2>/dev/null || true
 cp "$tmp"/sb/*/LICENSE "$out/licenses/sing-box-LICENSE.txt"
+# Without wintun.dll beside it, sing-box cannot make the tunnel of the
+# whole-device mode (run as administrator), and that mode fails outright.
+fetch "https://www.wintun.net/builds/wintun-$WINTUN_VERSION.zip" "$dl/wintun-$WINTUN_VERSION.zip"
+echo "$WINTUN_SHA256  $dl/wintun-$WINTUN_VERSION.zip" | sha256sum -c - >/dev/null
+unzip -q -o "$dl/wintun-$WINTUN_VERSION.zip" -d "$tmp/wintun"
+cp "$tmp/wintun/wintun/bin/amd64/wintun.dll" "$out/core/"
+cp "$tmp/wintun/wintun/LICENSE.txt" "$out/licenses/wintun-LICENSE.txt"
 unzip -q -o "$dl/xray-$XRAY_VERSION.zip" -d "$tmp/xray"
 cp "$tmp/xray/xray.exe" "$out/core/"
 cp "$tmp/xray/LICENSE" "$out/licenses/xray-LICENSE.txt"
@@ -67,6 +78,7 @@ Bundled components (see the licenses folder):
   Xray-core $XRAY_VERSION    https://github.com/XTLS/Xray-core    (MPL-2.0)
   warp-plus $WARPPLUS_VERSION   https://github.com/bepass-org/warp-plus (MIT)
   usque $USQUE_VERSION          https://github.com/Diniboy1123/usque (MIT)
+  Wintun $WINTUN_VERSION           https://www.wintun.net (prebuilt binaries license; the TUN driver of the whole-device mode)
   Tor Expert Bundle         https://www.torproject.org (BSD-3-Clause; transports under their own licenses)
   Snowflake proxy           https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/snowflake (BSD-3-Clause)
   Twemoji country flags     https://github.com/talkjs/country-flag-emoji-polyfill (CC-BY 4.0 graphics by Twitter)

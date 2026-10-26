@@ -355,6 +355,7 @@ jobs:
           $state = Invoke-RestMethod -Uri "http://127.0.0.1:18080/api/state" -Headers $h
           # The page is not told about cores; check the files and that the engine answers.
           foreach ($c in "sing-box", "xray", "warp-plus", "usque") { if (-not (Test-Path "dist\Albatross\core\$c.exe")) { throw "$c is missing" } }
+          if (-not (Test-Path "dist\Albatross\core\wintun.dll")) { throw "wintun.dll is missing: the whole-device mode cannot make its tunnel without it" }
           if (-not $state.status) { throw "the engine did not answer" }
           if ($state.PSObject.Properties.Name -contains "cores") { throw "the state still lists cores" }
           $page = Invoke-WebRequest -Uri "http://127.0.0.1:18080/" -UseBasicParsing
