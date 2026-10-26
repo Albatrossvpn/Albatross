@@ -125,6 +125,7 @@ func (e *Engine) Login(username, password string) error {
 		return err
 	}
 	e.logf("info", "Signed in.")
+	e.updateBadge()
 	// The service's own server (the edge) is for signed-in users.
 	methodsMu.Lock()
 	edgeFetched = time.Time{}
@@ -222,6 +223,26 @@ func (e *Engine) Logout() {
 	}
 	e.Disconnect()
 	e.acct.Logout()
+	e.updateBadge()
+}
+
+// updateBadge tells the app which plan the signed-in account is on when
+// that changes ("" once nobody is signed in), so it can mark its icon.
+func (e *Engine) updateBadge() {
+	if e.acct == nil || e.opt.Badge == nil {
+		return
+	}
+	tier := ""
+	if v := e.acct.View(); v.SignedIn {
+		tier = v.Info.Tier
+	}
+	e.mu.Lock()
+	changed := !e.badged || tier != e.badge
+	e.badge, e.badged = tier, true
+	e.mu.Unlock()
+	if changed {
+		e.opt.Badge(tier)
+	}
 }
 
 // AllowConnect says whether the signed-in user may connect now. The last
@@ -248,6 +269,7 @@ func (e *Engine) AllowConnect() error {
 			return err
 		})
 		cancel()
+		e.updateBadge()
 		if errors.Is(err, account.ErrSignedOut) {
 			return ErrLoginRequired
 		}
@@ -338,6 +360,7 @@ func (e *Engine) meterStep(ctx context.Context, c *connection, m *meterState, ch
 		switch {
 		case err == nil:
 			info, why, m.synced = got, got.Why(now), now
+			e.updateBadge()
 		case errors.Is(err, account.ErrSignedOut):
 			e.stopForAccount("Sign in to connect.")
 			return true

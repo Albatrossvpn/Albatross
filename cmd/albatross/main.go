@@ -88,6 +88,7 @@ func main() {
 		SysProxy:  sysProxy,
 		Version:   version,
 		Autostart: platform.SetAutostart,
+		Badge:     setBadge,
 	})
 	if err != nil {
 		platform.Alert(windowTitle, "The app could not start:\n"+err.Error())

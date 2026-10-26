@@ -59,6 +59,9 @@ type Platform interface {
 	// OpenLocationSettings shows the system screen for one of those steps:
 	// About phone for "developer", Developer options for "mock_app".
 	OpenLocationSettings(step string)
+	// SetBadge marks the launcher icon with the signed-in account's plan
+	// ("bronze", "silver", "gold" or "vip"), or with nothing for "".
+	SetBadge(tier string)
 }
 
 var (
@@ -108,6 +111,7 @@ func Start(dataDir, libDir, dns string, p Platform) (string, error) {
 		LocalDNS:      dns,
 		Mobile:        true,
 		InstallUpdate: p.InstallUpdate,
+		Badge:         p.SetBadge,
 		LANAddrs: func() []string {
 			var out []string
 			for _, a := range strings.Split(p.LanAddrs(), ",") {

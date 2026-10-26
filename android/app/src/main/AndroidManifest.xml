@@ -42,6 +42,58 @@
             </intent-filter>
         </activity>
 
+        <!-- The launcher entries with a plan's badge on the icon (Badges.java):
+             the one for the signed-in account's plan is turned on, the plain
+             entry above off. -->
+        <activity-alias
+            android:name=".LauncherBronze"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_bronze"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherSilver"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_silver"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherGold"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_gold"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherVip"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_vip"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <service
             android:name=".TunnelService"
             android:exported="false"

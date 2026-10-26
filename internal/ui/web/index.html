@@ -15,6 +15,7 @@
       <span class="brand-name">Albatross</span>
     </div>
     <div class="top-actions">
+      <span id="plan-chip" class="plan-badge hidden"></span>
       <span id="admin-chip" class="chip hidden" title="Running as administrator">Admin</span>
     </div>
   </header>
@@ -60,7 +61,7 @@
       <div class="view-head"><h2>Settings</h2></div>
 
       <div class="card account hidden" id="account-card">
-        <div class="acc-head"><div><b id="acc-name"></b><small id="acc-note"></small></div><button class="btn" id="logout-btn">Sign out</button></div>
+        <div class="acc-head"><div><b id="acc-name"></b><span id="acc-plan" class="plan-badge hidden"></span><small id="acc-note"></small></div><button class="btn" id="logout-btn">Sign out</button></div>
         <div class="meter hidden" id="acc-data"><div class="meter-top"><span>Data</span><span id="acc-data-text"></span></div><div class="bar"><i id="acc-data-bar"></i></div></div>
         <div class="meter hidden" id="acc-time"><div class="meter-top"><span>Time</span><span id="acc-time-text"></span></div><div class="bar"><i id="acc-time-bar"></i></div></div>
         <div class="hint" id="acc-dates"></div>

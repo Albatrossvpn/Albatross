@@ -183,8 +183,21 @@ function meter(id, used, limit, fmt) {
   bar.className = frac >= 1 ? "full" : frac >= 0.85 ? "warn" : "";
 }
 
+var PLAN_NAMES = { bronze: "Bronze", silver: "Silver", gold: "Gold", vip: "VIP" };
+var PLAN_STAR = '<svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/></svg>';
+var PLAN_CROWN = '<svg viewBox="0 0 24 24"><path d="M3 7.5l4.6 4.2L12 4.5l4.4 7.2L21 7.5l-1.6 11.3H4.6z"/></svg>';
+
+/** Shows the plan's badge in el, or hides el for an account without one. */
+function planBadge(el, tier) {
+  var name = PLAN_NAMES[tier];
+  el.className = "plan-badge" + (name ? " " + tier : " hidden");
+  el.innerHTML = name ? (tier === "vip" ? PLAN_CROWN : PLAN_STAR) + name : "";
+}
+
 function renderAccount(a) {
   var needLogin = a.enabled && !a.signed_in;
+  planBadge($("plan-chip"), a.signed_in ? a.tier : "");
+  planBadge($("acc-plan"), a.signed_in ? a.tier : "");
   $("login").classList.toggle("hidden", !needLogin);
   $("account-card").classList.toggle("hidden", !a.signed_in);
   if (!a.signed_in) return;
@@ -193,10 +206,7 @@ function renderAccount(a) {
   meter("acc-data", a.used_bytes, a.quota_bytes, fmtBytes);
   meter("acc-time", a.used_seconds, a.max_seconds, fmtTime);
   var dates = [];
-  if (a.max_devices) {
-    var plan = { bronze: "Bronze", silver: "Silver", gold: "Gold", vip: "VIP" }[a.tier] || a.tier || "";
-    dates.push((plan ? plan + " plan: " : "") + a.devices + " of " + a.max_devices + (a.max_devices === 1 ? " device" : " devices") + " connected");
-  }
+  if (a.max_devices) dates.push(a.devices + " of " + a.max_devices + (a.max_devices === 1 ? " device" : " devices") + " connected");
   if (a.resets_at) dates.push("Renews " + fmtDate(a.resets_at));
   if (a.expires_at) dates.push("Expires " + fmtDate(a.expires_at));
   if (!a.quota_bytes && !a.max_seconds && !a.expires_at) dates.push("No limits on this account");
