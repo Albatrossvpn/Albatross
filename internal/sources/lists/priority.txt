@@ -104,3 +104,8 @@ https://raw.githubusercontent.com/adiwzx/freenode/main/adispeed.yml
 https://raw.githubusercontent.com/bestnite/sub2clash/main/templates/template_clash.yaml
 https://raw.githubusercontent.com/bestnite/sub2clash/main/templates/template_meta.yaml
 https://www.ermao.net/sub/untested/clash/ermao.net
+# WireGuard: configs from Telegram, refreshed hourly or faster (Oct 2026).
+https://raw.githubusercontent.com/javadkhajavi/wg-config-fetcher/main/configs/wireguard_configs.txt
+https://raw.githubusercontent.com/MehdiNaji69/wg-config-fetcher/main/configs/wireguard_configs.txt
+https://raw.githubusercontent.com/10ium/ScrapeAndCategorize/main/output_configs/WireGuard.txt
+https://raw.githubusercontent.com/Argh94/V2RayAutoConfig/main/configs/WireGuard.txt

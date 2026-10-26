@@ -49,6 +49,46 @@ const hotSpare = 150
 // fetch often instead of downloading all of fresh.txt again.
 const newSize = 4000
 
+// minProtoTests is how many servers of each protocol the real test covers
+// at least: the most shared servers are mostly VLESS, and a protocol the
+// filtering spares (WireGuard works well here) was hardly ever tested.
+const minProtoTests = 400
+
+// promoteRare moves servers of protocols that have fewer than min entries
+// among the first n of list forward into that range, keeping the order
+// otherwise, so the real test (which takes the first n) covers them.
+func promoteRare(list []*entry, n, min int) {
+	if n <= 0 || n >= len(list) {
+		return
+	}
+	have := map[string]int{}
+	for _, e := range list[:n] {
+		have[e.proto]++
+	}
+	var pulled []*entry
+	rest := make([]*entry, 0, len(list)-n)
+	for _, e := range list[n:] {
+		if have[e.proto] < min {
+			have[e.proto]++
+			pulled = append(pulled, e)
+		} else {
+			rest = append(rest, e)
+		}
+	}
+	if len(pulled) == 0 {
+		return
+	}
+	// The pulled servers take the places of the least shared in the head.
+	head := append([]*entry(nil), list[:n]...)
+	keep := n - len(pulled)
+	if keep < 0 {
+		keep = 0
+	}
+	out := append(append(append([]*entry(nil), head[:keep]...), pulled...), head[keep:]...)
+	out = append(out, rest...)
+	copy(list, out)
+}
+
 // newList is fresh minus what the last run published, newest first, with
 // the last new.txt's servers that are still listed after them.
 func newList(fresh, prevFresh, prevNew []string, max int) []string {
@@ -370,6 +410,7 @@ func main() {
 			restE = append(restE, e)
 		}
 	}
+	promoteRare(freshE, *real, minProtoTests)
 	passed, tested := realTest(freshE, *real)
 	passed = confirm(passed)
 	freshE, failedE := orderFresh(freshE, passed, tested, crowd)

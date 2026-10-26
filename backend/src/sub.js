@@ -67,7 +67,7 @@ export function parseList(text) {
 // The schemes the connection apps on Apple devices (V2Box, Streisand,
 // Shadowrocket, Hiddify, sing-box) take. The app's own protocols and
 // plain proxies are left out of a subscription.
-const APPLE_SCHEMES = new Set(["vmess", "vless", "trojan", "ss", "hysteria2", "hy2", "tuic"]);
+const APPLE_SCHEMES = new Set(["vmess", "vless", "trojan", "ss", "hysteria2", "hy2", "tuic", "wireguard", "wg"]);
 
 /** Whether a link is one the Apple apps can use. */
 export const forApple = (e) => APPLE_SCHEMES.has(e.link.slice(0, e.link.indexOf("://")).toLowerCase());

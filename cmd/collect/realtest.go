@@ -179,7 +179,52 @@ func hotList(ordered []*entry, passed map[*entry]time.Duration, max int, crowd c
 		}
 		protos = left
 	}
-	return out
+	return reserveProto(out, cands, "wireguard", wgReserve)
+}
+
+// wgReserve is how many WireGuard servers the hot list carries when that
+// many passed: the protocol is fast where the filtering lets it through.
+const wgReserve = 40
+
+// reserveProto makes sure out holds up to want servers of proto from
+// cands (in cands' order), replacing servers of other protocols from the
+// end of out when it is full.
+func reserveProto(out, cands []*entry, proto string, want int) []*entry {
+	in := map[*entry]bool{}
+	have := 0
+	for _, e := range out {
+		in[e] = true
+		if e.proto == proto {
+			have++
+		}
+	}
+	var extra []*entry
+	for _, e := range cands {
+		if have+len(extra) >= want {
+			break
+		}
+		if e.proto == proto && !in[e] {
+			extra = append(extra, e)
+		}
+	}
+	if len(extra) == 0 {
+		return out
+	}
+	// Room at the end: the last servers of other protocols go.
+	size := len(out)
+	kept := make([]*entry, 0, size)
+	drop := len(extra)
+	for i := len(out) - 1; i >= 0; i-- {
+		if drop > 0 && out[i].proto != proto {
+			drop--
+			continue
+		}
+		kept = append(kept, out[i])
+	}
+	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
+		kept[i], kept[j] = kept[j], kept[i]
+	}
+	return append(kept, extra...)
 }
 
 // confirm tests the servers that passed once more and keeps those that
