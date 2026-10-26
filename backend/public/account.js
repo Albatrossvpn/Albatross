@@ -1,4 +1,4 @@
-import { $, ago, api, esc, fmtBytes, fmtDate, fmtTime, frame, meter, toast } from "/site.js";
+import { $, ago, api, esc, fmtBytes, fmtDate, fmtTime, frame, meter, planBadge, toast } from "/site.js";
 
 let token = "";
 let info;
@@ -12,7 +12,7 @@ const reasons = {
 };
 
 const planName = (tier) => (info.tiers && info.tiers[tier] ? info.tiers[tier].name : tier);
-const planPill = (tier) => `<span class="pill plan ${esc(tier)}">${esc(planName(tier))}</span>`;
+const planPill = (tier, cls) => planBadge(tier, planName(tier), cls);
 
 function showTab(name) {
   $("#login-form").classList.toggle("hidden", name !== "login");
@@ -91,6 +91,7 @@ function render(a) {
   if (a.allowed) loadSub();
   else $("#sub-list").innerHTML = `<span class="muted note">The servers are available while the account can connect.</span>`;
   $("#d-name").textContent = a.username;
+  $("#d-plan").innerHTML = planPill(a.tier, "big");
   const pill = $("#d-status");
   pill.textContent = a.allowed ? "Active" : { disabled: "Off", expired: "Expired", devices: "Devices in use" }[a.reason] || "Limit reached";
   pill.className = "pill" + (a.allowed ? "" : " bad");
