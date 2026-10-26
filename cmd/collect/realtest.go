@@ -179,12 +179,31 @@ func hotList(ordered []*entry, passed map[*entry]time.Duration, max int, crowd c
 		}
 		protos = left
 	}
-	return reserveProto(out, cands, "wireguard", wgReserve)
+	// Every protocol that has passing servers is in the hot list, with at
+	// least protoReserve of them (WireGuard more: it is fast where the
+	// filtering lets it through), so a user who picks any protocol, or a
+	// network that spares only one, finds servers.
+	var protoOrder []string
+	seenProto := map[string]bool{}
+	for _, e := range cands {
+		if !seenProto[e.proto] {
+			seenProto[e.proto] = true
+			protoOrder = append(protoOrder, e.proto)
+		}
+	}
+	for _, p := range protoOrder {
+		want := protoReserve
+		if p == "wireguard" {
+			want = wgReserve
+		}
+		out = reserveProto(out, cands, p, want)
+	}
+	return out
 }
 
-// wgReserve is how many WireGuard servers the hot list carries when that
-// many passed: the protocol is fast where the filtering lets it through.
-const wgReserve = 40
+// protoReserve is how many servers of each protocol the hot list carries
+// at least when that many passed; wgReserve the same for WireGuard.
+const protoReserve, wgReserve = 20, 40
 
 // reserveProto makes sure out holds up to want servers of proto from
 // cands (in cands' order), replacing servers of other protocols from the
