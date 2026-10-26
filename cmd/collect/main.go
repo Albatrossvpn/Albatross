@@ -41,6 +41,10 @@ import (
 // a few that work on its network, small enough to fetch in a moment.
 const hotSize = 300
 
+// hotSpare is how many more candidates than hotSize the hot list starts
+// with, for the ones the check from inside the country drops.
+const hotSpare = 150
+
 // newSize bounds new.txt: the latest additions to fresh.txt, which apps
 // fetch often instead of downloading all of fresh.txt again.
 const newSize = 4000
@@ -117,8 +121,11 @@ func refreshHot(path, out string, n int, crowd crowdStats, report, tester string
 	}
 	crowdOrder(ok, passed, crowd)
 	copy(list, ok)
-	hot := hotList(list, passed, hotSize, crowd)
-	checkIran(hot)
+	hot := hotList(list, passed, hotSize+hotSpare, crowd)
+	hot, _, _ = checkIran(hot, out, out)
+	if len(hot) > hotSize {
+		hot = hot[:hotSize]
+	}
 	if len(hot) == 0 {
 		log.Print("nothing passed; hot.txt left as it was")
 		return
@@ -381,8 +388,13 @@ func main() {
 		m.Files[name] = len(links)
 	}
 	write("fresh.txt", fresh)
-	hot := hotList(freshE, passed, hotSize, crowd)
-	m.IranChecked, m.IranOpen = checkIran(hot)
+	// More than hotSize candidates, so what the probes inside the country
+	// cannot reach is left out and the list is still full.
+	hot := hotList(freshE, passed, hotSize+hotSpare, crowd)
+	hot, m.IranChecked, m.IranOpen = checkIran(hot, *prev, *out)
+	if len(hot) > hotSize {
+		hot = hot[:hotSize]
+	}
 	write("hot.txt", links(hot))
 	if *prev != "" {
 		write("new.txt", newList(fresh, readLines(filepath.Join(*prev, "fresh.txt")), readLines(filepath.Join(*prev, "new.txt")), newSize))

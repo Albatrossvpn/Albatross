@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -161,5 +162,37 @@ func TestDiscoverMentions(t *testing.T) {
 	got := extraSources(filepath.Join(dir, "s.txt"), "sub")
 	if len(got) != 2 || got[1].URL != "https://c/d.txt" || got[0].Tier != 1 {
 		t.Fatalf("extra %v", got)
+	}
+}
+
+// The check from inside the country keeps its answers between runs: with
+// fresh answers for every address nothing is asked, what does not answer
+// inside is left out, and what does comes first.
+func TestCheckIranUsesItsCache(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now().Unix()
+	cache := map[string]iranSeen{
+		"a:1": {Open: false, At: now - 60},
+		"b:1": {Open: true, At: now - 60},
+		"d:1": {Open: true, At: now - int64(iranKeep/time.Second) - 1}, // too old: dropped from the file
+	}
+	b, _ := json.Marshal(cache)
+	os.WriteFile(filepath.Join(dir, iranCacheName), b, 0o644)
+	a := &entry{link: "vless://a@a:1#A", endpoint: "a:1"}
+	bb := &entry{link: "vless://b@b:1#B", endpoint: "b:1"}
+	c := &entry{link: "hysteria2://c@c:1#C"} // no TCP endpoint: never checked, kept
+	// Nothing left to ask: an empty quota keeps the probes out of the test.
+	t.Setenv("GLOBALPING_TAGS", "")
+	t.Setenv("GLOBALPING_TOKEN", "")
+	kept, checked, open := checkIran([]*entry{a, bb, c}, dir, dir)
+	if got := links(kept); len(got) != 2 || got[0] != bb.link || got[1] != c.link {
+		t.Fatalf("kept %v", got)
+	}
+	if checked != 2 || open != 1 {
+		t.Fatalf("checked %d open %d", checked, open)
+	}
+	saved := loadIranCache(dir)
+	if _, ok := saved["d:1"]; ok || len(saved) != 2 {
+		t.Fatalf("saved %v", saved)
 	}
 }
