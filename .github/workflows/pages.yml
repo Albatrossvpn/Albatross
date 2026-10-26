@@ -10,10 +10,11 @@ on:
     paths: ["site/**", "update.json", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
+# Published from the gh-pages branch: the workflow token may not create
+# the Pages site itself, and a gh-pages branch is published as soon as
+# Pages is on (Settings > Pages > Deploy from a branch > gh-pages).
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
@@ -22,14 +23,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/configure-pages@v5
-        with:
-          enablement: true
       - name: Build the mirror
         # The mirror lives under /Albatross/, so the pages' root-relative
         # links and assets get that prefix.
@@ -40,9 +35,14 @@ jobs:
           find _site -name '*.css' -print0 | xargs -0 sed -i -E "s#url\\(/#url($base/#g"
           # Nothing of the site's own API or storage is here.
           rm -f _site/update.json
+          touch _site/.nojekyll
           ls _site
-      - uses: actions/upload-pages-artifact@v4
-        with:
-          path: _site
-      - id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Publish to the gh-pages branch
+        run: |
+          cd _site
+          git init -q -b gh-pages
+          git config user.name Claude
+          git config user.email noreply@anthropic.com
+          git add -A
+          TZ=UTC git commit -qm "Site mirror from ${GITHUB_SHA::7}"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
