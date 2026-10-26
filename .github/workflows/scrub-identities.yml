@@ -22,6 +22,10 @@ on:
         description: 'What the text becomes'
         required: false
         default: albatross
+      drop_paths:
+        description: 'Paths to take out of every commit (comma separated), e.g. a stray binary that carries the text; commits stay'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -52,9 +56,21 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           REMOVE_TEXT: ${{ inputs.remove_text }}
           REPLACE_WITH: ${{ inputs.replace_with }}
+          DROP_PATHS: ${{ inputs.drop_paths }}
         run: |
           pip install -q git-filter-repo
           cd repo.git
+          # Paths taken out of every commit first (a stray binary a text
+          # replacement cannot reach); a commit left with no change stays.
+          if [ -n "$DROP_PATHS" ]; then
+            drop=()
+            IFS=, read -ra parts <<< "$DROP_PATHS"
+            for t in "${parts[@]}"; do
+              t="$(printf '%s' "$t" | sed 's/^ *//; s/ *$//')"
+              [ -n "$t" ] && drop+=(--path "$t")
+            done
+            git filter-repo --force --invert-paths "${drop[@]}" --prune-empty never
+          fi
           # Text to take out of every file version, when asked.
           args=()
           if [ -n "$REMOVE_TEXT" ]; then
@@ -88,6 +104,7 @@ jobs:
       - name: Check that no file changed
         env:
           REMOVE_TEXT: ${{ inputs.remove_text }}
+          DROP_PATHS: ${{ inputs.drop_paths }}
         run: |
           cd repo.git
           bad=0
@@ -95,7 +112,7 @@ jobs:
             new="$(git rev-parse "$ref")"
             # With text taken out of files, the trees differ where it was;
             # the commit count must not.
-            if [ -z "$REMOVE_TEXT" ]; then
+            if [ -z "$REMOVE_TEXT" ] && [ -z "$DROP_PATHS" ]; then
               [ "$(git -C ../before.git rev-parse "$old^{tree}")" = "$(git rev-parse "$new^{tree}")" ] || { echo "::error::$ref: files differ after the rewrite"; bad=1; }
             fi
             [ "$(git -C ../before.git rev-list --count "$old")" = "$(git rev-list --count "$new")" ] || { echo "::error::$ref: commit count differs"; bad=1; }
