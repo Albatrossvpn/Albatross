@@ -1,4 +1,4 @@
-import { $, ago, api, esc, fmtBytes, fmtDate, fmtTime, frame, toast } from "/site.js";
+import { $, ago, api, esc, fmtBytes, fmtDate, fmtTime, frame, planBadge, toast } from "/site.js";
 
 const GB = 1024 ** 3;
 const KEY = "admin-session";
@@ -80,7 +80,8 @@ const statusPill = (u) =>
     : `<span class="pill ${u.status === "disabled" ? "bad" : "warn"}">${esc({ disabled: "Off", expired: "Expired", quota: "Data used", time: "Time used", devices: "Devices full" }[u.status] || u.status)}</span>`;
 
 let tiers = {};
-const planCell = (u) => `<span class="pill plan ${esc(u.tier)}">${esc(tiers[u.tier] ? tiers[u.tier].name : u.tier)}</span><div class="muted small">${u.devices} of ${u.max_devices} ${u.max_devices === 1 ? "device" : "devices"}</div>`;
+const planName = (tier) => (tiers[tier] ? tiers[tier].name : tier);
+const planCell = (u) => `${planBadge(u.tier, planName(u.tier))}<div class="muted small">${u.devices} of ${u.max_devices} ${u.max_devices === 1 ? "device" : "devices"}</div>`;
 
 /** Fills every plan selector from the service's list of plans. */
 function fillPlans() {
@@ -155,7 +156,7 @@ async function copy(text) {
 function openUser(u) {
   editing = u;
   $("#u-error").textContent = "";
-  $("#u-title").textContent = u ? `Edit ${u.username}` : "New user";
+  $("#u-title").innerHTML = u ? `Edit ${esc(u.username)} ${planBadge(u.tier, planName(u.tier))}` : "New user";
   $("#u-name-field").classList.toggle("hidden", !!u);
   $("#u-pass-field").classList.toggle("hidden", !!u);
   $("#u-extra").classList.toggle("hidden", !u);

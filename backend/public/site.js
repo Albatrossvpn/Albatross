@@ -21,6 +21,15 @@ export async function api(method, path, { token, body } = {}) {
   return data;
 }
 
+const PLAN_STAR = '<path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5L2.5 9.4l6.6-.9z"/>';
+const PLAN_CROWN = '<path d="M3 7.5l4.6 4.2L12 4.5l4.4 7.2L21 7.5l-1.6 11.3H4.6z"/>';
+
+/** A plan's badge: its medal and name. `cls` adds classes ("big"). */
+export function planBadge(tier, name, cls = "") {
+  const t = String(tier || "");
+  return `<span class="plan-badge ${esc(t)} ${esc(cls)}"><svg viewBox="0 0 24 24" aria-hidden="true">${t === "vip" ? PLAN_CROWN : PLAN_STAR}</svg>${esc(name || t)}</span>`;
+}
+
 let infoPromise;
 export const publicInfo = () => (infoPromise ||= api("GET", "public").catch(() => ({ name: "Albatross", downloads: {}, signup_open: false })));
 

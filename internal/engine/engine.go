@@ -59,6 +59,10 @@ type Options struct {
 	// systems where the engine cannot list them itself (Android 11 and
 	// later refuse it); nil means the engine asks the system.
 	LANAddrs func() []string
+	// Badge is told the plan of the signed-in account ("bronze", "silver",
+	// "gold", "vip") whenever it changes, and "" when nobody is signed in,
+	// so the app can mark its icon with it. Nil means no badge.
+	Badge func(tier string)
 }
 
 // SystemProxy sets and clears the OS proxy settings.
@@ -84,6 +88,9 @@ type Engine struct {
 	// crowd stats (crowd.go); crowdAt is when tests were last reported.
 	crowdURLs []string
 	crowdAt   time.Time
+	// badge is the plan last given to opt.Badge, badged whether any was.
+	badge  string
+	badged bool
 	// httpsOK is when a server last passed a test with a genuine
 	// certificate, which shows this device checks certificates correctly
 	// (see distrust).
@@ -232,6 +239,7 @@ func New(opt Options) (*Engine, error) {
 // Start begins scanning (and connects if the user asked for that).
 func (e *Engine) Start() {
 	e.ctx, e.cancel = context.WithCancel(context.Background())
+	e.updateBadge()
 	// A crash left the system pointing at our dead proxy: at today's port,
 	// or at the one in use then, which an automatic port change (another
 	// program took the port) may have made different.

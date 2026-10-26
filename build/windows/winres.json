@@ -2,6 +2,18 @@
   "RT_GROUP_ICON": {
     "#1": {
       "0000": "icon.ico"
+    },
+    "#2": {
+      "0000": "badge-bronze.ico"
+    },
+    "#3": {
+      "0000": "badge-silver.ico"
+    },
+    "#4": {
+      "0000": "badge-gold.ico"
+    },
+    "#5": {
+      "0000": "badge-vip.ico"
     }
   },
   "RT_MANIFEST": {

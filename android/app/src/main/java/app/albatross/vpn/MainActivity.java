@@ -150,6 +150,19 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onStart() {
+        super.onStart();
+        Badges.setForeground(this, true);
+    }
+
+    @Override
+    protected void onStop() {
+        // A pending change of the launcher icon is made now, off screen.
+        Badges.setForeground(this, false);
+        super.onStop();
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         visible = new WeakReference<>(this);

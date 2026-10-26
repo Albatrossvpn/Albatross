@@ -184,6 +184,11 @@ final class Bridge implements Platform {
     }
 
     @Override
+    public void setBadge(String tier) {
+        main.post(() -> Badges.request(app, tier));
+    }
+
+    @Override
     public void quit() {
         main.post(() -> {
             TunnelService.stop(app);

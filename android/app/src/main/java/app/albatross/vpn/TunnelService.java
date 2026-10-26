@@ -147,7 +147,7 @@ public final class TunnelService extends VpnService {
             }
         }
         if (Build.VERSION.SDK_INT >= 29) b.setMetered(false);
-        b.setConfigureIntent(PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE));
+        b.setConfigureIntent(PendingIntent.getActivity(this, 0, Badges.openIntent(this), PendingIntent.FLAG_IMMUTABLE));
         return b;
     }
 
@@ -200,7 +200,7 @@ public final class TunnelService extends VpnService {
     }
 
     private Notification notification(boolean connected) {
-        PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class), PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent open = PendingIntent.getActivity(this, 0, Badges.openIntent(this), PendingIntent.FLAG_IMMUTABLE);
         PendingIntent disconnect = PendingIntent.getService(this, 1,
                 new Intent(this, TunnelService.class).setAction(ACTION_DISCONNECT), PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder nb = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, App.CHANNEL) : new Notification.Builder(this);
