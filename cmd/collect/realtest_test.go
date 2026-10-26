@@ -237,3 +237,33 @@ func TestRareProtocolsAreTestedAndKept(t *testing.T) {
 		t.Fatal("the first server was replaced instead of the last")
 	}
 }
+
+// Every protocol with passing servers has at least protoReserve in the
+// hot list, even when the best half is all one protocol.
+func TestHotListHasEveryProtocol(t *testing.T) {
+	var ordered []*entry
+	passed := map[*entry]time.Duration{}
+	add := func(proto string, n int, d time.Duration) {
+		for i := 0; i < n; i++ {
+			e := &entry{link: proto + "://x@" + proto + string(rune('a'+i/26)) + string(rune('a'+i%26)) + ":1#X", proto: proto, endpoint: proto + string(rune('a'+i/26)) + string(rune('a'+i%26)) + ":1"}
+			ordered = append(ordered, e)
+			passed[e] = d
+		}
+	}
+	add("vless", 400, time.Millisecond)
+	add("trojan", 30, time.Second)
+	add("ss", 25, time.Second)
+	add("wireguard", 50, time.Second)
+	add("tuic", 3, time.Second)
+	hot := hotList(ordered, passed, 300, crowdStats{rates: map[uint64][2]float64{}})
+	if len(hot) != 300 {
+		t.Fatalf("%d hot", len(hot))
+	}
+	count := map[string]int{}
+	for _, e := range hot {
+		count[e.proto]++
+	}
+	if count["trojan"] < protoReserve || count["ss"] < protoReserve || count["wireguard"] < wgReserve || count["tuic"] != 3 {
+		t.Fatalf("protocol counts: %v", count)
+	}
+}
