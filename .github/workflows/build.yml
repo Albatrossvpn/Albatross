@@ -45,8 +45,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -60,8 +60,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Vet
@@ -134,8 +134,8 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Version
@@ -182,12 +182,12 @@ jobs:
             export ACCOUNT_URL MIRROR_URL UPDATE_KEY
           fi
           bash build/package.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Albatross-folder
           path: dist/Albatross
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Albatross-portable-${{ steps.version.outputs.version }}
           path: dist/*.zip
@@ -199,11 +199,11 @@ jobs:
     env:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
@@ -276,7 +276,7 @@ jobs:
           signer="$("$tools/apksigner" verify --print-certs "$apk" | grep -m1 'SHA-256' | awk '{print $NF}')"
           echo "APK signer SHA-256: $signer"
           echo "- APK signer SHA-256: \`$signer\`, signed with $want, $(du -m "$apk" | cut -f1) MB" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Albatross-android-${{ env.VERSION }}
           path: dist/*.apk
@@ -336,8 +336,8 @@ jobs:
     env:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: Albatross-folder
           path: dist/Albatross
@@ -432,7 +432,7 @@ jobs:
             if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f after install" }
           }
           "installed OK: $dir"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Albatross-Setup-${{ env.VERSION }}
           path: dist/Albatross-Setup-*.exe
@@ -445,11 +445,11 @@ jobs:
     needs: [backend, test, build, installer, android]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Albatross-android-${{ needs.build.outputs.version }}
           path: dist
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: Albatross-Setup-${{ needs.build.outputs.version }}
           path: dist
@@ -457,7 +457,7 @@ jobs:
       # APK for every phone.
       - name: Name the APK
         run: mv dist/*-android.apk "Albatross-${{ needs.build.outputs.version }}-android.apk"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           # The workflow's own token creates the release; a RELEASE_TOKEN
           # secret (a fine-grained token with Contents read and write on
@@ -475,17 +475,17 @@ jobs:
           files: |
             Albatross-*-android.apk
             dist/Albatross-Setup-*.exe
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           path: repo
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: repo/go.mod
           cache-dependency-path: repo/go.sum
       # wrangler, to put the files straight into the project's own storage
       # (deploy/files/lib.sh).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm

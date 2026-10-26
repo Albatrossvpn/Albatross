@@ -19,8 +19,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -62,25 +62,39 @@ jobs:
           edge="$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' ../edge/wrangler.toml | head -1)"
           args+=(--var "EDGE_HOST:$edge")
           npx wrangler deploy "${args[@]}"
-      - name: Check Encrypted Client Hello
-        # ECH hides the service's name in the TLS handshake; the app reads the
-        # key from the HTTPS DNS record (internal/engine/ech.go). Cloudflare
-        # turns it on by default on free zones; this turns it on otherwise,
-        # if the token may change zone settings.
+      - name: Encrypted Client Hello and HTTP/3 off for the websites
+        # Iran's filtering drops TLS handshakes that carry ECH to Cloudflare
+        # and throttles QUIC, and browsers do not always fall back: with
+        # either on, the website and the account page open badly or not at
+        # all from inside the country. Both are zone settings, so they go
+        # off for every name on the zone. The app does not need them here:
+        # it negotiates ECH per server where it works (internal/engine/ech.go
+        # falls back to a plain handshake) and reaches the edge over TCP.
+        # Zone settings need a token with Zone Settings: Edit; the secret
+        # Cloudflare_API_edit holds one when the deploy token has not.
         continue-on-error: true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.Cloudflare_API_edit || secrets.CLOUDFLARE_API_TOKEN }}
+          # The zone's id, for a token that may not list zones (Zone: Read):
+          # the variable, else albatrossvpn.online's id (an id is not a secret).
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID || '10cb31d048a94862c5080fbd33c551bd' }}
         run: |
           rc=0
-          for host in $(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml); do
-            if curl -fsS "https://dns.google/resolve?name=$host&type=HTTPS" | jq -e '[.Answer[]?.data | select(test("ech="))] | length > 0' >/dev/null; then
-              echo "ECH is on for $host."; continue
-            fi
-            zone="${host#*.}"
-            api="https://api.cloudflare.com/client/v4/zones"
-            id="$(curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api?name=$zone" | jq -r '.result[0].id // empty')"
-            [ -n "$id" ] || { echo "::warning::The API token cannot see the zone $zone, so ECH was not checked."; rc=1; continue; }
-            out="$(curl -sS -X PATCH -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" --data '{"value":"on"}' "$api/$id/settings/ech")"
-            echo "$out" | jq -c '{success, errors: [.errors[]?.message], value: .result.value}'
-            [ "$(echo "$out" | jq -r .success)" = true ] || { echo "::warning::ECH could not be turned on: the API token needs the Zone Settings Edit permission for $zone."; rc=1; }
+          api="https://api.cloudflare.com/client/v4"
+          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          # Which kind of token this is, and whether it is live.
+          for v in user/tokens/verify "accounts/$CLOUDFLARE_ACCOUNT_ID/tokens/verify"; do
+            echo "$v: $(curl -sS "${auth[@]}" "$api/$v" | jq -c '{success, status: .result.status, errors: [.errors[]?.message]}')"
+          done
+          for zone in $(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml ../site/wrangler.toml ../edge/wrangler.toml | awk -F. '{print $(NF-1)"."$NF}' | sort -u); do
+            id="$(curl -sS "${auth[@]}" "$api/zones?name=$zone" | jq -r '.result[0].id // empty')"
+            [ -n "$id" ] || id="$CLOUDFLARE_ZONE_ID"
+            [ -n "$id" ] || { echo "::warning::The API token cannot list the zone $zone (it needs Zone: Read), and the variable CLOUDFLARE_ZONE_ID is not set; turn ECH and HTTP/3 off in its dashboard (SSL/TLS > Edge Certificates, Network)."; rc=1; continue; }
+            for setting in ech http3; do
+              out="$(curl -sS -X PATCH "${auth[@]}" -H "Content-Type: application/json" --data '{"value":"off"}' "$api/zones/$id/settings/$setting")"
+              echo "$zone $setting: $(echo "$out" | jq -c '{success, errors: [.errors[]?.message], value: .result.value}')"
+              [ "$(echo "$out" | jq -r .success)" = true ] || { echo "::warning::$setting could not be turned off on $zone: the API token needs Zone Settings Edit, or turn it off in the dashboard."; rc=1; }
+            done
           done
           exit $rc
       - name: Set the secrets
@@ -111,12 +125,12 @@ jobs:
       # The app's own files (lists, ad list, update manifest) from the
       # branches CI publishes them to, so the storage holds them from the
       # first deploy on; the collectors and releases keep them current.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         continue-on-error: true
         with:
           ref: servers
           path: branch-servers
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         continue-on-error: true
         with:
           ref: rules
@@ -148,8 +162,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -178,8 +192,8 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
