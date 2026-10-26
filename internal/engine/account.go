@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -59,7 +60,12 @@ type AccountState struct {
 	UsedSeconds int64  `json:"used_seconds"`
 	ExpiresAt   int64  `json:"expires_at"`
 	ResetsAt    int64  `json:"resets_at"`
-	SiteURL     string `json:"site_url,omitempty"`
+	// Tier is the plan; MaxDevices how many devices it lets connect at
+	// once; Devices how many are connected now.
+	Tier       string `json:"tier,omitempty"`
+	MaxDevices int    `json:"max_devices"`
+	Devices    int    `json:"devices"`
+	SiteURL    string `json:"site_url,omitempty"`
 }
 
 func accountURLs(opt Options) []string {
@@ -90,6 +96,7 @@ func (e *Engine) Account() AccountState {
 	st.SignedIn, st.Username = true, i.Username
 	st.QuotaBytes, st.UsedBytes, st.MaxSeconds, st.UsedSeconds = i.QuotaBytes, i.UsedBytes, i.MaxSeconds, i.UsedSeconds
 	st.ExpiresAt, st.ResetsAt = i.ExpiresAt, i.ResetsAt
+	st.Tier, st.MaxDevices, st.Devices = i.Tier, i.MaxDevices, i.Devices
 	if why := i.Why(time.Now()); why != "" {
 		st.Message = limitMessage(why, i)
 	}
@@ -263,6 +270,15 @@ func limitMessage(reason string, i account.Info) string {
 		return "Your time allowance is used up." + renew
 	case account.ReasonExpired:
 		return "Your account has expired."
+	case account.ReasonDevices:
+		n := i.MaxDevices
+		switch {
+		case n == 1:
+			return "This account is already connected on another device; your plan allows one at a time. Disconnect it, or remove it on your account page."
+		case n > 1:
+			return fmt.Sprintf("This account is already connected on %d devices, as many as your plan allows. Disconnect one, or remove it on your account page.", n)
+		}
+		return "This account is already connected on as many devices as your plan allows. Disconnect one, or remove it on your account page."
 	}
 	return "Your account is turned off."
 }

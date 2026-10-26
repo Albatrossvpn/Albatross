@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -206,6 +207,7 @@ func New(opt Options) (*Engine, error) {
 	if urls := accountURLs(opt); len(urls) > 0 {
 		e.acct = account.New(urls, account.SessionPath(e.dir), e.accountHTTP)
 		e.acct.Version = opt.Version
+		e.acct.Device, e.acct.DeviceName = account.DeviceID(e.dir), deviceName(opt)
 		e.crowdURLs = urls
 	}
 	e.tester = &tester.Tester{Runtime: e.rt}
@@ -473,6 +475,23 @@ func (e *Engine) triggerRefill() {
 	case e.refill <- struct{}{}:
 	default:
 	}
+}
+
+// deviceName is the word for this kind of device that the account service
+// shows on the account page's device list.
+func deviceName(opt Options) string {
+	if opt.Mobile {
+		return "Android"
+	}
+	switch runtime.GOOS {
+	case "windows":
+		return "Windows"
+	case "darwin":
+		return "Mac"
+	case "linux":
+		return "Linux"
+	}
+	return runtime.GOOS
 }
 
 // installNumber returns this installation's random number, made once and
