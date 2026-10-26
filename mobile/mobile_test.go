@@ -309,6 +309,7 @@ func (p *fakeVPN) LanAddrs() string            { return "" }
 func (p *fakeVPN) InstallUpdate(string) error  { return nil }
 func (p *fakeVPN) LocationSetup() string       { return "" }
 func (p *fakeVPN) OpenLocationSettings(string) {}
+func (*fakeVPN) SetBadge(string)               {}
 
 // The mock location stays near the place, keeps still for one server and
 // moves for another.
