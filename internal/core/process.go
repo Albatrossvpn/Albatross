@@ -178,7 +178,15 @@ func (p *Process) WaitListening(ctx context.Context, addr string, timeout time.D
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("%s did not start listening on %s", p.Name, addr)
+			err := fmt.Errorf("%s did not start listening on %s", p.Name, addr)
+			if out := strings.TrimSpace(p.Output()); out != "" {
+				lines := strings.Split(out, "\n")
+				if len(lines) > 5 {
+					lines = lines[len(lines)-5:]
+				}
+				err = fmt.Errorf("%w: %s", err, strings.Join(lines, " | "))
+			}
+			return err
 		}
 		select {
 		case <-ctx.Done():
