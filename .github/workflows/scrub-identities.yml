@@ -2,8 +2,9 @@ name: Scrub commit identities
 
 # Rewrites the whole history so that no commit carries a personal address
 # or a local time zone: every author and committer address that is not a
-# noreply one becomes the repository owner's GitHub noreply address, and
-# every date is written in UTC. The files in every commit stay exactly the
+# noreply one becomes the repository owner's GitHub noreply address, so
+# does every such address inside a commit message (the Co-authored-by
+# lines GitHub adds to squash merges), and every date is written in UTC. The files in every commit stay exactly the
 # same (the run checks this before it pushes), only the metadata changes,
 # so every commit gets a new hash and every clone must be fetched again.
 # Run it by hand, once, after personal addresses got in.
@@ -55,6 +56,13 @@ jobs:
           ' --commit-callback '
           commit.author_date = commit.author_date.split(b" ")[0] + b" +0000"
           commit.committer_date = commit.committer_date.split(b" ")[0] + b" +0000"
+          ' --message-callback '
+          import os, re
+          noreply = os.environ["OWNER_ID"].encode() + b"+" + os.environ["OWNER"].encode() + b"@users.noreply.github.com"
+          def keep(m):
+              e = m.group(0)
+              return e if e.endswith(b"@users.noreply.github.com") or e in (b"noreply@github.com", b"noreply@anthropic.com") else noreply
+          return re.sub(rb"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", keep, message)
           '
       - name: Check that no file changed
         run: |
@@ -67,7 +75,9 @@ jobs:
           done < ../refs-before.txt
           left="$(git log --all --format='%ae%n%ce%n%ad%n%cd' --date=format:%z | grep -vcE '^(\+0000|.*@users\.noreply\.github\.com|noreply@github\.com|noreply@anthropic\.com)$' || true)"
           echo "fields still personal: $left"
-          [ "$bad" = 0 ] && [ "$left" = 0 ] || exit 1
+          inmsg="$(git log --all --format=%B | grep -oE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' | grep -vcE '(@users\.noreply\.github\.com|^noreply@github\.com|^noreply@anthropic\.com)$' || true)"
+          echo "addresses still personal in messages: $inmsg"
+          [ "$bad" = 0 ] && [ "$left" = 0 ] && [ "$inmsg" = 0 ] || exit 1
       - name: Push every branch and tag
         env:
           GH_TOKEN: ${{ github.token }}
