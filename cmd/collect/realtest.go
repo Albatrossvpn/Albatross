@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -35,7 +37,9 @@ func realTest(list []*entry, n int) (passed map[*entry]time.Duration, tested map
 		return nil, nil
 	}
 	defer os.RemoveAll(dir)
-	rt := &core.Runtime{Bin: core.Binaries{SingBox: sb, Xray: os.Getenv("XRAY")}, Dir: dir}
+	// Xray with 250 servers takes a while to come up on a busy runner;
+	// given 15 seconds it was given up on, and its servers never tested.
+	rt := &core.Runtime{Bin: core.Binaries{SingBox: sb, Xray: os.Getenv("XRAY")}, Dir: dir, StartWait: 60 * time.Second}
 	reps, siblings := byAddress(list)
 	passed = map[*entry]time.Duration{}
 	tested = map[*entry]bool{}
@@ -206,24 +210,92 @@ func confirm(passed map[*entry]time.Duration) map[*entry]time.Duration {
 
 // checkIran reorders hot by reachability from inside Iran (see iranReach)
 // and returns how many addresses were checked and how many were open.
-func checkIran(hot []*entry) (checked, open int) {
+// checkIran asks probes inside the country which hot addresses answer
+// there, keeping the answers in iran-tcp.json (read from prevDir, written
+// to outDir) so a run spends its quota on addresses not checked lately.
+// It returns the hot list with what does not answer from inside left out,
+// those that do first, and how many addresses had an answer and answered.
+func checkIran(hot []*entry, prevDir, outDir string) ([]*entry, int, int) {
+	cache := loadIranCache(prevDir)
+	now := time.Now()
 	var eps []string
 	for _, e := range hot {
-		if e.endpoint != "" && len(eps) < iranChecks() {
+		if e.endpoint == "" {
+			continue
+		}
+		if c, ok := cache[e.endpoint]; ok && now.Sub(time.Unix(c.At, 0)) < iranFresh {
+			continue
+		}
+		if len(eps) < iranChecks() {
 			eps = append(eps, e.endpoint)
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
-	seen := iranReach(ctx, eps, gpProbes())
-	for _, ok := range seen {
-		if ok {
-			open++
+	for ep, open := range iranReach(ctx, eps, gpProbes()) {
+		cache[ep] = iranSeen{Open: open, At: now.Unix()}
+	}
+	saveIranCache(outDir, cache, now)
+	seen := map[string]bool{}
+	checked, open := 0, 0
+	for _, e := range hot {
+		if c, ok := cache[e.endpoint]; ok && e.endpoint != "" && now.Sub(time.Unix(c.At, 0)) < iranFresh {
+			seen[e.endpoint] = c.Open
+			checked++
+			if c.Open {
+				open++
+			}
 		}
 	}
-	iranFirst(hot, seen)
-	log.Printf("globalping: %d of %d hot addresses answer from Iran", open, len(seen))
-	return len(seen), open
+	kept := hot[:0:0]
+	for _, e := range hot {
+		if o, ok := seen[e.endpoint]; !ok || o {
+			kept = append(kept, e)
+		}
+	}
+	iranFirst(kept, seen)
+	log.Printf("globalping: %d of %d hot addresses answer from Iran (%d asked this run); %d left out", open, checked, len(eps), len(hot)-len(kept))
+	return kept, checked, open
+}
+
+// iranSeen is one address's last answer from inside the country.
+type iranSeen struct {
+	Open bool  `json:"open"`
+	At   int64 `json:"at"`
+}
+
+// iranFresh is how long an answer from inside counts; iranKeep how long
+// it is kept in the file at all.
+const iranFresh, iranKeep = 3 * time.Hour, 24 * time.Hour
+
+const iranCacheName = "iran-tcp.json"
+
+func loadIranCache(dir string) map[string]iranSeen {
+	out := map[string]iranSeen{}
+	if dir == "" {
+		return out
+	}
+	b, err := os.ReadFile(filepath.Join(dir, iranCacheName))
+	if err != nil {
+		return out
+	}
+	json.Unmarshal(b, &out)
+	return out
+}
+
+func saveIranCache(dir string, cache map[string]iranSeen, now time.Time) {
+	if dir == "" {
+		return
+	}
+	for ep, c := range cache {
+		if now.Sub(time.Unix(c.At, 0)) > iranKeep {
+			delete(cache, ep)
+		}
+	}
+	b, err := json.Marshal(cache)
+	if err == nil {
+		os.WriteFile(filepath.Join(dir, iranCacheName), b, 0o644)
+	}
 }
 
 // iranChecks bounds the addresses checked from Iran per run, within the

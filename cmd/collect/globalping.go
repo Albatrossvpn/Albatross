@@ -35,7 +35,7 @@ func iranReach(ctx context.Context, endpoints []string, probes int) map[string]b
 	var once, fell sync.Once
 	var own atomic.Bool
 	own.Store(gpOwnTags() != nil)
-	sem := make(chan struct{}, 4)
+	sem := make(chan struct{}, 12)
 	var wg sync.WaitGroup
 	for _, ep := range endpoints {
 		select {
@@ -140,8 +140,8 @@ func tcpFromIran(ctx context.Context, endpoint string, probes int, own bool) (bo
 			} `json:"result"`
 		} `json:"results"`
 	}
-	for i := 0; i < 30; i++ {
-		time.Sleep(time.Second)
+	for i := 0; i < 60; i++ {
+		time.Sleep(500 * time.Millisecond)
 		if _, err := gpDo(ctx, http.MethodGet, globalpingAPI+"/"+created.ID, nil, &m); err != nil {
 			return false, err
 		}

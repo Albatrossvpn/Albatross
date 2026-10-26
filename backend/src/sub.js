@@ -93,7 +93,7 @@ export function pool(hot, fresh, min = SUB_MIN, pick = Math.random) {
       out.push(e);
     }
   }
-  if (out.length >= min) return out;
+  if (out.length >= min) return tcpFirst(out);
   const cands = [];
   for (const e of parseList(fresh)) {
     if (cands.length >= TOPUP_FROM) break;
@@ -104,8 +104,13 @@ export function pool(hot, fresh, min = SUB_MIN, pick = Math.random) {
   const chosen = new Set();
   while (chosen.size < want) chosen.add(Math.floor(pick() * cands.length) % cands.length);
   for (const [i, e] of cands.entries()) if (chosen.has(i)) out.push(e);
-  return out;
+  return tcpFirst(out);
 }
+
+// UDP is throttled on many networks here: servers over it go after the rest.
+const UDP_SCHEMES = new Set(["hysteria2", "hy2", "tuic"]);
+const overUDP = (e) => UDP_SCHEMES.has(e.link.slice(0, e.link.indexOf("://")).toLowerCase());
+export const tcpFirst = (entries) => [...entries.filter((e) => !overUDP(e)), ...entries.filter(overUDP)];
 
 /** The countries in a list, most servers first. */
 export function countriesOf(entries) {

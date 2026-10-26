@@ -211,4 +211,6 @@ test("a subscription is topped up from the fresh list when the hot list is short
   const other = pool(hot, fresh, 10);
   assert.equal(other.length, 10);
   assert.equal(pool(hot, "", 10).length, 2, "nothing fresh: the hot list alone");
+  const udp = pool("hysteria2://a@h:443#DE\nvless://b@h:443#US\ntuic://c@h:443#FR\nss://YWVzOmJhc2U@h2:8388#NL", "", 1);
+  assert.deepEqual(udp.map((e) => e.link.split("://")[0]), ["vless", "ss", "hysteria2", "tuic"], "UDP servers go last");
 });
