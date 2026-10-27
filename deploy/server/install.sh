@@ -50,6 +50,10 @@ WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
 # NaiveProxy forward proxy (a commit of its naive branch) and AmneziaWG.
 XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"
 NAIVE_PROXY_REF="${NAIVE_PROXY_REF:-e747854e78743dba85c039b38ed185fb11d93667}"
+# The Caddy that forward proxy is built for (its release v2.11.7-naive2):
+# it uses Caddy's idle timeouts, which older Caddy lacks, while xcaddy
+# left alone picks a Caddy of its own.
+CADDY_VERSION="${CADDY_VERSION:-v2.11.7}"
 AWG_GO_REF="${AWG_GO_REF:-v3.1.20260828}"
 AWG_TOOLS_REF="${AWG_TOOLS_REF:-v3.1.20260812}"
 # SIDECARS=0 skips them (sing-box and Xray alone, as before).
@@ -671,7 +675,7 @@ sidecar_setup() {
   # NaiveProxy's server is Caddy with klzgrad's forward proxy.
   if [ ! -x /usr/local/bin/caddy-naive ]; then
     go install "github.com/caddyserver/xcaddy/cmd/xcaddy@$XCADDY_VERSION" >/dev/null
-    xcaddy build --with "github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@$NAIVE_PROXY_REF" --output /usr/local/bin/caddy-naive >/dev/null
+    xcaddy build "$CADDY_VERSION" --with "github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@$NAIVE_PROXY_REF" --output /usr/local/bin/caddy-naive >/dev/null
   fi
   cat >"$OUT/Caddyfile" <<EOF
 {
