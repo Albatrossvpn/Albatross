@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// LEAP providers (Riseup, Calyx) publish their OpenVPN gateways through the
+// LEAP providers (Riseup) publish their OpenVPN gateways through the
 // LEAP API and hand out an anonymous client certificate to anyone who asks,
 // so their servers are free and need no account. sources fetches the three
 // documents and joins them as one LEAPDoc.
