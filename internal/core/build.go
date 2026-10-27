@@ -74,7 +74,22 @@ type BuildOptions struct {
 	OnLine func(core, line string)
 	// warpPorts maps warp-plus and sidecar nodes to the SOCKS port their
 	// process listens on; nodes without a port are left out.
-	warpPorts map[*node.Node]int
+	warpPorts map[*node.Node]helperPort
+}
+
+// helperPort is where a helper process (warp-plus, usque, Tor, a sidecar)
+// takes SOCKS5 connections, and the password it asks of node.SocksUser
+// there ("" for the helpers that cannot ask one: warp-plus, Tor, Brook).
+type helperPort struct {
+	port int
+	pass string
+}
+
+// helperPass is a fresh password for one helper's SOCKS5 port.
+func helperPass() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // BuildSet lays nodes out for sing-box and, when needed, Xray.
@@ -124,13 +139,17 @@ func BuildSet(nodes []*node.Node, o BuildOptions) (*Set, error) {
 		}
 	}
 	for _, i := range wpNodes {
-		port := o.warpPorts[nodes[i]]
-		if port == 0 {
-			port = 9 // discard: no process serves this node
+		hp := o.warpPorts[nodes[i]]
+		if hp.port == 0 {
+			hp.port = 9 // discard: no process serves this node
 		}
-		s.Outbounds = append(s.Outbounds, map[string]any{
-			"type": "socks", "tag": s.Tags[i], "server": "127.0.0.1", "server_port": port, "version": "5",
-		})
+		out := map[string]any{
+			"type": "socks", "tag": s.Tags[i], "server": "127.0.0.1", "server_port": hp.port, "version": "5",
+		}
+		if hp.pass != "" {
+			out["username"], out["password"] = node.SocksUser, hp.pass
+		}
+		s.Outbounds = append(s.Outbounds, out)
 		s.outIdx = append(s.outIdx, i)
 	}
 	if len(xrayNodes) == 0 {
@@ -356,7 +375,7 @@ func sidecarNode(n *node.Node) bool {
 // parallel, and waits for each to open its SOCKS port. warp-plus only
 // listens once its tunnel is up, so this also tests the method. Tor nodes
 // share one tor process instead; release lets go of it.
-func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Process, map[*node.Node]int, []*node.Node, []*node.Node, func()) {
+func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Process, map[*node.Node]helperPort, []*node.Node, []*node.Node, func()) {
 	var idx []int
 	for i, n := range nodes {
 		if sidecarNode(n) {
@@ -367,6 +386,7 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 		return nil, nil, nil, nodes, nil
 	}
 	procs := make([]*Process, len(nodes))
+	passes := make([]string, len(nodes))
 	torPorts := make([]int, len(nodes))
 	ports, err := FreePorts(len(idx))
 	if err == nil {
@@ -377,10 +397,13 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 				if r.Bin.Sidecar(n.Sidecar()) == "" {
 					continue
 				}
+				if n.SidecarAuth() {
+					passes[i] = helperPass()
+				}
 				wg.Add(1)
 				go func(i, port int) {
 					defer wg.Done()
-					if p := r.startSidecar(ctx, n, port); p != nil {
+					if p := r.startSidecar(ctx, n, port, passes[i]); p != nil {
 						procs[i] = p
 					}
 				}(i, ports[k])
@@ -402,10 +425,11 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 				if r.Bin.Usque == "" {
 					continue
 				}
+				passes[i] = helperPass()
 				wg.Add(1)
 				go func(i, port int) {
 					defer wg.Done()
-					if p := r.startUsque(ctx, n, port); p != nil {
+					if p := r.startUsque(ctx, n, port, passes[i]); p != nil {
 						procs[i] = p
 					}
 				}(i, ports[k])
@@ -437,7 +461,7 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 		}
 		wg.Wait()
 	}
-	bound := map[*node.Node]int{}
+	bound := map[*node.Node]helperPort{}
 	var keep, failed []*node.Node
 	var running []*Process
 	held := 0
@@ -450,12 +474,12 @@ func (r *Runtime) startWarpPlus(ctx context.Context, nodes []*node.Node) ([]*Pro
 		switch {
 		case torPorts[i] != 0:
 			keep = append(keep, n)
-			bound[n] = torPorts[i]
+			bound[n] = helperPort{port: torPorts[i]}
 			held++
 		case procs[i] != nil:
 			keep = append(keep, n)
 			running = append(running, procs[i])
-			bound[n] = ports[k]
+			bound[n] = helperPort{port: ports[k], pass: passes[i]}
 		default:
 			failed = append(failed, n)
 		}
@@ -547,10 +571,11 @@ func (r *Runtime) start(ctx context.Context, coreName, name string, cfg map[stri
 	return p, nil
 }
 
-// startUsque runs usque (WARP over MASQUE) as a SOCKS proxy on port. The
-// first run registers a WARP device, which needs Cloudflare's API; the
-// registration is kept, so later runs start at once.
-func (r *Runtime) startUsque(ctx context.Context, n *node.Node, port int) *Process {
+// startUsque runs usque (WARP over MASQUE) as a SOCKS proxy on port,
+// asking for pass there when it is set. The first run registers a WARP
+// device, which needs Cloudflare's API; the registration is kept, so later
+// runs start at once.
+func (r *Runtime) startUsque(ctx context.Context, n *node.Node, port int, pass string) *Process {
 	cache := filepath.Join(r.Dir, "usque")
 	os.MkdirAll(cache, 0o755)
 	var onLine func(string)
@@ -576,7 +601,7 @@ func (r *Runtime) startUsque(ctx context.Context, n *node.Node, port int) *Proce
 		}
 	}
 	bind := "127.0.0.1:" + strconv.Itoa(port)
-	p, err := Start("usque", r.Bin.Usque, n.UsqueArgs("127.0.0.1", strconv.Itoa(port), cache), nil, onLine)
+	p, err := Start("usque", r.Bin.Usque, n.UsqueArgs("127.0.0.1", strconv.Itoa(port), cache, pass), nil, onLine)
 	if err != nil {
 		return nil
 	}
@@ -588,16 +613,17 @@ func (r *Runtime) startUsque(ctx context.Context, n *node.Node, port int) *Proce
 }
 
 // startSidecar runs the helper program of a sidecar protocol as a SOCKS5
-// proxy on port, with its configuration files in a directory of this run's
-// own (the node and the port: a test and the connection may run one node at
-// once), removed when the helper ends, and waits for the port.
-func (r *Runtime) startSidecar(ctx context.Context, n *node.Node, port int) *Process {
+// proxy on port, asking for pass there when it is set (node.SidecarArgs),
+// with its configuration files in a directory of this run's own (the node
+// and the port: a test and the connection may run one node at once),
+// removed when the helper ends, and waits for the port.
+func (r *Runtime) startSidecar(ctx context.Context, n *node.Node, port int, pass string) *Process {
 	name := n.Sidecar()
 	dir := filepath.Join(r.Dir, "sidecar", name+"-"+n.Key()[:12]+"-"+strconv.Itoa(port))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil
 	}
-	args, env, files := n.SidecarArgs(port, dir)
+	args, env, files := n.SidecarArgs(port, dir, pass)
 	for f, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, f), []byte(body), 0o600); err != nil {
 			os.RemoveAll(dir)

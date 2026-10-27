@@ -39,7 +39,7 @@ func TestSidecarOutboundIsSocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	set, err := BuildSet([]*node.Node{n}, BuildOptions{warpPorts: map[*node.Node]int{n: 21080}})
+	set, err := BuildSet([]*node.Node{n}, BuildOptions{warpPorts: map[*node.Node]helperPort{n: {port: 21080}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,5 +49,27 @@ func TestSidecarOutboundIsSocks(t *testing.T) {
 	}
 	if Locate(t.TempDir()).Sidecar("mieru") != "" {
 		t.Fatal("found a helper in an empty directory")
+	}
+}
+
+// A helper that asks for a password on its SOCKS5 port gets it from
+// sing-box's outbound; one that cannot ask (warp-plus, Tor, Brook) is
+// reached without.
+func TestHelperOutboundCarriesThePassword(t *testing.T) {
+	a, _ := node.ParseLink("mieru://carol:pw@5.6.7.8:2086?protocol=tcp#M")
+	b, _ := node.ParseLink("brook://server?server=5.6.7.8%3A9999&password=pw#B")
+	set, err := BuildSet([]*node.Node{a, b}, BuildOptions{warpPorts: map[*node.Node]helperPort{a: {port: 21080, pass: "s3cret"}, b: {port: 21081}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oa, ob := set.Outbounds[0].(map[string]any), set.Outbounds[1].(map[string]any)
+	if oa["username"] != node.SocksUser || oa["password"] != "s3cret" {
+		t.Fatalf("outbound %v", oa)
+	}
+	if _, ok := ob["password"]; ok {
+		t.Fatalf("outbound %v", ob)
+	}
+	if p, q := helperPass(), helperPass(); len(p) != 32 || p == q {
+		t.Fatalf("helper passwords %q %q", p, q)
 	}
 }

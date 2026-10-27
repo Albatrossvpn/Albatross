@@ -1082,8 +1082,12 @@ func UsqueRegisterArgs(cacheDir string) []string {
 // UsqueArgs runs usque as a SOCKS5 proxy on host:port over MASQUE: HTTP/3
 // over QUIC, or for masque2 HTTP/2 over TCP, which gets through networks
 // that throttle UDP.
-func (n *Node) UsqueArgs(host, port, cacheDir string) []string {
+func (n *Node) UsqueArgs(host, port, cacheDir, pass string) []string {
 	args := []string{"-c", UsqueConfig(cacheDir), "socks", "-b", host, "-p", port, "--always-reconnect"}
+	if pass != "" {
+		// Its SOCKS5 port takes only this login (see SidecarArgs).
+		args = append(args, "-u", SocksUser, "-w", pass)
+	}
 	if n.WPMode == "masque2" {
 		args = append(args, "--http2")
 	}

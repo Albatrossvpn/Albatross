@@ -53,8 +53,8 @@ func TestSidecarRunsInItsOwnDir(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	a := r.startSidecar(ctx, n, ports[0])
-	b := r.startSidecar(ctx, n, ports[1])
+	a := r.startSidecar(ctx, n, ports[0], "")
+	b := r.startSidecar(ctx, n, ports[1], "")
 	if a == nil || b == nil {
 		t.Fatal("the helper did not start")
 	}
