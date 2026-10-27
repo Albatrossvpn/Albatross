@@ -27,6 +27,11 @@ type scanState struct {
 	Found        int       `json:"found"`
 	Testing      int       `json:"testing"`
 	recent       []time.Time
+	// shardAt is when a long-tail list was last downloaded (shards.go);
+	// exhausted, when the scan last ran out of servers to test while none
+	// worked, zero since it found some.
+	shardAt   time.Time
+	exhausted time.Time
 }
 
 // protoCodes number the protocols in the pool. Every protocol the user may
@@ -48,10 +53,10 @@ func refreshEvery(s sources.Source, mobile bool) time.Duration {
 		return 30 * time.Minute
 	case s.Hot || s.Delta:
 		return 20 * time.Minute
-	case s.Central && s.Tier == sources.TierDeep && mobile:
-		return 24 * time.Hour
-	case s.Central && s.Tier == sources.TierDeep:
-		return 6 * time.Hour
+	case shard(s):
+		// One at a time, by nextShard.
+		_, age := shardTiming(mobile)
+		return age
 	case s.Central && mobile:
 		// new.txt brings the additions in between.
 		return 8 * time.Hour
@@ -157,8 +162,15 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 			}
 		}
 	}
+	_, shardAge := shardTiming(e.opt.Mobile)
 	for i, s := range srcs {
 		if !s.Enabled || (skipBuiltin && s.Builtin && !s.Central) {
+			continue
+		}
+		if shard(s) && time.Since(e.fetcher.CachedAt(s)) >= shardAge {
+			// Ten megabytes of servers the collector could not confirm,
+			// days old: not worth the parsing, nor the space.
+			e.fetcher.Forget(s)
 			continue
 		}
 		select {
@@ -261,7 +273,16 @@ func (e *Engine) refreshSources(central bool) {
 			due = append(due, i)
 			continue
 		}
+		if shard(s) {
+			continue
+		}
 		if now.Sub(st.Fetched) >= refreshEvery(s, e.opt.Mobile) {
+			due = append(due, i)
+		}
+	}
+	if central {
+		if i := e.nextShard(now, shut); i >= 0 {
+			e.scan.shardAt = now
 			due = append(due, i)
 		}
 	}
@@ -744,6 +765,7 @@ func (e *Engine) scanLoop() {
 		size, chunk, _ := e.scanPace()
 		batch := e.pickBatch(size)
 		if len(batch) == 0 {
+			e.noneLeft()
 			select {
 			case <-e.ctx.Done():
 				return
@@ -752,6 +774,9 @@ func (e *Engine) scanLoop() {
 			}
 			continue
 		}
+		e.mu.Lock()
+		e.scan.exhausted = time.Time{}
+		e.mu.Unlock()
 		e.runBatch(batch, chunk)
 		done := time.Now()
 		// Wake-ups (a new target, a connect request, new candidates) end the

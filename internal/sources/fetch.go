@@ -539,6 +539,16 @@ func (f *Fetcher) loadBody(s Source) (string, bool) {
 	return string(b), true
 }
 
+// Forget deletes the copy of a source kept on disk.
+func (f *Fetcher) Forget(s Source) {
+	if f.CacheDir == "" {
+		return
+	}
+	body, meta := f.paths(s)
+	os.Remove(body)
+	os.Remove(meta)
+}
+
 // Cached returns the last downloaded body of a source, if any.
 func (f *Fetcher) Cached(s Source) (string, bool) { return f.loadBody(s) }
 
