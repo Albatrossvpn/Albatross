@@ -199,15 +199,12 @@ export function checkPassword(pw) {
 
 /**
  * The edge's share links for a signed-in user: VLESS over WebSocket with
- * TLS, on the ports Cloudflare proxies that the app's edge scan also uses.
+ * TLS, by the edge's name on the ports Cloudflare proxies that the app's
+ * edge scan also uses and, for each clean Cloudflare address given
+ * (reach.json, found open from inside the country), the same edge by
+ * address, which gets through where the name's resolution is poisoned.
  * The path carries early data in the WebSocket upgrade (`?ed=`), which
  * saves a round trip. Empty when the edge is not deployed.
- */
-/**
- * The edge's links: the edge's name on Cloudflare's TLS ports and, for
- * each clean Cloudflare address given (reach.json, found open from inside
- * the country), the same edge by address, which gets through where the
- * name's resolution is poisoned.
  */
 export function edgeLinks(host, uuid, addrs = []) {
   if (!host || !/^[0-9a-f-]{36}$/i.test(uuid || "")) return [];

@@ -67,6 +67,11 @@ test("public information; sign-ups are closed until the administrator opens them
   assert.equal(s.status, 403);
 });
 
+test("a body too large for any request is refused", async () => {
+  const r = await call("POST", "login", { body: { username: "someone", password: "x".repeat(9000) } });
+  assert.equal(r.status, 413);
+});
+
 test("the administrator signs in; panels reject everyone else", async () => {
   const bad = await call("POST", "admin/login", { body: { username: "root", password: "nope" } });
   assert.equal(bad.status, 401);
