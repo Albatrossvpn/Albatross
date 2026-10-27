@@ -197,15 +197,25 @@ certificate() {
   # A real certificate, so the app checks it like any HTTPS site: no
   # "insecure" links that anyone in the middle could impersonate.
   local args=(certonly --standalone --non-interactive --agree-tos --cert-name "$DOMAIN" -d "$DOMAIN" --keep-until-expiring)
-  # The CDN name goes on the same certificate: Cloudflare checks it
-  # against the name it connects for.
-  [ -z "$CDN_HOST" ] || args+=(-d "$CDN_HOST" --expand)
   if [ -n "${EMAIL:-}" ]; then args+=(-m "$EMAIL"); else args+=(--register-unsafely-without-email); fi
   iptables -C INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport 80 -j ACCEPT
-  # On a rerun the HTTP inbound holds port 80, which the validation needs.
+  # On a rerun the HTTP inbound holds port 80, which the validation needs;
+  # it starts again whatever the outcome, or a failed check would leave
+  # the server's protocols down.
   systemctl stop albatross-sing-box 2>/dev/null || true
-  certbot "${args[@]}"
+  local ok=1
+  # The CDN name goes on the same certificate: Cloudflare checks it
+  # against the name it connects for (SSL/TLS mode Full (strict)). Its
+  # check comes through Cloudflare, which may turn it away (Always Use
+  # HTTPS); the server's own name alone then does, with the mode on Full.
+  if [ -n "$CDN_HOST" ] && ! certbot "${args[@]}" -d "$CDN_HOST" --expand; then
+    log "No certificate for $CDN_HOST (Cloudflare kept the check from this machine); one for $DOMAIN alone. Set the zone's SSL/TLS mode to Full, not Full (strict)."
+    certbot "${args[@]}" || ok=0
+  elif [ -z "$CDN_HOST" ]; then
+    certbot "${args[@]}" || ok=0
+  fi
   systemctl start albatross-sing-box 2>/dev/null || true
+  [ "$ok" = 1 ] || { log "No certificate for $DOMAIN: is port 80 open to this machine?"; exit 1; }
   ln -sf "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" "$CERT"
   ln -sf "/etc/letsencrypt/live/$DOMAIN/privkey.pem" "$KEY"
   mkdir -p /etc/letsencrypt/renewal-hooks/deploy
