@@ -1,9 +1,12 @@
 package node
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -69,17 +72,45 @@ func (n *Node) validateSidecar() error {
 			return fmt.Errorf("wstunnel needs the path secret")
 		}
 	case "amneziawg":
-		if n.PrivateKey == "" || n.PeerPublicKey == "" {
-			return fmt.Errorf("amneziawg needs keys")
+		// Every value goes into the helper's INI file (SidecarArgs), so each
+		// is checked for its exact form: a newline in a link from a public
+		// list must not add a section of its own (a SOCKS port open to the
+		// network, a tunnel to the device's own services).
+		if _, ok := wgKey(n.PrivateKey); !ok {
+			return fmt.Errorf("amneziawg needs a private key")
+		}
+		if _, ok := wgKey(n.PeerPublicKey); !ok {
+			return fmt.Errorf("amneziawg needs the peer's public key")
+		}
+		if _, ok := wgKey(n.PreSharedKey); n.PreSharedKey != "" && !ok {
+			return fmt.Errorf("bad amneziawg preshared key")
 		}
 		if len(n.LocalAddress) == 0 {
 			return fmt.Errorf("amneziawg needs an address")
+		}
+		for _, a := range n.LocalAddress {
+			if _, err := netip.ParsePrefix(a); err != nil {
+				if _, err := netip.ParseAddr(a); err != nil {
+					return fmt.Errorf("bad amneziawg address %q", a)
+				}
+			}
+		}
+		if !plainHost(n.Server) || n.Port <= 0 || n.Port > 65535 {
+			return fmt.Errorf("bad amneziawg endpoint")
 		}
 		if n.AWG == nil {
 			return fmt.Errorf("amneziawg needs its parameters")
 		}
 		if n.AWG.Jc < 0 || n.AWG.Jc > 128 || n.AWG.Jmin < 0 || n.AWG.Jmax > 1280 || n.AWG.Jmin > n.AWG.Jmax {
 			return fmt.Errorf("bad junk packet parameters")
+		}
+		if n.AWG.S1 < 0 || n.AWG.S1 > 1280 || n.AWG.S2 < 0 || n.AWG.S2 > 1280 {
+			return fmt.Errorf("bad padding parameters")
+		}
+		for _, h := range []string{n.AWG.H1, n.AWG.H2, n.AWG.H3, n.AWG.H4} {
+			if h != "" && !awgHeader.MatchString(h) {
+				return fmt.Errorf("bad amneziawg header value %q", h)
+			}
 		}
 	default:
 		return fmt.Errorf("unsupported protocol %q", n.Proto)
@@ -89,6 +120,38 @@ func (n *Node) validateSidecar() error {
 
 // hostPort joins the server and port for a command line.
 func (n *Node) hostPort() string { return net.JoinHostPort(n.Server, strconv.Itoa(n.Port)) }
+
+// awgHeader is an AmneziaWG message type value: a number, or a range of
+// them (AmneziaWG 2).
+var awgHeader = regexp.MustCompile(`^[0-9]{1,10}(-[0-9]{1,10})?$`)
+
+// wgKey decodes a WireGuard key (32 bytes in base64, padded or not, standard
+// or URL-safe) and returns it in the standard form the configs take.
+func wgKey(s string) (string, bool) {
+	for _, enc := range []*base64.Encoding{base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding} {
+		if b, err := enc.DecodeString(s); err == nil && len(b) == 32 {
+			return base64.StdEncoding.EncodeToString(b), true
+		}
+	}
+	return "", false
+}
+
+// plainHost says whether s is an IP address or a DNS name and nothing more.
+func plainHost(s string) bool {
+	if _, err := netip.ParseAddr(s); err == nil {
+		return true
+	}
+	if s == "" || len(s) > 253 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '.' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
 
 // SidecarArgs are the command line and environment that run the node's
 // helper as a SOCKS5 proxy on 127.0.0.1:port. files are written into dir
@@ -166,9 +229,13 @@ func (n *Node) SidecarArgs(port int, dir string) (args, env []string, files map[
 		}
 		args = append(args, "wss://"+n.hostPort())
 	case "amneziawg":
+		// The keys in their standard form, rebuilt from their bytes
+		// (validateSidecar has checked every value written here).
+		priv, _ := wgKey(n.PrivateKey)
+		peer, _ := wgKey(n.PeerPublicKey)
 		var b strings.Builder
 		b.WriteString("[Interface]\n")
-		b.WriteString("PrivateKey = " + n.PrivateKey + "\n")
+		b.WriteString("PrivateKey = " + priv + "\n")
 		b.WriteString("Address = " + strings.Join(n.LocalAddress, ", ") + "\n")
 		b.WriteString("DNS = 1.1.1.1\n")
 		if n.MTU > 0 {
@@ -182,9 +249,9 @@ func (n *Node) SidecarArgs(port int, dir string) (args, env []string, files map[
 			}
 		}
 		b.WriteString("\n[Peer]\n")
-		b.WriteString("PublicKey = " + n.PeerPublicKey + "\n")
-		if n.PreSharedKey != "" {
-			b.WriteString("PresharedKey = " + n.PreSharedKey + "\n")
+		b.WriteString("PublicKey = " + peer + "\n")
+		if psk, ok := wgKey(n.PreSharedKey); ok {
+			b.WriteString("PresharedKey = " + psk + "\n")
 		}
 		b.WriteString("Endpoint = " + n.hostPort() + "\n")
 		b.WriteString("AllowedIPs = 0.0.0.0/0, ::/0\n")

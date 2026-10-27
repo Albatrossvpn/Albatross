@@ -67,6 +67,27 @@ func TestSidecarLinksRejected(t *testing.T) {
 	}
 }
 
+// Every value of an AmneziaWG link goes into the helper's INI file: one that
+// carries a newline (a section of its own, such as a SOCKS port open to the
+// network) or is not of its exact form is refused.
+func TestAmneziaWGInjectionRejected(t *testing.T) {
+	const priv, pub = "cPr%2BXL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E%3D", "HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw%3D"
+	inject := "%0A%5BSocks5%5D%0ABindAddress%20%3D%200.0.0.0%3A1080"
+	base := "amneziawg://" + priv + "@1.2.3.4:8447?publickey=" + pub + "&address=10.8.0.2%2F32&jc=4&jmin=40&jmax=70"
+	for _, link := range []string{
+		base + "&h1=1" + inject,
+		"amneziawg://" + priv + "@1.2.3.4:8447?publickey=" + pub + inject + "&address=10.8.0.2%2F32&jc=4&jmin=40&jmax=70",
+		"amneziawg://" + priv + "@1.2.3.4:8447?publickey=" + pub + "&address=10.8.0.2%2F32" + inject + "&jc=4&jmin=40&jmax=70",
+		base + "&psk=x" + inject,
+		base + "&s1=-1",
+		"amneziawg://" + priv + "@1.2.3.4:8447?publickey=short&address=10.8.0.2%2F32&jc=4&jmin=40&jmax=70",
+	} {
+		if _, err := ParseLink(link); err == nil {
+			t.Errorf("%s parsed", link)
+		}
+	}
+}
+
 // Trojan-Go servers are Trojan over WebSocket for the cores.
 func TestTrojanGoLink(t *testing.T) {
 	n := mustParse(t, "trojan-go://pw@a.example.com:2098?type=ws&host=a.example.com&path=%2Ftg&sni=a.example.com#T")
@@ -81,5 +102,21 @@ func TestAmneziaKeyDiffersFromWireGuard(t *testing.T) {
 	b := mustParse(t, "amneziawg://cPr%2BXL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E%3D@1.2.3.4:8447?publickey=HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw%3D&address=10.8.0.2%2F32&jc=5&jmin=40&jmax=70")
 	if wg.Key() == a.Key() || a.Key() == b.Key() {
 		t.Fatal("keys collide")
+	}
+}
+
+// Keys written without padding, or URL-safe, are taken and written in the
+// standard form.
+func TestAmneziaWGKeyForms(t *testing.T) {
+	n := mustParse(t, "amneziawg://cPr-XL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E@1.2.3.4:8447?publickey=HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw&address=10.8.0.2%2F32,fd00::2%2F128&jc=4&jmin=40&jmax=70&h1=5-9")
+	_, _, files := n.SidecarArgs(1080, "/tmp/x")
+	conf := files["wireproxy.conf"]
+	for _, want := range []string{"PrivateKey = cPr+XL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E=\n", "PublicKey = HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=\n", "Address = 10.8.0.2/32, fd00::2/128\n", "H1 = 5-9\n"} {
+		if !strings.Contains(conf, want) {
+			t.Fatalf("config lacks %q:\n%s", want, conf)
+		}
+	}
+	if strings.Count(conf, "[") != 3 {
+		t.Fatalf("sections:\n%s", conf)
 	}
 }
