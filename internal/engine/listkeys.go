@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -94,6 +95,9 @@ func (e *Engine) refreshListKeys() {
 			}
 		}
 		listKeysMu.Lock()
+		if len(keys) > 0 {
+			keys = keepKeys(keys, listKeys, time.Now())
+		}
 		listKeys = keys
 		listKeysMu.Unlock()
 		if b, err := json.Marshal(keys); err == nil {
@@ -105,6 +109,29 @@ func (e *Engine) refreshListKeys() {
 	default:
 		e.logf("warn", "The lists' keys could not be fetched: %v", err)
 	}
+}
+
+// keepKeys returns the keys the service handed out with those this device
+// got before, newest first. The service hands out only the newest few,
+// while copies of the lists stay on the device for days (the long tail's
+// the longest, shards.go): a key stays as long as such a copy may need it
+// (its id is the time of the collection that made it). An account at a
+// limit gets no keys, and keeps none.
+func keepKeys(fresh, old []sources.ListKey, now time.Time) []sources.ListKey {
+	_, keep := shardTiming(false)
+	out := append([]sources.ListKey(nil), fresh...)
+	have := map[uint64]bool{}
+	for _, k := range fresh {
+		have[k.ID] = true
+	}
+	for _, k := range old {
+		if !have[k.ID] && now.Sub(time.Unix(int64(k.ID), 0)) < keep {
+			have[k.ID] = true
+			out = append(out, k)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	return out
 }
 
 // openKeyed opens a sealed list, fetching the keys when the list's key is
