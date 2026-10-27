@@ -3,6 +3,7 @@ package tester
 import (
 	"context"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -90,14 +91,41 @@ func liveLabel(n *node.Node) string {
 	return s
 }
 
-// hide takes the servers' names and addresses out of an error.
+// hide takes the servers' names, secrets and any address out of an
+// error (a core's message may quote its config, or a resolved address).
 func hide(s string, nodes []*node.Node) string {
 	for _, n := range nodes {
-		for _, v := range []string{n.Server, n.SNI, n.Host, n.VerifyName} {
+		for _, v := range []string{n.Server, n.SNI, n.Host, n.VerifyName, n.UUID, n.Password, n.Username, n.Path, n.Seed,
+			n.PublicKey, n.ShortID, n.HostKey, n.ObfsPassword, n.PrivateKey, n.PeerPublicKey, n.PreSharedKey} {
 			if len(v) > 3 {
-				s = strings.ReplaceAll(s, v, "<server>")
+				s = strings.ReplaceAll(s, v, "<hidden>")
 			}
 		}
 	}
-	return s
+	s = ipv4.ReplaceAllString(s, "<address>")
+	// What looks like IPv6, but not a time of day.
+	return ipv6.ReplaceAllStringFunc(s, func(m string) string {
+		if strings.Contains(m, "::") || strings.ContainsAny(strings.ToLower(m), "abcdef") {
+			return "<address>"
+		}
+		return m
+	})
+}
+
+var (
+	ipv4 = regexp.MustCompile(`\d{1,3}(\.\d{1,3}){3}`)
+	ipv6 = regexp.MustCompile(`(?i)[0-9a-f]{0,4}(:[0-9a-f]{0,4}){2,7}`)
+)
+
+func TestHideTakesOutAddresses(t *testing.T) {
+	n := &node.Node{Proto: "trojan", Server: "198-51-100-7.sslip.io", Password: "hunter22"}
+	got := hide(`dial 198-51-100-7.sslip.io (198.51.100.7, [2001:db8::7]:443) as hunter22 at 13:45:17: refused`, []*node.Node{n})
+	for _, leak := range []string{"198", "2001", "db8", "hunter22"} {
+		if strings.Contains(got, leak) {
+			t.Errorf("%q left in %q", leak, got)
+		}
+	}
+	if !strings.Contains(got, "13:45:17") || !strings.Contains(got, "refused") {
+		t.Errorf("too much taken out: %q", got)
+	}
 }
