@@ -10,11 +10,11 @@
   var mirror = /\.github\.io$/.test(location.hostname);
   var releases = "https://github.com/Albatrossvpn/Albatross/releases";
   if (mirror) {
-    document.querySelectorAll('a[href^="/download/"]').forEach(function (a) { a.href = releases; });
-    document.querySelectorAll('a[href^="/"]').forEach(function (a) {
-      // The main site's own pages: send visitors to the site itself.
-      if (a.getAttribute("href") !== "/" && !/^\/(download|#)/.test(a.getAttribute("href"))) a.href = "https://albatrossvpn.online" + a.getAttribute("href");
-    });
+    // The mirror holds every page of the site under the repository's name
+    // (pages.yml puts it in front of each root-relative address), so its
+    // links stay on it; only the list of downloads is the releases there.
+    var base = "/" + (location.pathname.split("/")[1] || "");
+    document.querySelectorAll('a[href^="/download/"], a[href^="' + base + '/download/"]').forEach(function (a) { a.href = releases; });
   }
   var urls = mirror ? ["https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json"] : [
     "/update.json"
