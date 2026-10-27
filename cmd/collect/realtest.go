@@ -189,73 +189,67 @@ func hotList(ordered []*entry, passed map[*entry]time.Duration, max int, crowd c
 		protos = left
 	}
 	// Every protocol that has passing servers is in the hot list, with at
-	// least protoReserve of them (WireGuard more: it is fast where the
-	// filtering lets it through), so a user who picks any protocol, or a
+	// least its reserve of them, so a user who picks any protocol, or a
 	// network that spares only one, finds servers.
-	var protoOrder []string
-	seenProto := map[string]bool{}
-	for _, e := range cands {
-		if !seenProto[e.proto] {
-			seenProto[e.proto] = true
-			protoOrder = append(protoOrder, e.proto)
-		}
-	}
-	for _, p := range protoOrder {
-		// Scaled to the list: a small list (tests) keeps its shares.
-		want := min(protoReserve, max/15)
-		if p == "wireguard" {
-			want = min(wgReserve, max/7)
-		}
-		if want > 0 {
-			out = reserveProto(out, cands, p, want)
-		}
-	}
-	return out
+	return keepReserves(out, cands, max, func(p string) int { return reserveOf(p, max) })
 }
 
 // protoReserve is how many servers of each protocol a 300-server hot list
 // carries at least when that many passed; wgReserve the same for WireGuard.
 const protoReserve, wgReserve = 20, 40
 
-// reserveProto makes sure out holds up to want servers of proto from
-// cands (in cands' order), replacing servers of other protocols from the
-// end of out when it is full.
-func reserveProto(out, cands []*entry, proto string, want int) []*entry {
+// reserveOf is how many servers of proto a hot list of max servers keeps at
+// least: WireGuard more, as it is fast where the filtering lets it through;
+// scaled to the list, so a small one (tests) keeps its shares.
+func reserveOf(proto string, max int) int {
+	if proto == "wireguard" {
+		return min(wgReserve, max/7)
+	}
+	return min(protoReserve, max/15)
+}
+
+// keepReserves returns out (at most max servers, best first) holding up to
+// reserve(p) servers of every protocol p in pool, taken in pool's order. A
+// server added replaces the last one in out of a protocol holding more
+// than its own reserve, so no protocol's share is given up for another's,
+// and joins at the end.
+func keepReserves(out, pool []*entry, max int, reserve func(string) int) []*entry {
+	out = append([]*entry(nil), out...)
 	in := map[*entry]bool{}
-	have := 0
+	count := map[string]int{}
 	for _, e := range out {
 		in[e] = true
-		if e.proto == proto {
-			have++
-		}
+		count[e.proto]++
 	}
-	var extra []*entry
-	for _, e := range cands {
-		if have+len(extra) >= want {
-			break
-		}
-		if e.proto == proto && !in[e] {
-			extra = append(extra, e)
-		}
-	}
-	if len(extra) == 0 {
-		return out
-	}
-	// Room at the end: the last servers of other protocols go.
-	size := len(out)
-	kept := make([]*entry, 0, size)
-	drop := len(extra)
-	for i := len(out) - 1; i >= 0; i-- {
-		if drop > 0 && out[i].proto != proto {
-			drop--
+	for _, e := range pool {
+		if in[e] || count[e.proto] >= reserve(e.proto) {
 			continue
 		}
-		kept = append(kept, out[i])
+		if len(out) >= max {
+			i := len(out) - 1
+			for i >= 0 && count[out[i].proto] <= reserve(out[i].proto) {
+				i--
+			}
+			if i < 0 {
+				continue
+			}
+			count[out[i].proto]--
+			delete(in, out[i])
+			out = append(out[:i], out[i+1:]...)
+		}
+		out = append(out, e)
+		in[e] = true
+		count[e.proto]++
 	}
-	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
-		kept[i], kept[j] = kept[j], kept[i]
-	}
-	return append(kept, extra...)
+	return out
+}
+
+// fitHot cuts the hot list to max servers once the probes inside the
+// country have reordered it, keeping every protocol's reserve: servers
+// without an answer from inside, all the UDP ones among them, sort last,
+// where a plain cut falls.
+func fitHot(hot []*entry, max int) []*entry {
+	return keepReserves(hot[:min(len(hot), max)], hot, max, func(p string) int { return reserveOf(p, max) })
 }
 
 // confirm tests the servers that passed once more and keeps those that

@@ -215,9 +215,7 @@ func refreshHot(paths []string, out string, n int, crowd crowdStats, report, tes
 	copy(list, ok)
 	hot := hotList(list, passed, hotSize+hotSpare, crowd)
 	hot, _, _ = checkIran(hot, out, out)
-	if len(hot) > hotSize {
-		hot = hot[:hotSize]
-	}
+	hot = fitHot(hot, hotSize)
 	if len(hot) == 0 {
 		log.Print("nothing passed; hot.txt left as it was")
 		return
@@ -553,9 +551,7 @@ func main() {
 	// cannot reach is left out and the list is still full.
 	hot := hotList(freshE, passed, hotSize+hotSpare, crowd)
 	hot, m.IranChecked, m.IranOpen = checkIran(hot, *prev, *out)
-	if len(hot) > hotSize {
-		hot = hot[:hotSize]
-	}
+	hot = fitHot(hot, hotSize)
 	write("hot.txt", links(hot))
 	if *prev != "" {
 		write("new.txt", newList(fresh, readLines(filepath.Join(*prev, "fresh.txt")), readLines(filepath.Join(*prev, "new.txt")), newSize))
