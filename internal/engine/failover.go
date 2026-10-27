@@ -489,13 +489,32 @@ func (e *Engine) checkActive(ctx context.Context, c *connection, urgent bool) bo
 		return true
 	}
 	e.noteResult(c, m, d, ok)
-	if ok {
-		c.mu.Lock()
-		c.healthy, c.delay = true, d
-		c.mu.Unlock()
-		return true
+	if !ok {
+		return e.failover(ctx, c, m)
 	}
-	return e.failover(ctx, c, m)
+	c.mu.Lock()
+	c.healthy, c.delay = true, d
+	c.mu.Unlock()
+	if !e.dnsCheck(ctx, c, m) {
+		switch move, say := c.dnsSwitches(); {
+		case move:
+			e.logf("warn", "Names stopped resolving through the server in use; switching to another.")
+			// The next one's names are looked at the next tick, not in
+			// dnsEvery: the user has gone without them for long enough.
+			c.mu.Lock()
+			c.dnsAt = time.Time{}
+			c.mu.Unlock()
+			return e.failover(ctx, c, m)
+		case say:
+			e.logf("warn", "Names do not resolve through any server right now (the resolver is out of reach); staying on this one.")
+		}
+	}
+	if urgent && c.stalledOften() {
+		// It answers its check, yet the user's requests keep going
+		// unanswered: what it carries is measured now, not in minutes.
+		go e.speedRound(ctx, c, true)
+	}
+	return true
 }
 
 // style is the wire style of the member's server.
@@ -680,7 +699,7 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 	}
 	if !c.idle() {
 		// Speed tests take seconds; health checks must not wait for them.
-		go e.speedRound(ctx, c)
+		go e.speedRound(ctx, c, false)
 	} else if b := c.faster(); b != nil && c.confirmFaster(b) && c.use(ctx, b) == nil {
 		c.mu.Lock()
 		d := b.delay
@@ -886,6 +905,10 @@ func (c *connection) addTraffic(up, down int64) {
 	case !c.waiting.IsZero() && now.Sub(c.waiting) >= 2*time.Second:
 		c.waiting = time.Time{}
 		stalled = true
+		if now.Sub(c.stallsFrom) > stallWindow {
+			c.stalls, c.stallsFrom = 0, now
+		}
+		c.stalls++
 	}
 	c.mu.Unlock()
 	if stalled {
@@ -893,12 +916,120 @@ func (c *connection) addTraffic(up, down int64) {
 	}
 }
 
+// A server can answer its check, a few bytes, and still carry next to
+// nothing of what the user asks: stalls that keep coming while it passes
+// its checks have its speed measured at once (speedRound) instead of in
+// minutes.
+const (
+	stallWindow = time.Minute
+	stallsMany  = 3
+)
+
+// stalledOften reports whether the user's traffic stalled stallsMany
+// times within the last stallWindow.
+func (c *connection) stalledOften() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.stalls >= stallsMany && time.Since(c.stallsFrom) <= stallWindow
+}
+
+// dnsEvery is how often names are checked through the server in use. In
+// TUN mode the device's lookups go through it to a resolver (connectConfig,
+// the "remote" server), which its own check never touches: there the
+// server resolves the name. A server that cannot reach the resolver passes
+// every check while no site opens.
+const dnsEvery = 30 * time.Second
+
+// dnsCheck reports whether lookups through the server in use answer. It
+// asks the core's resolver for a name nobody asked before, so no cache
+// answers for the server; any answer, "no such name" too, means the
+// resolver was reached. One failure is checked again at the next tick, so
+// a lost query is not a dead server; two in a row are. Only in TUN mode,
+// and not on the carriers that move a few bytes at a time (a DNS tunnel,
+// ping) nor on the serverless fallback, whose lookups take as long as
+// they take.
+func (e *Engine) dnsCheck(ctx context.Context, c *connection, m *member) bool {
+	if c.mode != "tun" || m == nil {
+		return true
+	}
+	if n := m.server.Node(); n == nil || n.DNSTunnel() || n.ICMP() || n.NoEndpoint() || m.server.Proto == "direct" {
+		return true
+	}
+	c.mu.Lock()
+	due := time.Since(c.dnsAt) >= dnsEvery
+	if due {
+		c.dnsAt = time.Now()
+	}
+	c.mu.Unlock()
+	if !due {
+		return true
+	}
+	var r struct {
+		Status int `json:"Status"`
+	}
+	q := url.Values{"name": {randomToken()[:16] + ".example.com"}, "type": {"A"}}
+	// Longer than the core's own wait on the resolver (ten seconds), so a
+	// resolver that does not answer comes back as the core's error, not as
+	// a core that did not answer.
+	status, err := c.api(ctx, http.MethodGet, "/dns/query?"+q.Encode(), nil, &r, 12*time.Second)
+	if status == 0 || ctx.Err() != nil {
+		return true // the core itself did not answer: the health check decides
+	}
+	ok := err == nil && (r.Status == 0 || r.Status == 3) // NOERROR or NXDOMAIN
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if ok {
+		c.dnsFails = 0
+		return true
+	}
+	c.dnsFails++
+	if c.dnsFails < 2 {
+		c.dnsAt = time.Time{} // again at the next tick
+		return true
+	}
+	c.dnsFails = 0
+	return false
+}
+
+// dnsSwitches reports whether a server whose names fail may be left (move),
+// and counts the switch. Two such switches in dnsSwitchWindow, and the
+// servers are not what fails: the resolver is out of reach through any of
+// them, and moving on would only change the exit address over and over;
+// say is true the first time that is found in the window.
+func (c *connection) dnsSwitches() (move, say bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := time.Now()
+	keep := c.dnsMoves[:0]
+	for _, t := range c.dnsMoves {
+		if now.Sub(t) < dnsSwitchWindow {
+			keep = append(keep, t)
+		}
+	}
+	c.dnsMoves = keep
+	if len(keep) >= 2 {
+		say = now.Sub(c.dnsStuck) >= dnsSwitchWindow
+		if say {
+			c.dnsStuck = now
+		}
+		return false, say
+	}
+	c.dnsMoves = append(c.dnsMoves, now)
+	return true, false
+}
+
+// dnsSwitchWindow is how far back dnsSwitches looks.
+const dnsSwitchWindow = 10 * time.Minute
+
+// speedWait is the longest one speed test takes.
+var speedWait = 12 * time.Second
+
 // speed downloads through one member and returns its speed in bytes per
 // second, timed from the first byte so connection setup is left out.
 func (c *connection) speed(ctx context.Context, m *member, size int) (float64, error) {
 	proxy := &url.URL{Scheme: "http", User: url.UserPassword(m.tag, c.clashSecret), Host: c.probeAddr}
 	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy), DisableKeepAlives: true}}
-	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, speedWait)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, speedURL+strconv.Itoa(size), nil)
 	if err != nil {
@@ -940,15 +1071,36 @@ func (c *connection) noteSpeed(m *member, bps float64) {
 	c.mu.Unlock()
 }
 
+// unusable is the speed, in bytes a second, below which the member in use is
+// left even before stayAtLeast: pages through it do not finish. A member a
+// download fails through counts as 0.
+const unusable = 32 << 10
+
+// settleFor is how long a member is in use before it is first measured.
+const settleFor = 45 * time.Second
+
 // speedRound measures the member in use while traffic flows and, when it is
 // slow, its best backups; it moves to one that is much faster. A server can
 // answer pings quickly and still carry little, so delay alone cannot tell.
 // To avoid swapping on one unlucky test, a backup must win twice in a row
-// unless it is more than four times as fast.
-func (e *Engine) speedRound(ctx context.Context, c *connection) {
+// unless it is more than four times as fast. Within stayAtLeast of a switch
+// only an unusable member is left, for a backup that is usable. stalled
+// (the user's traffic keeps stalling) measures now, with less, instead of
+// at the usual pace.
+func (e *Engine) speedRound(ctx context.Context, c *connection, stalled bool) {
 	every, size := speedPlan(e.opt.Mobile)
 	c.mu.Lock()
-	due := time.Since(c.speedAt) >= every && time.Since(c.switched) >= stayAtLeast
+	if stalled && time.Since(c.slowNet) >= 10*time.Minute {
+		// Not while every server was just found slow: then the network is,
+		// and more tests would only take from what little it carries.
+		every, size = 30*time.Second, min(size, 512<<10)
+	}
+	young := time.Since(c.switched) < stayAtLeast
+	if young {
+		// Telling unusable from usable takes little.
+		size = min(size, 512<<10)
+	}
+	due := time.Since(c.speedAt) >= every && time.Since(c.switched) >= settleFor
 	if due {
 		c.speedAt = time.Now()
 	}
@@ -959,12 +1111,18 @@ func (e *Engine) speedRound(ctx context.Context, c *connection) {
 	}
 	cur, err := c.speed(ctx, active, size)
 	if err != nil {
-		// The health checks decide about a member that does not answer.
-		return
+		if ctx.Err() != nil {
+			return
+		}
+		// It answers its checks (or a failover is on its way), yet nothing
+		// came through it: as unusable as it gets.
+		cur = 0
 	}
 	c.noteSpeed(active, cur)
-	e.noteLine(active, cur)
-	if cur >= fastEnough {
+	if err == nil {
+		e.noteLine(active, cur)
+	}
+	if cur >= fastEnough || young && cur >= unusable {
 		c.mu.Lock()
 		c.slowRuns = 0
 		c.mu.Unlock()
@@ -1005,6 +1163,11 @@ func (e *Engine) speedRound(ctx context.Context, c *connection) {
 		return
 	}
 	better := best != nil && bestSpeed >= 2*cur && bestSpeed-cur >= 200<<10
+	if young {
+		// Only a rescue this soon: the exit address is not changed for a
+		// faster server, only for one that works.
+		better = best != nil && cur < unusable && bestSpeed >= usable
+	}
 	if better {
 		c.slowRuns++
 	} else {
@@ -1017,6 +1180,10 @@ func (e *Engine) speedRound(ctx context.Context, c *connection) {
 	}
 	c.mu.Unlock()
 	if !swap || c.use(ctx, best) != nil {
+		return
+	}
+	if cur == 0 {
+		e.logf("info", "Nothing came through the server in use, although it answered its checks; switched to one at %s in the same location.", rate(bestSpeed))
 		return
 	}
 	e.logf("info", "A server was slow (%s); switched to one at %s in the same location.", rate(cur), rate(bestSpeed))
