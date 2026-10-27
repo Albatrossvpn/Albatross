@@ -405,18 +405,24 @@ firewall() {
     iptables -C INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$p" -j ACCEPT
   done
   # Hysteria 2 port hopping: the whole range, and UDP 53, land on its one
-  # port.
-  local hy2ports="$HOP_RANGE $P_HY2_DNS"
+  # port. Only what is sent to this machine: the clients of the tunnels
+  # below send their DNS queries, and any UDP, through it to elsewhere,
+  # and a redirect of everything took those to Hysteria (a tunnel then
+  # connected and reached nothing). The older, wider rules go.
+  local hy2ports="$HOP_RANGE $P_HY2_DNS" r
+  for r in $HOP_RANGE $P_HY2_DNS; do
+    while iptables -t nat -D PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null; do :; done
+  done
   if [ -n "$DNS_TUNNEL" ]; then
-    # UDP 53 serves the DNS tunnel; an older rule sending it to Hysteria goes.
+    # UDP 53 serves the DNS tunnel; a rule sending it to Hysteria goes.
     hy2ports="$HOP_RANGE"
-    iptables -t nat -D PREROUTING -p udp --dport "$P_HY2_DNS" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null || true
+    iptables -t nat -D PREROUTING -p udp --dport "$P_HY2_DNS" -m addrtype --dst-type LOCAL -j REDIRECT --to-ports "$P_HY2" 2>/dev/null || true
     iptables -C INPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport 53 -j ACCEPT
   fi
   for r in $hy2ports; do
     iptables -C INPUT -p udp --dport "$r" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$r" -j ACCEPT
-    iptables -t nat -C PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null ||
-      iptables -t nat -A PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2"
+    iptables -t nat -C PREROUTING -p udp --dport "$r" -m addrtype --dst-type LOCAL -j REDIRECT --to-ports "$P_HY2" 2>/dev/null ||
+      iptables -t nat -A PREROUTING -p udp --dport "$r" -m addrtype --dst-type LOCAL -j REDIRECT --to-ports "$P_HY2"
   done
   # The tunnels that hand the client an address (OpenVPN, AmneziaWG,
   # OpenConnect) forward its traffic, which Oracle's Ubuntu images reject
