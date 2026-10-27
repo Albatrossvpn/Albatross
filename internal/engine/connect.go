@@ -70,6 +70,12 @@ type connection struct {
 	dnRate     int64
 	lastBusy   time.Time // last second that carried traffic
 	waiting    time.Time // when data went out with nothing back since
+	stalls     int       // stalls since stallsFrom (stalledOften)
+	stallsFrom time.Time
+	dnsAt      time.Time   // last check of the names through the server (dnsCheck)
+	dnsFails   int         // failed name checks in a row
+	dnsMoves   []time.Time // switches made because names failed (dnsSwitches)
+	dnsStuck   time.Time   // when dnsSwitches last said it stays
 	healthy    bool
 	switched   time.Time // last time the member in use changed
 	speedAt    time.Time // last speed round
