@@ -30,6 +30,10 @@ func TestParseLEAP(t *testing.T) {
 	if !strings.HasPrefix(first.Node.Name, "Riseup Seattle") || !strings.HasPrefix(first.Node.Source, "leap://riseup/vpn01-sea.riseup.net/") {
 		t.Fatalf("name/source: %q %q", first.Node.Name, first.Node.Source)
 	}
+	// The app keeps it as its own link form, read back when it is tested.
+	if back, err := ParseLink(first.Node.Link()); err != nil || back.Key() != first.Node.Key() {
+		t.Fatalf("round trip through Link: %v", err)
+	}
 	cfg, _ := first.Node.SingBox("out", SingBoxOptions{})
 	tls, _ := cfg["tls"].(map[string]any)
 	if tls == nil || tls["client_certificate"] == nil || tls["client_key"] == nil {

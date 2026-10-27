@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 )
 
-var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|trojan-go|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|amneziawg|awg|anytls|socks5?|socks4|naive(?:\+https|\+quic)?|juicity|mieru|brook|wstunnel)://`)
+var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|trojan-go|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|amneziawg|awg|anytls|socks5?|socks4|naive(?:\+https|\+quic)?|juicity|mieru|brook|wstunnel|albatross)://`)
 
 // ErrUnsupported marks links that parse but cannot be run by any core.
 var ErrUnsupported = errors.New("unsupported")
@@ -190,7 +190,11 @@ func ParseLink(link string) (*Node, error) {
 	case "socks", "socks5":
 		n, err = parseSocks(link)
 	case "albatross":
-		return parseInternal(link)
+		// The app's own form of a node (Node.Link), which lists carry
+		// too: checked like the share links it stands in for.
+		if n, err = parseInternal(link); err == nil {
+			n.Name = cleanName(n.Name)
+		}
 	case "ssr", "socks4":
 		return nil, ErrUnsupported
 	default:
@@ -199,7 +203,10 @@ func ParseLink(link string) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	n.Source = link
+	if scheme != "albatross" {
+		// Link writes an internal node out as it is now, not as it came.
+		n.Source = link
+	}
 	n.normalize()
 	if err := n.Validate(); err != nil {
 		return nil, err
@@ -1016,7 +1023,9 @@ func EachText(text string, fn func(*Node)) (seen int) {
 	}
 	links := ExtractLinks(text)
 	for _, l := range links {
-		if n, err := ParseLink(l); err == nil {
+		// The methods (warp-plus, the serverless one) are the app's own:
+		// none comes from a list.
+		if n, err := ParseLink(l); err == nil && !n.NoEndpoint() {
 			fn(n)
 		}
 	}
