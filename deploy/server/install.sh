@@ -1067,8 +1067,14 @@ src="$MIRROR_SOURCE"; out="$OUT/mirror"
 EOF
   cat >>"$OUT/mirror-sync.sh" <<'EOF'
 get() { curl -fsSL --retry 2 --max-time 120 "$src/$1" -o "$out/$1.tmp" && mv "$out/$1.tmp" "$out/$1" || rm -f "$out/$1.tmp"; }
+# The lists go out sealed (.sealed, opened with the keys signed-in apps
+# get); the plain names are copied too while the collector still writes them.
 for f in hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt \
-         tor.json meta.json crowd.json iran.json own-0.bin own-1.bin own-2.bin own-3.bin own-4.bin; do
+         own-0.bin own-1.bin own-2.bin own-3.bin own-4.bin; do
+  get "list/servers/$f.sealed"
+  get "list/servers/$f"
+done
+for f in tor.json meta.json reach.json crowd.json iran.json; do
   get "list/servers/$f"
 done
 get list/rules/ads.srs

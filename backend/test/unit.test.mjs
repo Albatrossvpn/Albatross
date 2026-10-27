@@ -148,9 +148,9 @@ test("release files: names, sources and ranges", async () => {
 
 test("the app's own files: names and types", async () => {
   const { LIST_PATH, listType } = await import("../src/files.js");
-  for (const p of ["servers/hot.txt", "servers/all-8.txt", "servers/tor.json", "servers/crowd.json", "servers/iran.json", "servers/own-0.bin", "servers/own-4.bin", "main/update.json", "rules/ads.srs", "rules/ads.json", "rules/LICENSE-GPL-3.0.txt", "tools/collect-linux-amd64"]) assert.ok(LIST_PATH.test(p), p);
+  for (const p of ["servers/hot.txt", "servers/all-8.txt", "servers/tor.json", "servers/crowd.json", "servers/iran.json", "servers/own-0.bin", "servers/own-4.bin", "servers/hot.txt.sealed", "servers/own-2.bin.sealed", "servers/reach.json", "main/update.json", "rules/ads.srs", "rules/ads.json", "rules/LICENSE-GPL-3.0.txt", "tools/collect-linux-amd64"]) assert.ok(LIST_PATH.test(p), p);
   assert.equal(listType("tools/collect-linux-amd64"), "application/octet-stream");
-  for (const p of ["servers/all-9.txt", "servers/own-5.bin", "main/README.md", "../x", "servers/hot.txt/..", "rules/other.json"]) assert.ok(!LIST_PATH.test(p), p);
+  for (const p of ["servers/all-9.txt", "servers/own-5.bin", "main/README.md", "../x", "servers/hot.txt/..", "rules/other.json", "servers/iran-tcp.json", "servers/tor.json.sealed"]) assert.ok(!LIST_PATH.test(p), p);
   assert.equal(listType("main/update.json"), "application/json; charset=utf-8");
   assert.equal(listType("rules/ads.srs"), "application/octet-stream");
   assert.equal(listType("servers/hot.txt"), "text/plain; charset=utf-8");

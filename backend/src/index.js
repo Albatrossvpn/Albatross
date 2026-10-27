@@ -92,6 +92,7 @@ async function route(request, env, url) {
     case "GET admin/users": return adminList(request, env, url);
     case "POST admin/users": return adminCreate(request, env);
     case "POST admin/users/bulk": return adminBulk(request, env);
+    case "GET admin/listkeys": return adminListKeys(request, env);
     case "GET admin/settings": return adminSettings(request, env);
     case "PUT admin/settings": return adminSaveSettings(request, env);
     case "POST admin/files": return adminPullFile(request, env);
@@ -490,11 +491,24 @@ async function listKeys(request, env) {
   const { user } = await authUser(request, env);
   const a = await viewOf(env, user, deviceOf(request), now());
   if (!a.allowed) return json({ keys: [], reason: a.reason });
-  const keys = (await storedListKeys(env))
+  return json({ keys: await recentListKeys(env), reason: "" });
+}
+
+/**
+ * The same keys for the administrator: the tester inside the country
+ * (deploy/tester) opens the sealed lists with them and seals the hot.txt it
+ * publishes with the newest.
+ */
+async function adminListKeys(request, env) {
+  await authAdmin(request, env);
+  return json({ keys: await recentListKeys(env), reason: "" });
+}
+
+async function recentListKeys(env) {
+  return (await storedListKeys(env))
     .filter((k) => Number.isSafeInteger(k.id) && typeof k.key === "string" && /^[0-9a-f]{64}$/.test(k.key))
     .sort((x, y) => y.id - x.id)
     .slice(0, LIST_KEYS_GIVEN);
-  return json({ keys, reason: "" });
 }
 
 /**
