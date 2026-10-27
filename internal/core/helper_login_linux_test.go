@@ -26,25 +26,11 @@ func TestHelperPortsTakeOnlyTheLogin(t *testing.T) {
 	r.OnLine = func(name, line string) { t.Logf("%s| %s", name, line) }
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	// NaiveProxy answers its first client only once it has loaded the
-	// server's page (its preamble, which makes it look like a browser);
-	// at an address that drops packets that takes minutes to fail, at a
-	// closed port no time.
-	closed, err := FreePorts(1)
+	nodes, err := loginNodes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, link := range []string{
-		"naive+https://u:p@127.0.0.1:" + strconv.Itoa(closed[0]) + "#N",
-		"juicity://11111111-1111-1111-1111-111111111111:pw@192.0.2.1:443?sni=a.example#J",
-		"mieru://u:p@192.0.2.1:2086?protocol=tcp#M",
-		"wstunnel://192.0.2.1:443?path=secret#W",
-		"amneziawg://cPr%2BXL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E%3D@192.0.2.1:8447?publickey=HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw%3D&address=10.8.0.2%2F32&jc=4&jmin=40&jmax=70#A",
-	} {
-		n, err := node.ParseLink(link)
-		if err != nil {
-			t.Fatalf("%s: %v", link, err)
-		}
+	for _, n := range nodes {
 		name := n.Sidecar()
 		if r.Bin.Sidecar(name) == "" {
 			t.Errorf("%s: not in %s", name, dir)
@@ -81,6 +67,53 @@ func TestHelperPortsTakeOnlyTheLogin(t *testing.T) {
 			t.Errorf("%s: its port refuses the run's login (%s)", name, socksTrace(addr, node.SocksUser, pass))
 		}
 		p.Stop()
+	}
+}
+
+// loginNodes are the servers the login test starts a helper for, one
+// per helper that takes a login. NaiveProxy answers its first client only
+// once it has loaded the server's page (its preamble, which makes it look
+// like a browser): at an address that drops packets that takes minutes
+// to fail, at a closed port no time, so its server is one here (set after
+// parsing, which refuses a loopback address in a link).
+func loginNodes() ([]*node.Node, error) {
+	closed, err := FreePorts(1)
+	if err != nil {
+		return nil, err
+	}
+	var out []*node.Node
+	for _, link := range []string{
+		"naive+https://u:p@192.0.2.1:443#N",
+		"juicity://11111111-1111-1111-1111-111111111111:pw@192.0.2.1:443?sni=a.example#J",
+		"mieru://u:p@192.0.2.1:2086?protocol=tcp#M",
+		"wstunnel://192.0.2.1:443?path=secret#W",
+		"amneziawg://cPr%2BXL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E%3D@192.0.2.1:8447?publickey=HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw%3D&address=10.8.0.2%2F32&jc=4&jmin=40&jmax=70#A",
+	} {
+		n, err := node.ParseLink(link)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %v", link, err)
+		}
+		if n.Proto == "naive" {
+			n.Server, n.Port = "127.0.0.1", closed[0]
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
+// The login test's servers parse, also where its helpers are missing.
+func TestLoginNodes(t *testing.T) {
+	nodes, err := loginNodes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range nodes {
+		if !n.SidecarAuth() {
+			t.Errorf("%s takes no login", n.Proto)
+		}
+		if args, _, files := n.SidecarArgs(1080, t.TempDir(), "pass"); len(args) == 0 && len(files) == 0 {
+			t.Errorf("%s: no way to start its helper", n.Proto)
+		}
 	}
 }
 
