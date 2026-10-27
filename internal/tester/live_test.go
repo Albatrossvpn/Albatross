@@ -23,7 +23,8 @@ import (
 //
 // The cores and helpers are looked for in ALBATROSS_HELPERS, then on the
 // PATH. Run on the server itself, a Hysteria 2 link that hops ports fails:
-// the hops are redirected only for packets that arrive from outside.
+// the hops are redirected only for packets that arrive from outside. Its
+// own port is then checked on its own too.
 func TestLiveLinks(t *testing.T) {
 	path := os.Getenv("ALBATROSS_LIVE_LINKS")
 	if path == "" {
@@ -42,6 +43,11 @@ func TestLiveLinks(t *testing.T) {
 			continue
 		}
 		nodes = append(nodes, n)
+		if n.PortHop != "" {
+			one := *n
+			one.PortHop = ""
+			nodes = append(nodes, &one)
+		}
 	}
 	if len(nodes) == 0 {
 		t.Fatal("no links")
@@ -87,6 +93,9 @@ func liveLabel(n *node.Node) string {
 	}
 	if n.Sidecar() != "" {
 		s += " (" + n.Sidecar() + ")"
+	}
+	if n.PortHop != "" {
+		s += " hopping ports"
 	}
 	return s
 }
