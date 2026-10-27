@@ -343,6 +343,14 @@ jobs:
         with:
           name: Albatross-folder
           path: dist/Albatross
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Unit tests on Windows
+        # The packages whose behaviour differs on Windows (files, renames,
+        # paths): the tests run on Linux otherwise, and a compaction of the
+        # server pool failed on Windows only, unseen.
+        run: go test -count=1 ./internal/pool ./internal/node ./internal/sources ./internal/account ./internal/updatesig ./internal/geo
       - name: Smoke test on Windows
         shell: pwsh
         run: |
