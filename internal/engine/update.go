@@ -142,6 +142,41 @@ func (e *Engine) checkUpdate() {
 	e.applyUpdate(m)
 }
 
+// updateEvery is how often the app looks for a new version while it runs,
+// and updateLook how old that look may be when the user has the app open:
+// a release shows within the hour, and at once to whoever is looking.
+const (
+	updateEvery = time.Hour
+	updateLook  = 10 * time.Minute
+)
+
+// checkUpdateIf fetches the manifest when the last fetch is older than age
+// and none is running.
+func (e *Engine) checkUpdateIf(age time.Duration) {
+	e.mu.Lock()
+	due := !e.checking && time.Since(e.updateAt) > age
+	if due {
+		e.checking, e.updateAt = true, time.Now()
+	}
+	e.mu.Unlock()
+	if !due {
+		return
+	}
+	go func() {
+		defer func() {
+			e.mu.Lock()
+			e.checking = false
+			e.mu.Unlock()
+		}()
+		e.checkUpdate()
+	}()
+}
+
+// Looked tells the engine that the user has the app open (the UI asks for
+// its state while it shows), so a new version is looked for unless that
+// was done lately.
+func (e *Engine) Looked() { e.checkUpdateIf(updateLook) }
+
 func (e *Engine) loadUpdate() {
 	b, err := os.ReadFile(filepath.Join(e.dir, "update.json"))
 	var m UpdateManifest
@@ -311,9 +346,9 @@ func (e *Engine) GetUpdate() error {
 		case err == nil:
 			e.update.Progress = 100
 		case downloaded:
-			e.update.Progress, e.update.Error = 0, "The new version could not be opened; tap to try again, or download it from the releases page."
+			e.update.Progress, e.update.Error = 0, "The new version could not be opened; it is also on the download page."
 		default:
-			e.update.Progress, e.update.Error = 0, "The download failed; tap to try again."
+			e.update.Progress, e.update.Error = 0, "The download failed."
 		}
 	}
 	e.mu.Unlock()

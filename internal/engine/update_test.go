@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -544,5 +545,77 @@ func TestUpdateVersionMustBeARelease(t *testing.T) {
 	path, err := e.downloadUpdate(file, "0.2.2")
 	if err != nil || filepath.Base(path) != "Albatross-0.2.2.exe" {
 		t.Fatalf("download = %q, %v", path, err)
+	}
+}
+
+// A new version shows to whoever opens the app, not only at the next
+// hourly look: the page's look fetches the manifest unless that was done
+// in the last few minutes, and the hourly one waits for the hour.
+func TestUpdateLooksWhenTheUserLooks(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{"min_version": "1.0.0", "latest_version": "1.0.5"}`))
+	}))
+	defer srv.Close()
+	old := UpdateURL
+	UpdateURL = srv.URL + "/update.json"
+	defer func() { UpdateURL = old }()
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}, Version: "1.0.4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	// What Start sets up before the UI can look; its loops would look too.
+	e.ctx, e.cancel = context.WithCancel(context.Background())
+	defer e.cancel()
+	// settled waits for the fetch that is running, if any, to be applied.
+	settled := func() {
+		for range 200 {
+			e.mu.Lock()
+			busy := e.checking
+			e.mu.Unlock()
+			if !busy {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal("the manifest's fetch did not end")
+	}
+	ago := func(d time.Duration) {
+		e.mu.Lock()
+		e.updateAt = time.Now().Add(-d)
+		e.mu.Unlock()
+	}
+
+	e.Looked()
+	settled()
+	if u := e.Snapshot().Update; u == nil || u.Latest != "1.0.5" || u.Required {
+		t.Fatalf("after the first look: %+v", u)
+	}
+	// Right after, neither looks again.
+	e.Looked()
+	e.checkUpdateIf(updateEvery)
+	settled()
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("fetched %d times, want 1", n)
+	}
+	// Some minutes on, the user's look fetches; the hourly one does not.
+	ago(updateLook + time.Second)
+	e.checkUpdateIf(updateEvery)
+	settled()
+	if n := hits.Load(); n != 1 {
+		t.Fatalf("the hourly look fetched after %v", updateLook)
+	}
+	e.Looked()
+	settled()
+	if n := hits.Load(); n != 2 {
+		t.Fatalf("fetched %d times, want 2", n)
+	}
+	ago(updateEvery + time.Second)
+	e.checkUpdateIf(updateEvery)
+	settled()
+	if n := hits.Load(); n != 3 {
+		t.Fatalf("fetched %d times, want 3", n)
 	}
 }

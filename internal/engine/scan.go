@@ -87,8 +87,8 @@ func (e *Engine) refreshLoop() {
 		if time.Since(ruleCheck) > 6*time.Hour {
 			ruleCheck = time.Now()
 			e.refreshRules()
-			go e.checkUpdate()
 		}
+		e.checkUpdateIf(updateEvery)
 		// The network's regime first: a storm of doomed fetches must not
 		// delay noticing that foreign addresses are cut.
 		if e.regimeDue() {

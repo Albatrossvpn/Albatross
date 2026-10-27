@@ -23,6 +23,9 @@ import (
 
 	"golang.org/x/net/dns/dnsmessage"
 	"golang.org/x/sys/unix"
+
+	"github.com/Albatrossvpn/vp/internal/engine"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // TestAndroidPath runs the Android app's whole data path on Linux. A fake
@@ -332,5 +335,46 @@ func TestMockPoint(t *testing.T) {
 				t.Fatalf("mockPoint(%v) = %q", place, a)
 			}
 		}
+	}
+}
+
+// The VPN service's ticker learns of a newer version, and that it is
+// required, as soon as the engine has seen it.
+func TestOfferedUpdate(t *testing.T) {
+	if u := OfferedUpdate(); u != nil {
+		t.Fatalf("OfferedUpdate without an engine = %+v", u)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"min_version": "1.0.5", "latest_version": "1.0.5"}`))
+	}))
+	defer srv.Close()
+	old := engine.UpdateURL
+	engine.UpdateURL = srv.URL + "/update.json"
+	defer func() { engine.UpdateURL = old }()
+	e, err := engine.New(engine.Options{DataDir: t.TempDir(), Sources: []sources.Source{}, Version: "1.0.4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Start()
+	defer e.Close()
+	mu.Lock()
+	eng = e
+	mu.Unlock()
+	defer func() {
+		mu.Lock()
+		eng = nil
+		mu.Unlock()
+	}()
+	// The engine's first look comes once its loops have loaded what they
+	// keep, which can take seconds on a busy machine.
+	var u *UpdateOffer
+	for range 1000 {
+		if u = OfferedUpdate(); u != nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if u == nil || u.Version != "1.0.5" || !u.Required {
+		t.Fatalf("OfferedUpdate = %+v, want 1.0.5, required", u)
 	}
 }

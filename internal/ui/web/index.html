@@ -23,7 +23,12 @@
   <main>
     <!-- Connect -->
     <section class="view active" id="view-home">
-      <button class="update-banner hidden" id="update-banner"></button>
+      <div class="update-banner hidden" id="update-banner">
+        <span class="badge" id="update-badge"></span>
+        <b class="update-version" id="update-version"></b>
+        <button class="btn primary" id="update-install"></button>
+        <small class="update-error hidden" id="update-error"></small>
+      </div>
       <div class="notice hidden" id="notice"></div>
       <div class="network hidden" id="network"></div>
       <div class="hero">
@@ -191,11 +196,11 @@
   <!-- This version may no longer connect -->
   <div class="modal-backdrop hidden" id="update-modal">
     <div class="modal">
-      <h3>Update required</h3>
-      <p id="update-text">This version is no longer supported. Install the latest version to keep using the app.</p>
+      <h3><span class="badge slow">Required</span> <span id="update-modal-version"></span></h3>
       <div class="update-progress hidden" id="update-progress"><div class="bar"><i id="update-bar"></i></div><small id="update-step"></small></div>
+      <small class="update-error hidden" id="update-modal-error"></small>
       <div class="row-end">
-        <button class="btn primary" id="update-get">Get the update</button>
+        <button class="btn primary" id="update-get">Install</button>
       </div>
     </div>
   </div>
