@@ -493,3 +493,56 @@ func TestSignedManifest(t *testing.T) {
 		t.Fatalf("no key: ok=%v %+v", ok, m)
 	}
 }
+
+func TestUpdateVersionMustBeARelease(t *testing.T) {
+	body := []byte("new version")
+	sum := sha256.Sum256(body)
+	var hits atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write(body)
+	}))
+	defer srv.Close()
+	old := directUpdateClient
+	directUpdateClient = srv.Client
+	defer func() { directUpdateClient = old }()
+
+	root := t.TempDir()
+	e, err := New(Options{DataDir: filepath.Join(root, "data"), Sources: []sources.Source{}, Version: "0.2.1",
+		InstallUpdate: func(string) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	file := UpdateFile{URLs: []string{srv.URL + "/x"}, SHA256: hex.EncodeToString(sum[:])}
+	for _, v := range []string{"0.2.2-x/../../../escaped", "0.2.2/../../escaped", "v0.2.2", "0.2.2-rc1", "00.2.2"} {
+		e.applyUpdate(UpdateManifest{LatestVersion: v, Files: map[string]UpdateFile{updateKey(false): file}})
+		if u := e.Snapshot().Update; u != nil && u.InApp {
+			t.Errorf("%q is downloaded by the app: %+v", v, u)
+		}
+		if _, err := e.downloadUpdate(file, v); err == nil {
+			t.Errorf("%q was taken as a file name", v)
+		}
+	}
+	// Required with such a version: the download page, not a download.
+	e.applyUpdate(UpdateManifest{MinVersion: "0.3.0", LatestVersion: "0.3.0/../../escaped", Files: map[string]UpdateFile{updateKey(false): file}})
+	if u := e.Snapshot().Update; u == nil || !u.Required || u.InApp {
+		t.Fatalf("required update = %+v", u)
+	}
+	if err := e.GetUpdate(); !errors.Is(err, ErrNoInAppUpdate) {
+		t.Fatalf("GetUpdate = %v", err)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("%d downloads", n)
+	}
+	entries, _ := os.ReadDir(root)
+	if len(entries) != 1 || entries[0].Name() != "data" {
+		t.Fatalf("files outside the data folder: %v", entries)
+	}
+	// A plain release version is still downloaded.
+	e.applyUpdate(UpdateManifest{LatestVersion: "0.2.2", Files: map[string]UpdateFile{updateKey(false): file}})
+	path, err := e.downloadUpdate(file, "0.2.2")
+	if err != nil || filepath.Base(path) != "Albatross-0.2.2.exe" {
+		t.Fatalf("download = %q, %v", path, err)
+	}
+}

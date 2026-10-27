@@ -15,12 +15,7 @@ import (
 	"unicode/utf8"
 )
 
-var schemes = []string{
-	"vmess://", "vless://", "trojan://", "ss://", "ssr://", "hysteria2://", "hy2://", "hysteria://",
-	"tuic://", "wireguard://", "wg://", "anytls://", "socks5://", "socks://", "socks4://",
-}
-
-var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|anytls|socks5?|socks4)://`)
+var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|trojan-go|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|amneziawg|awg|anytls|socks5?|socks4|naive(?:\+https|\+quic)?|juicity|mieru|brook|wstunnel)://`)
 
 // ErrUnsupported marks links that parse but cannot be run by any core.
 var ErrUnsupported = errors.New("unsupported")
@@ -162,6 +157,22 @@ func ParseLink(link string) (*Node, error) {
 		n, err = parseVMess(link)
 	case "vless", "trojan":
 		n, err = parseStandard(link, scheme)
+	case "trojan-go":
+		// Trojan-Go is Trojan, usually over WebSocket: the same link
+		// form, which the cores run as a trojan outbound.
+		n, err = parseStandard("trojan://"+link[len("trojan-go://"):], "trojan")
+	case "naive", "naive+https", "naive+quic":
+		n, err = parseNaive(link, scheme)
+	case "juicity":
+		n, err = parseJuicity(link)
+	case "mieru":
+		n, err = parseMieru(link)
+	case "brook":
+		n, err = parseBrook(link)
+	case "wstunnel":
+		n, err = parseWStunnel(link)
+	case "amneziawg", "awg":
+		n, err = parseAmneziaWG(link)
 	case "ss":
 		n, err = parseSS(link)
 	case "hysteria2", "hy2":
@@ -775,9 +786,7 @@ func parseWireGuard(link string) (*Node, error) {
 		PreSharedKey:  firstNonEmpty(q["presharedkey"], q["psk"]),
 		MTU:           atoi(q["mtu"]),
 	}
-	for _, a := range splitList(firstNonEmpty(q["address"], q["ip"], q["addresses"])) {
-		n.LocalAddress = append(n.LocalAddress, a)
-	}
+	n.LocalAddress = append(n.LocalAddress, splitList(firstNonEmpty(q["address"], q["ip"], q["addresses"]))...)
 	if r := q["reserved"]; r != "" {
 		n.Reserved = parseReserved(r)
 	}
@@ -831,6 +840,13 @@ var fingerprints = map[string]bool{
 // normalize fixes common inconsistencies so the two cores agree on a node.
 func (n *Node) normalize() {
 	n.Server = strings.Trim(strings.TrimSpace(n.Server), "[]")
+	if n.Sidecar() != "" {
+		// The helpers read the fields as their links name them; the
+		// cores' transports and TLS settings do not apply.
+		n.Transport = strings.ToLower(strings.TrimSpace(n.Transport))
+		n.Fingerprint = ""
+		return
+	}
 	n.Transport = strings.ToLower(strings.TrimSpace(n.Transport))
 	switch n.Transport {
 	case "raw", "none":
@@ -1066,8 +1082,12 @@ func UsqueRegisterArgs(cacheDir string) []string {
 // UsqueArgs runs usque as a SOCKS5 proxy on host:port over MASQUE: HTTP/3
 // over QUIC, or for masque2 HTTP/2 over TCP, which gets through networks
 // that throttle UDP.
-func (n *Node) UsqueArgs(host, port, cacheDir string) []string {
+func (n *Node) UsqueArgs(host, port, cacheDir, pass string) []string {
 	args := []string{"-c", UsqueConfig(cacheDir), "socks", "-b", host, "-p", port, "--always-reconnect"}
+	if pass != "" {
+		// Its SOCKS5 port takes only this login (see SidecarArgs).
+		args = append(args, "-u", SocksUser, "-w", pass)
+	}
 	if n.WPMode == "masque2" {
 		args = append(args, "--http2")
 	}

@@ -139,6 +139,7 @@ jobs:
         env:
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          LISTS_PLAIN: ${{ vars.LISTS_PLAIN }}
         run: |
           account="https://$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' wrangler.toml | head -1)"
           publish() { # branch dir names...
@@ -148,7 +149,13 @@ jobs:
             if [ ${#files[@]} -eq 0 ]; then echo "::warning::nothing to store from the $branch branch"; return 0; fi
             bash ../deploy/files/publish-lists.sh "$account" "$branch" "${files[@]}" || echo "::warning::the $branch files could not all be stored"
           }
-          publish servers ../branch-servers hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt tor.json meta.json
+          lists=()
+          for f in hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt own-0.bin own-1.bin own-2.bin own-3.bin own-4.bin; do
+            lists+=("$f.sealed")
+            # The plain copies, only while LISTS_PLAIN is 1 (collect.yml).
+            [ "${LISTS_PLAIN:-0}" = 1 ] && lists+=("$f")
+          done
+          publish servers ../branch-servers "${lists[@]}" tor.json meta.json reach.json
           publish rules ../branch-rules ads.srs ads.json README.md LICENSE-GPL-3.0.txt LICENSE-AGPL-3.0.txt
           # The manifest only moves forward: a deploy from a branch behind
           # main must not put an older manifest over the released one (the

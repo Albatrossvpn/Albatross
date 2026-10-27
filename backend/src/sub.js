@@ -18,7 +18,14 @@ export async function readSubToken(env, token, now) {
   return p && p.sub === 1 && p.u ? p : null;
 }
 
-const b64 = (s) => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+// In slices: spread into one call, a list over about 125 KB (a full hot
+// list of long links) exceeds the engine's argument limit and throws.
+const b64 = (s) => {
+  const bytes = new TextEncoder().encode(s);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+};
 const unb64 = (s) => new TextDecoder().decode(Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0)));
 
 /** The name a link carries (its fragment, or a vmess link's "ps"). */

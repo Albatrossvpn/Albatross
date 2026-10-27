@@ -2,8 +2,9 @@ name: Scrub commit identities
 
 # Rewrites the whole history so that no commit carries a personal address
 # or a local time zone: every author and committer address that is not a
-# noreply one becomes the repository owner's GitHub noreply address, and
-# every date is written in UTC. The files in every commit stay exactly the
+# noreply one becomes the repository owner's GitHub noreply address, so
+# does every such address inside a commit message (the Co-authored-by
+# lines GitHub adds to squash merges), and every date is written in UTC. The files in every commit stay exactly the
 # same (the run checks this before it pushes), only the metadata changes,
 # so every commit gets a new hash and every clone must be fetched again.
 # Run it by hand, once, after personal addresses got in.
@@ -13,6 +14,18 @@ on:
       confirm:
         description: 'Type REWRITE to rewrite every branch and tag'
         required: true
+      remove_text:
+        description: 'Text to replace in every file of every commit (comma separated), e.g. an old address with a name in it; files then change where it occurs'
+        required: false
+        default: ''
+      replace_with:
+        description: 'What the text becomes'
+        required: false
+        default: albatross
+      drop_paths:
+        description: 'Paths to take out of every commit (comma separated), e.g. a stray binary that carries the text; commits stay'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -41,12 +54,37 @@ jobs:
         env:
           OWNER_ID: ${{ github.repository_owner_id }}
           OWNER: ${{ github.repository_owner }}
+          REMOVE_TEXT: ${{ inputs.remove_text }}
+          REPLACE_WITH: ${{ inputs.replace_with }}
+          DROP_PATHS: ${{ inputs.drop_paths }}
         run: |
           pip install -q git-filter-repo
           cd repo.git
+          # Paths taken out of every commit first (a stray binary a text
+          # replacement cannot reach); a commit left with no change stays.
+          if [ -n "$DROP_PATHS" ]; then
+            drop=()
+            IFS=, read -ra parts <<< "$DROP_PATHS"
+            for t in "${parts[@]}"; do
+              t="$(printf '%s' "$t" | sed 's/^ *//; s/ *$//')"
+              [ -n "$t" ] && drop+=(--path "$t")
+            done
+            git filter-repo --force --invert-paths "${drop[@]}" --prune-empty never
+          fi
+          # Text to take out of every file version, when asked.
+          args=()
+          if [ -n "$REMOVE_TEXT" ]; then
+            : > ../replace.txt
+            IFS=, read -ra parts <<< "$REMOVE_TEXT"
+            for t in "${parts[@]}"; do
+              t="$(printf '%s' "$t" | sed 's/^ *//; s/ *$//')"
+              [ -n "$t" ] && printf '%s==>%s\n' "$t" "$REPLACE_WITH" >> ../replace.txt
+            done
+            args+=(--replace-text ../replace.txt)
+          fi
           # The callbacks are Python; filter-repo indents them itself, so
           # every line starts at the same column.
-          git filter-repo --force --email-callback '
+          git filter-repo --force "${args[@]}" --email-callback '
           import os
           noreply = os.environ["OWNER_ID"].encode() + b"+" + os.environ["OWNER"].encode() + b"@users.noreply.github.com"
           if email.endswith(b"@users.noreply.github.com") or email in (b"noreply@github.com", b"noreply@anthropic.com"):
@@ -55,19 +93,45 @@ jobs:
           ' --commit-callback '
           commit.author_date = commit.author_date.split(b" ")[0] + b" +0000"
           commit.committer_date = commit.committer_date.split(b" ")[0] + b" +0000"
+          ' --message-callback '
+          import os, re
+          noreply = os.environ["OWNER_ID"].encode() + b"+" + os.environ["OWNER"].encode() + b"@users.noreply.github.com"
+          def keep(m):
+              e = m.group(0)
+              return e if e.endswith(b"@users.noreply.github.com") or e in (b"noreply@github.com", b"noreply@anthropic.com") else noreply
+          return re.sub(rb"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", keep, message)
           '
       - name: Check that no file changed
+        env:
+          REMOVE_TEXT: ${{ inputs.remove_text }}
+          DROP_PATHS: ${{ inputs.drop_paths }}
         run: |
           cd repo.git
           bad=0
           while read -r ref old; do
             new="$(git rev-parse "$ref")"
-            [ "$(git -C ../before.git rev-parse "$old^{tree}")" = "$(git rev-parse "$new^{tree}")" ] || { echo "::error::$ref: files differ after the rewrite"; bad=1; }
+            # With text taken out of files, the trees differ where it was;
+            # the commit count must not.
+            if [ -z "$REMOVE_TEXT" ] && [ -z "$DROP_PATHS" ]; then
+              [ "$(git -C ../before.git rev-parse "$old^{tree}")" = "$(git rev-parse "$new^{tree}")" ] || { echo "::error::$ref: files differ after the rewrite"; bad=1; }
+            fi
             [ "$(git -C ../before.git rev-list --count "$old")" = "$(git rev-list --count "$new")" ] || { echo "::error::$ref: commit count differs"; bad=1; }
           done < ../refs-before.txt
+          if [ -n "$REMOVE_TEXT" ]; then
+            IFS=, read -ra parts <<< "$REMOVE_TEXT"
+            for t in "${parts[@]}"; do
+              t="$(printf '%s' "$t" | sed 's/^ *//; s/ *$//')"
+              [ -n "$t" ] || continue
+              n="$(git log --all -S"$t" --format=%H | wc -l)"
+              echo "commits whose files still change '$t': $n"
+              [ "$n" = 0 ] || { echo "::error::'$t' is still in some file version"; bad=1; }
+            done
+          fi
           left="$(git log --all --format='%ae%n%ce%n%ad%n%cd' --date=format:%z | grep -vcE '^(\+0000|.*@users\.noreply\.github\.com|noreply@github\.com|noreply@anthropic\.com)$' || true)"
           echo "fields still personal: $left"
-          [ "$bad" = 0 ] && [ "$left" = 0 ] || exit 1
+          inmsg="$(git log --all --format=%B | grep -oE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}' | grep -vcE '(@users\.noreply\.github\.com|^noreply@github\.com|^noreply@anthropic\.com)$' || true)"
+          echo "addresses still personal in messages: $inmsg"
+          [ "$bad" = 0 ] && [ "$left" = 0 ] && [ "$inmsg" = 0 ] || exit 1
       - name: Push every branch and tag
         env:
           GH_TOKEN: ${{ github.token }}

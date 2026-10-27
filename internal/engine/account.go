@@ -163,6 +163,11 @@ func (e *Engine) Login(username, password string) error {
 	}
 	e.logf("info", "Signed in.")
 	e.updateBadge()
+	// The lists downloaded so far open with the keys (rereadKeyed). Before
+	// Start there are none, and reading them will fetch the keys.
+	if e.ctx != nil {
+		go e.refreshListKeys()
+	}
 	// The service's own server (the edge) is for signed-in users.
 	methodsMu.Lock()
 	edgeFetched = time.Time{}

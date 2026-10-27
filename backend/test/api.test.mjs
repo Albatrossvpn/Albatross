@@ -67,6 +67,11 @@ test("public information; sign-ups are closed until the administrator opens them
   assert.equal(s.status, 403);
 });
 
+test("a body too large for any request is refused", async () => {
+  const r = await call("POST", "login", { body: { username: "someone", password: "x".repeat(9000) } });
+  assert.equal(r.status, 413);
+});
+
 test("the administrator signs in; panels reject everyone else", async () => {
   const bad = await call("POST", "admin/login", { body: { username: "root", password: "nope" } });
   assert.equal(bad.status, 401);
@@ -141,7 +146,13 @@ test("the lists' keys go to signed-in users who may connect, newest first", asyn
   assert.equal(r.headers.get("cache-control"), "no-store");
   assert.ok(Array.isArray(r.body.keys), "a list of keys, empty before the first collection");
   for (let i = 1; i < r.body.keys.length; i++) assert.ok(r.body.keys[i - 1].id > r.body.keys[i].id, "newest first");
-  await call("POST", "admin/users/keys-1", { token: admin, body: { enabled: false } }).catch(() => {});
+  // The administrator gets them too (deploy/tester); a user's session is not the administrator's.
+  assert.equal((await call("GET", "admin/listkeys")).status, 401);
+  assert.equal((await call("GET", "admin/listkeys", { token })).status, 401);
+  const a = await call("GET", "admin/listkeys", { token: admin });
+  assert.equal(a.status, 200);
+  assert.equal(a.headers.get("cache-control"), "no-store");
+  assert.deepEqual(a.body.keys, r.body.keys);
 });
 
 test("a usage report sent again with the same id is counted once", async () => {
@@ -263,6 +274,9 @@ test("settings, sign-up with the defaults, duplicate names", async () => {
   assert.equal(r.body.account.max_seconds, 7200);
   assert.ok(r.body.account.expires_at > Date.now() / 1000 + 29 * 86400);
   assert.equal((await call("POST", "signup", { body: { username: "newbie", password: "12345678" } })).status, 409);
+  // Probing which names are taken counts against the address like signing up.
+  for (let i = 0; i < 5; i++) await call("POST", "signup", { ip: "7.7.7.7", body: { username: "newbie", password: "12345678" } });
+  assert.equal((await call("POST", "signup", { ip: "7.7.7.7", body: { username: "fresh-name", password: "12345678" } })).status, 429);
 });
 
 test("bulk creation gives working accounts; search and delete", async () => {
@@ -302,6 +316,13 @@ test("crowd stats: operators appear after three reports; bad reports are refused
   const mine = (await call("GET", "stats?asn=self")).body;
   assert.equal(typeof mine.asn, "number", "the asker learns its own network");
   if (mine.asn !== 58224) assert.equal(mine.asns["58224"], undefined, "asn=self gives only the asker's network");
+});
+
+test("the users of one server share its address: many reports a day pass from it, not without end", async () => {
+  const report = { asn: 64512, proto: [[1, 1, 2]] };
+  for (let i = 0; i < 60; i++) assert.equal((await call("POST", "stats", { body: report, ip: "6.6.6.6" })).status, 200, "report " + (i + 1));
+  assert.equal((await call("POST", "stats", { body: report, ip: "6.6.6.6" })).status, 429);
+  assert.equal((await call("POST", "stats", { body: report, ip: "6.6.6.7" })).status, 200, "another address is unaffected");
 });
 
 test("users' reports about servers are summed for the collector", async () => {

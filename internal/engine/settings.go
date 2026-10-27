@@ -96,13 +96,18 @@ type ProtocolChoice struct {
 	Label string `json:"label"`
 }
 
-// ProtocolChoices are the protocols offered, automatic first. They match
-// Server.Proto.
+// ProtocolChoices are the protocols offered, automatic first. A value is
+// a Server.Proto, or "warp" and "tor" for the two kinds of warpplus
+// method (see Server.matches). Transports and TLS variants (Reality,
+// WebSocket, gRPC, XHTTP, ShadowTLS, Salamander) are not protocols of
+// their own: a VLESS server stays VLESS whichever carries it.
 func ProtocolChoices() []ProtocolChoice {
 	return []ProtocolChoice{
 		{"", "Automatic"}, {"vless", "VLESS"}, {"vmess", "VMess"}, {"trojan", "Trojan"},
-		{"shadowsocks", "Shadowsocks"}, {"hysteria2", "Hysteria 2"}, {"tuic", "TUIC"},
-		{"anytls", "AnyTLS"}, {"wireguard", "WireGuard"}, {"openvpn", "OpenVPN"}, {"ssh", "SSH"},
+		{"shadowsocks", "Shadowsocks"}, {"hysteria2", "Hysteria 2"}, {"hysteria", "Hysteria"}, {"tuic", "TUIC"},
+		{"anytls", "AnyTLS"}, {"wireguard", "WireGuard"}, {"amneziawg", "AmneziaWG"}, {"openvpn", "OpenVPN"}, {"ssh", "SSH"},
+		{"naive", "NaiveProxy"}, {"juicity", "Juicity"}, {"mieru", "Mieru"}, {"brook", "Brook"}, {"wstunnel", "WStunnel"},
+		{"socks", "SOCKS5"}, {"http", "HTTP proxy"}, {"warp", "Cloudflare WARP"}, {"tor", "Tor"},
 	}
 }
 

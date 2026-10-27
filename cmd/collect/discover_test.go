@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -112,5 +114,69 @@ func TestWebSearchLive(t *testing.T) {
 		}
 		res, err := fn(ctx, q)
 		t.Logf("%s: %d results, err %v; first: %v", name, len(res), err, res[:min(3, len(res))])
+	}
+}
+
+// A skipped site is the site or a subdomain of it, never a name that
+// merely ends the same way.
+func TestSkipHost(t *testing.T) {
+	for _, h := range []string{"x.com", "mobile.x.com", "www.youtube.com", "google.com", "www.google.de", "play.google.com", "amazon.co.uk"} {
+		if !skipHost(h) {
+			t.Errorf("%s not skipped", h)
+		}
+	}
+	for _, h := range []string{"v2rayx.com", "clashx.com", "freebing.com", "mygoogle.com", "googleusercontent.com", "raw.githubusercontent.com"} {
+		if skipHost(h) {
+			t.Errorf("%s skipped", h)
+		}
+	}
+}
+
+type fakeTransport map[string]string
+
+func (f fakeTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	body, ok := f[r.URL.String()]
+	code := http.StatusOK
+	if !ok {
+		code = http.StatusNotFound
+	}
+	return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}, Request: r}, nil
+}
+
+// An empty project among the results (no default branch) is passed over;
+// the projects after it are still listed.
+func TestCodeHostsSkipEmptyProjects(t *testing.T) {
+	d := newDiscoverer("", nil)
+	d.client = &http.Client{Transport: fakeTransport{
+		"https://gitlab.com/api/v4/projects?order_by=last_activity_at&per_page=50&search=v2ray": `[{"id":1,"path_with_namespace":"a/empty","default_branch":null},{"id":2,"path_with_namespace":"b/lists","default_branch":"main"}]`,
+		"https://gitlab.com/api/v4/projects/2/repository/tree?recursive=true&per_page=100":      `[{"path":"sub.txt","type":"blob"}]`,
+		"https://codeberg.org/api/v1/repos/search?sort=updated&order=desc&limit=50&q=v2ray":     `{"data":[{"full_name":"a/empty","default_branch":""},{"full_name":"b/lists","default_branch":"main"}]}`,
+		"https://codeberg.org/api/v1/repos/b/lists/git/trees/main?recursive=true&per_page=1000": `{"tree":[{"path":"sub.txt","type":"blob"}]}`,
+	}}
+	gl, err := d.gitlabFiles(context.Background(), "v2ray")
+	if err != nil || len(gl) != 1 || gl[0] != "https://gitlab.com/b/lists/-/raw/main/sub.txt" {
+		t.Fatalf("gitlab: %v %v", gl, err)
+	}
+	cb, err := d.codebergFiles(context.Background(), "v2ray")
+	if err != nil || len(cb) != 1 || cb[0] != "https://codeberg.org/b/lists/raw/branch/main/sub.txt" {
+		t.Fatalf("codeberg: %v %v", cb, err)
+	}
+}
+
+// What the run did not get to is carried as it was, except a source the
+// shipped lists now hold, and one that can no longer be a candidate, which
+// counts a miss.
+func TestCarryRest(t *testing.T) {
+	d := newDiscoverer("", nil)
+	for _, k := range []string{"https://a.example/sub.txt", "https://shipped.example/sub.txt", "https://www.youtube.com/sub.txt", "chanone", "shippedchan"} {
+		d.prev[k] = true
+	}
+	known := map[string]bool{"https://shipped.example/sub.txt": true, "shippedchan": true}
+	d.carryRest([]string{"https://a.example/sub.txt", "https://shipped.example/sub.txt", "https://www.youtube.com/sub.txt"}, []string{"ChanOne", "ShippedChan"}, known)
+	if len(d.subs) != 2 || d.subs[0] != "https://a.example/sub.txt" || len(d.channels) != 1 || d.channels[0] != "chanone" {
+		t.Fatalf("subs %v channels %v", d.subs, d.channels)
+	}
+	if d.misses["https://www.youtube.com/sub.txt"] != 1 || d.misses["https://a.example/sub.txt"] != 0 {
+		t.Fatalf("misses %v", d.misses)
 	}
 }

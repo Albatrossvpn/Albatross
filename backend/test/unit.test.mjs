@@ -148,9 +148,9 @@ test("release files: names, sources and ranges", async () => {
 
 test("the app's own files: names and types", async () => {
   const { LIST_PATH, listType } = await import("../src/files.js");
-  for (const p of ["servers/hot.txt", "servers/all-8.txt", "servers/tor.json", "servers/crowd.json", "servers/iran.json", "servers/own-0.bin", "servers/own-4.bin", "main/update.json", "rules/ads.srs", "rules/ads.json", "rules/LICENSE-GPL-3.0.txt", "tools/collect-linux-amd64"]) assert.ok(LIST_PATH.test(p), p);
+  for (const p of ["servers/hot.txt", "servers/all-8.txt", "servers/tor.json", "servers/crowd.json", "servers/iran.json", "servers/own-0.bin", "servers/own-4.bin", "servers/hot.txt.sealed", "servers/own-2.bin.sealed", "servers/reach.json", "main/update.json", "rules/ads.srs", "rules/ads.json", "rules/LICENSE-GPL-3.0.txt", "tools/collect-linux-amd64"]) assert.ok(LIST_PATH.test(p), p);
   assert.equal(listType("tools/collect-linux-amd64"), "application/octet-stream");
-  for (const p of ["servers/all-9.txt", "servers/own-5.bin", "main/README.md", "../x", "servers/hot.txt/..", "rules/other.json"]) assert.ok(!LIST_PATH.test(p), p);
+  for (const p of ["servers/all-9.txt", "servers/own-5.bin", "main/README.md", "../x", "servers/hot.txt/..", "rules/other.json", "servers/iran-tcp.json", "servers/tor.json.sealed"]) assert.ok(!LIST_PATH.test(p), p);
   assert.equal(listType("main/update.json"), "application/json; charset=utf-8");
   assert.equal(listType("rules/ads.srs"), "application/octet-stream");
   assert.equal(listType("servers/hot.txt"), "text/plain; charset=utf-8");
@@ -232,4 +232,15 @@ test("a sealed list opens with the collector's key of its id", async () => {
   assert.equal(await openKeyed([{ id: 1761480000, key: "ab".repeat(32) }], bytes), "", "the wrong key opens nothing");
   assert.equal(await openKeyed([], bytes), "");
   assert.equal(keyedID(new TextEncoder().encode("vless://plain")), null);
+});
+
+test("a subscription of a full hot list of long links builds (no argument-limit error)", async () => {
+  const { build } = await import("../src/sub.js");
+  const long = "vless://11111111-1111-1111-1111-111111111111@192.0.2.1:443?security=reality&type=xhttp&extra=" + "x".repeat(1200);
+  const entries = Array.from({ length: 450 }, (_, i) => ({ link: long + i + "#s" + i, country: "DE" }));
+  const sub = build(entries, "", "Albatross", []);
+  assert.equal(sub.count, 450);
+  const text = Buffer.from(sub.body, "base64").toString("utf8");
+  assert.equal(text.split("\n").filter(Boolean).length, 450);
+  assert.ok(text.includes("Germany"), "the names survive the encoding (and the flag, which is not ASCII)");
 });

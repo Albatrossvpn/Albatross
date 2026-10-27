@@ -33,7 +33,7 @@
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); line-height: 1.55;
   -webkit-font-smoothing: antialiased;
@@ -48,7 +48,7 @@ p { margin: 0; }
 .muted { color: var(--muted); }
 
 /* Navigation */
-.nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); background: color-mix(in srgb, var(--bg) 82%, transparent); border-bottom: 1px solid var(--line); }
+.nav { padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); background: color-mix(in srgb, var(--bg) 82%, transparent); border-bottom: 1px solid var(--line); }
 .nav .wrap { display: flex; align-items: center; gap: 28px; height: 64px; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 18px; color: var(--text); letter-spacing: -0.02em; }
 .brand:hover { text-decoration: none; }
@@ -116,14 +116,17 @@ section.block.alt { background: var(--bg-2); border-block: 1px solid var(--line)
 .faq details[open] summary::after { content: "–"; }
 .faq details p { color: var(--muted); margin-top: 10px; }
 
-.footer { border-top: 1px solid var(--line); padding: 36px 0 44px; color: var(--muted); font-size: 14px; }
+.footer { border-top: 1px solid var(--line); padding: 36px env(safe-area-inset-right) max(44px, env(safe-area-inset-bottom)) env(safe-area-inset-left); color: var(--muted); font-size: 14px; }
 .footer .wrap { display: flex; flex-wrap: wrap; gap: 20px 48px; justify-content: space-between; }
 .footer .links { display: flex; gap: 20px; }
 .footer address { font-style: normal; }
 
 /* Forms and panels */
-main.center { min-height: calc(100vh - 64px); display: grid; place-items: start center; padding: 56px 20px; }
-.panel { width: min(440px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 28px; box-shadow: var(--shadow); }
+/* One column that may shrink (minmax(0, 1fr)): with an automatic column a row of tabs or a long address makes the whole page wider than the screen,
+   and iPhone Safari then zooms the page out. */
+main.center { min-height: calc(100vh - 64px); min-height: calc(100dvh - 64px); display: grid; grid-template-columns: minmax(0, 1fr); place-items: start center;
+  padding: 56px max(20px, env(safe-area-inset-right)) max(56px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left)); }
+.panel { min-width: 0; width: min(440px, 100%); background: var(--surface); border: 1px solid var(--line); border-radius: 20px; padding: 28px; box-shadow: var(--shadow); }
 .panel.wide { width: min(980px, 100%); }
 .panel h1 { font-size: 24px; margin-bottom: 6px; }
 .tabs { display: flex; gap: 4px; padding: 4px; background: var(--surface-2); border-radius: 12px; margin-bottom: 22px; }
@@ -139,6 +142,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); ou
 input[type="checkbox"] { width: auto; }
 label.check { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-weight: 500; }
 .error { color: var(--bad); font-size: 14px; min-height: 20px; margin-bottom: 8px; }
+.error:empty { min-height: 0; margin: 0; }
 .notice { padding: 12px 14px; border-radius: 12px; background: color-mix(in srgb, var(--warn) 14%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent); font-size: 14px; margin-bottom: 18px; }
 .notice.ok { background: color-mix(in srgb, var(--ok) 14%, transparent); border-color: color-mix(in srgb, var(--ok) 40%, transparent); }
 .row { display: flex; gap: 12px; align-items: center; }
@@ -147,7 +151,8 @@ label.check { display: flex; align-items: center; gap: 10px; margin-bottom: 14px
 .stack > * + * { margin-top: 12px; }
 
 /* Account dashboard */
-.dash { width: min(640px, 100%); display: grid; gap: 18px; }
+.dash { width: min(640px, 100%); min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.dash .card { min-width: 0; }
 .dash .card h2 { font-size: 17px; margin-bottom: 16px; }
 .pill { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 700; background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 .pill.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
@@ -195,10 +200,10 @@ dialog .actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap
 .secret { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 15px; background: var(--bg); border: 1px dashed var(--line); border-radius: 10px; padding: 12px; word-break: break-all; user-select: all; }
 textarea.out { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; height: 220px; }
 
-.toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface-3); color: var(--text); padding: 11px 18px; border-radius: 12px; box-shadow: var(--shadow); z-index: 50; max-width: 90%; }
+.toast { position: fixed; bottom: max(24px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); background: var(--surface-3); color: var(--text); padding: 11px 18px; border-radius: 12px; box-shadow: var(--shadow); z-index: 50; max-width: 90%; }
 
 /* Text pages */
-.prose { width: min(760px, 100% - 40px); margin: 0 auto; padding: 56px 0 80px; }
+.prose { width: min(760px, 100% - 40px - env(safe-area-inset-left) - env(safe-area-inset-right)); margin: 0 auto; padding: 56px 0 80px; }
 .prose h1 { font-size: 36px; margin-bottom: 8px; }
 .prose h2 { font-size: 21px; margin: 34px 0 10px; }
 .prose p, .prose li { color: var(--muted); font-size: 16px; }
@@ -218,3 +223,33 @@ textarea.out { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monos
 .flush { margin: 0 !important; }
 .small { font-size: 13px; }
 .note { font-size: 14px; }
+
+/* Phones. Rows of controls wrap instead of widening the page, long names and addresses break, and on touch screens every control is at least
+   44 px tall (Apple's minimum for a finger). */
+.row.between > :first-child { flex: 1 1 11rem; min-width: 0; overflow-wrap: anywhere; }
+.row.between > .btn, .row.between > .pill { flex: none; }
+.kv dd, .kv dt, #d-name, #d-sub, code { overflow-wrap: anywhere; }
+.kv dd { min-width: 0; }
+code#sub-url { flex: 1 1 100%; min-width: 0; word-break: break-all; }
+#apps.tabs { flex-wrap: wrap; }
+#apps.tabs button { flex: 1 1 auto; }
+button, .btn, summary, .tabs button { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+@media (pointer: coarse) {
+  .btn, .tabs button, input, select { min-height: 44px; }
+  .btn.small { padding: 10px 14px; font-size: 14px; border-radius: 11px; }
+  .tabs button { padding: 10px 12px; }
+  summary { min-height: 44px; display: flex; align-items: center; }
+  .footer .links a, .nav .brand { display: inline-flex; align-items: center; min-height: 44px; }
+}
+@media (max-width: 480px) {
+  main.center { padding-top: 24px; padding-bottom: 32px; }
+  .panel { padding: 22px 18px; border-radius: 18px; }
+  .card { padding: 18px; }
+  .dash { gap: 14px; }
+  .btn.big { padding: 14px 18px; }
+  .row { gap: 10px; }
+  .kv { gap: 10px 14px; }
+  .meter .top { gap: 10px; }
+  .footer .links { gap: 6px 22px; flex-wrap: wrap; }
+  dialog { padding: 20px 18px; }
+}

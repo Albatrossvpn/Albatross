@@ -25,9 +25,10 @@ var globalpingAPI = "https://api.globalping.io/v1/measurements"
 // iranReach asks probes inside Iran whether each address answers a TCP
 // connection. The collector's own test runs from the US and cannot see
 // Iran's filtering; this can. Addresses missing from the result were not
-// checked (no probe free, quota used up). The project's own probes (GLOBALPING_TAGS) are asked first;
-// when none of them is online, the volunteers' probes in the country take
-// over, so the check never hangs on one machine being off.
+// checked (no probe free, quota used up, no probe could run the test).
+// The project's own probes (GLOBALPING_TAGS) are asked first; when none of
+// them is online, the volunteers' probes in the country take over, so the
+// check never hangs on one machine being off.
 func iranReach(ctx context.Context, endpoints []string, probes int) map[string]bool {
 	out := map[string]bool{}
 	var mu sync.Mutex
@@ -45,11 +46,15 @@ func iranReach(ctx context.Context, endpoints []string, probes int) map[string]b
 			go func(ep string) {
 				defer func() { <-sem; wg.Done() }()
 				useOwn := own.Load()
-				open, err := tcpFromIran(ctx, ep, probes, useOwn)
+				n := probes
+				if !useOwn {
+					n = max(n, 2) // see gpProbes
+				}
+				open, err := tcpFromIran(ctx, ep, n, useOwn)
 				if err == errNoProbes && useOwn {
 					fell.Do(func() { log.Print("globalping: no own probe online; using the volunteers' probes in Iran") })
 					own.Store(false)
-					open, err = tcpFromIran(ctx, ep, 2, false)
+					open, err = tcpFromIran(ctx, ep, max(probes, 2), false)
 				}
 				if err != nil {
 					if err == errNoProbes || err == errQuota {
@@ -103,6 +108,7 @@ func gpProbes() int {
 var (
 	errNoProbes = fmt.Errorf("no probes in Iran right now")
 	errQuota    = fmt.Errorf("hourly quota used up")
+	errNoAnswer = fmt.Errorf("no probe could run the test")
 )
 
 func tcpFromIran(ctx context.Context, endpoint string, probes int, own bool) (bool, error) {
@@ -134,7 +140,9 @@ func tcpFromIran(ctx context.Context, endpoint string, probes int, own bool) (bo
 		Status  string `json:"status"`
 		Results []struct {
 			Result struct {
-				Stats struct {
+				Status        string `json:"status"`
+				FailureSource string `json:"failureSource"`
+				Stats         struct {
 					Rcv int `json:"rcv"`
 				} `json:"stats"`
 			} `json:"result"`
@@ -152,10 +160,21 @@ func tcpFromIran(ctx context.Context, endpoint string, probes int, own bool) (bo
 	if m.Status != "finished" || len(m.Results) == 0 {
 		return false, fmt.Errorf("measurement %s", m.Status)
 	}
+	// A probe that got an answer decides. One that ran and got none, or
+	// failed at the target, says the address is closed there; one that
+	// failed on its own side (internal), or never finished, says nothing:
+	// a probe going off mid-run must not close every address it had.
+	said := false
 	for _, r := range m.Results {
-		if r.Result.Stats.Rcv > 0 {
+		switch res := r.Result; {
+		case res.Status == "finished" && res.Stats.Rcv > 0:
 			return true, nil
+		case res.Status == "finished", res.Status == "failed" && res.FailureSource != "internal":
+			said = true
 		}
+	}
+	if !said {
+		return false, errNoAnswer
 	}
 	return false, nil
 }

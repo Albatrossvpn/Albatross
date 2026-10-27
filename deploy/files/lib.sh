@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared by the scripts in deploy/files.
 #
 # Files reach the project's own storage (the R2 bucket the Workers serve
@@ -57,7 +58,7 @@ r2_sha() {
 list_type() {
   case "$1" in
     *.json) echo "application/json; charset=utf-8" ;;
-    *.srs) echo "application/octet-stream" ;;
+    *.srs|*.bin|*.sealed|collect-linux-*) echo "application/octet-stream" ;;
     *) echo "text/plain; charset=utf-8" ;;
   esac
 }

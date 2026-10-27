@@ -152,9 +152,10 @@ func (e *Engine) ImportShareCode(code string) (int, error) {
 			added++
 		} else {
 			// Known already, and likely marked dead while everything was
-			// failing: a friend says it works, so it is tried again now.
+			// failing: a friend says it works, so it is tried again now. A
+			// server working here already stays as it is.
 			e.pool.Update(en.Key, func(p *pool.Entry) {
-				if p.State != pool.StateRejected {
+				if p.State == pool.StateDead {
 					p.State, p.Fails, p.LastTest = pool.StateNew, 0, 0
 					p.Flags |= pool.FlagFresh
 					added++

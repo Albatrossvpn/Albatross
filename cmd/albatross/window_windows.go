@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	webview2 "github.com/jchv/go-webview2"
@@ -48,6 +49,28 @@ func openWindow(title, url, dataDir string, done <-chan struct{}) bool {
 	go func() {
 		<-done
 		w.Dispatch(w.Terminate)
+	}()
+	// Explorer makes the taskbar button a while after the window shows,
+	// and an overlay set before it is lost. Windows says when the button
+	// is there (TaskbarButtonCreated), but not to an elevated window, so
+	// the badge is put on again a little later.
+	go func() {
+		for _, d := range []time.Duration{time.Second, 5 * time.Second} {
+			select {
+			case <-time.After(d):
+			case <-done:
+				return
+			}
+			badge.mu.Lock()
+			open, tier := badge.w == w, badge.tier
+			badge.mu.Unlock()
+			if !open {
+				return
+			}
+			if tier != "" {
+				w.Dispatch(func() { applyBadge(w, tier) })
+			}
+		}
 	}()
 	w.Navigate(url)
 	w.Run()
@@ -101,9 +124,8 @@ var (
 	iidTaskbarList3  = windows.GUID{Data1: 0xEA1AFB91, Data2: 0x9E28, Data3: 0x4B86, Data4: [8]byte{0x90, 0xE9, 0x9E, 0x9F, 0x8A, 0x5E, 0xEF, 0xAF}}
 
 	// taskbar is the ITaskbarList3 object, made on first use on the
-	// window's thread; taskbarFailed when it could not be.
-	taskbar       *comObject
-	taskbarFailed bool
+	// window's thread.
+	taskbar *comObject
 )
 
 // comObject is a COM interface pointer: its first word is the vtable.
@@ -113,6 +135,7 @@ type comObject struct {
 
 // ITaskbarList3's methods, in vtable order.
 const (
+	tbRelease        = 2
 	tbHrInit         = 3
 	tbSetOverlayIcon = 18
 )
@@ -122,8 +145,10 @@ func (o *comObject) call(method int, args ...uintptr) int32 {
 	return int32(hr)
 }
 
+// taskbarList returns the taskbar object, or nil while there is none: a
+// failure (no taskbar yet, as at login) is tried again next time.
 func taskbarList() *comObject {
-	if taskbar != nil || taskbarFailed {
+	if taskbar != nil {
 		return taskbar
 	}
 	// The window's thread has COM up for WebView2; this is a no-op then.
@@ -131,8 +156,11 @@ func taskbarList() *comObject {
 	var obj *comObject
 	hr, _, _ := procCoCreateInstance.Call(uintptr(unsafe.Pointer(&clsidTaskbarList)), 0, windows.CLSCTX_INPROC_SERVER,
 		uintptr(unsafe.Pointer(&iidTaskbarList3)), uintptr(unsafe.Pointer(&obj)))
-	if int32(hr) < 0 || obj == nil || obj.call(tbHrInit) < 0 {
-		taskbarFailed = true
+	if int32(hr) < 0 || obj == nil {
+		return nil
+	}
+	if obj.call(tbHrInit) < 0 {
+		obj.call(tbRelease)
 		return nil
 	}
 	taskbar = obj

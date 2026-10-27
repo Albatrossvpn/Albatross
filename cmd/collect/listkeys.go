@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sort"
@@ -56,6 +57,38 @@ func newListKey(path string, now time.Time) (sources.ListKey, []listKeyFile) {
 	return fresh, keys
 }
 
+// readListKeys reads keys in the form writeListKeys writes them, or as the
+// account service hands them out ({"keys": [...]}), newest first. A missing
+// or unreadable file gives none.
+func readListKeys(path string) []sources.ListKey {
+	if path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var files []listKeyFile
+	if json.Unmarshal(b, &files) != nil {
+		var wrapped struct {
+			Keys []listKeyFile `json:"keys"`
+		}
+		if json.Unmarshal(b, &wrapped) != nil {
+			log.Printf("list keys: %s is not readable", path)
+			return nil
+		}
+		files = wrapped.Keys
+	}
+	var out []sources.ListKey
+	for _, f := range files {
+		if k, err := hex.DecodeString(f.Key); err == nil && len(k) == 32 {
+			out = append(out, sources.ListKey{ID: f.ID, Key: k})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	return out
+}
+
 // writeListKeys writes the keys for the account service.
 func writeListKeys(path string, keys []listKeyFile) error {
 	b, err := json.MarshalIndent(keys, "", " ")
@@ -63,4 +96,24 @@ func writeListKeys(path string, keys []listKeyFile) error {
 		return err
 	}
 	return os.WriteFile(path, b, 0o600)
+}
+
+// openList returns the sealed list (sources.SealKeyed) in the file at path
+// opened with keys. The build bundles the collector's list in the app this
+// way (build/snapshot.sh), so a first start has servers before anyone
+// signs in.
+func openList(path string, keys []sources.ListKey) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	id, ok := sources.KeyedID(string(b))
+	if !ok {
+		return "", fmt.Errorf("%s is not a sealed list", path)
+	}
+	text := sources.OpenKeyed(keys, string(b))
+	if text == "" {
+		return "", fmt.Errorf("no list key opens %s (its key is %d)", path, id)
+	}
+	return text, nil
 }

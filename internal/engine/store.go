@@ -80,7 +80,19 @@ func (s *Server) runNode() *node.Node {
 }
 
 // matches reports whether the server uses the chosen protocol ("" = any).
-func (s *Server) matches(protocol string) bool { return protocol == "" || s.Proto == protocol }
+func (s *Server) matches(protocol string) bool {
+	switch protocol {
+	case "":
+		return true
+	case "warp":
+		// Every warp-plus and usque method; Tor runs as one too but is
+		// its own choice.
+		return s.Proto == "warpplus" && s.Source != "tor"
+	case "tor":
+		return s.Proto == "warpplus" && s.Source == "tor"
+	}
+	return s.Proto == protocol
+}
 
 // usable reports whether the server is worth connecting to now.
 func (s *Server) usable(now time.Time) bool {
