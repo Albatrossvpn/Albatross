@@ -46,6 +46,12 @@ JUICITY_VERSION="${JUICITY_VERSION:-0.5.0}"
 MIERU_VERSION="${MIERU_VERSION:-3.39.0}"
 BROOK_VERSION="${BROOK_VERSION:-20270101}"
 WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
+# Built from source here, so pinned like the rest: Caddy's builder, the
+# NaiveProxy forward proxy (a commit of its naive branch) and AmneziaWG.
+XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"
+NAIVE_PROXY_REF="${NAIVE_PROXY_REF:-e747854e78743dba85c039b38ed185fb11d93667}"
+AWG_GO_REF="${AWG_GO_REF:-v3.1.20260828}"
+AWG_TOOLS_REF="${AWG_TOOLS_REF:-v3.1.20260812}"
 # SIDECARS=0 skips them (sing-box and Xray alone, as before).
 SIDECARS="${SIDECARS:-1}"
 DRY_RUN="${DRY_RUN:-0}"
@@ -393,6 +399,14 @@ firewall() {
     iptables -t nat -C PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2" 2>/dev/null ||
       iptables -t nat -A PREROUTING -p udp --dport "$r" -j REDIRECT --to-ports "$P_HY2"
   done
+  # The tunnels that hand the client an address (OpenVPN, AmneziaWG,
+  # OpenConnect) forward its traffic, which Oracle's Ubuntu images reject
+  # in FORWARD: the clients would connect and reach nothing.
+  for net in 10.9.0.0/24 10.10.0.0/24 10.11.0.0/24; do
+    iptables -C FORWARD -s "$net" -j ACCEPT 2>/dev/null || iptables -I FORWARD -s "$net" -j ACCEPT
+    iptables -C FORWARD -d "$net" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null ||
+      iptables -I FORWARD -d "$net" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  done
   # The ICMP carrier: echo requests must get in (the cloud's security
   # list too).
   iptables -C INPUT -p icmp --icmp-type echo-request -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp --icmp-type echo-request -j ACCEPT
@@ -632,14 +646,19 @@ sidecar_setup() {
   # The builds below (Caddy, AmneziaWG) need more memory than a small
   # machine has: a swap file, and one compile at a time.
   if [ ! -e /swapfile ] && [ "$(swapon --noheadings --show 2>/dev/null | wc -l)" = 0 ]; then
-    fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile &&
+    # Listed in fstab only once it is in use: a swap file that could not
+    # be made would otherwise fail at every boot.
+    if fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile; then
       grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >>/etc/fstab
+    else
+      rm -f /swapfile
+    fi
   fi
   export PATH="/usr/local/go/bin:/root/go/bin:$PATH" GOFLAGS="-buildvcs=false -p=1" GOTOOLCHAIN=auto GOGC=40
   # NaiveProxy's server is Caddy with klzgrad's forward proxy.
   if [ ! -x /usr/local/bin/caddy-naive ]; then
-    go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest >/dev/null
-    xcaddy build --with github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@naive --output /usr/local/bin/caddy-naive >/dev/null
+    go install "github.com/caddyserver/xcaddy/cmd/xcaddy@$XCADDY_VERSION" >/dev/null
+    xcaddy build --with "github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@$NAIVE_PROXY_REF" --output /usr/local/bin/caddy-naive >/dev/null
   fi
   cat >"$OUT/Caddyfile" <<EOF
 {
@@ -690,11 +709,11 @@ EOF
   install -m 755 "$tmp/wstunnel" /usr/local/bin/wstunnel
   # AmneziaWG: the userspace implementation and its tools, from source.
   if [ ! -x /usr/local/bin/amneziawg-go ]; then
-    git clone -q --depth 1 https://github.com/amnezia-vpn/amneziawg-go "$tmp/awg-go"
+    git clone -q --depth 1 --branch "$AWG_GO_REF" https://github.com/amnezia-vpn/amneziawg-go "$tmp/awg-go"
     (cd "$tmp/awg-go" && go build -trimpath -o /usr/local/bin/amneziawg-go .)
   fi
   if ! command -v awg >/dev/null; then
-    git clone -q --depth 1 https://github.com/amnezia-vpn/amneziawg-tools "$tmp/awg-tools"
+    git clone -q --depth 1 --branch "$AWG_TOOLS_REF" https://github.com/amnezia-vpn/amneziawg-tools "$tmp/awg-tools"
     make -s -C "$tmp/awg-tools/src" >/dev/null && make -s -C "$tmp/awg-tools/src" install >/dev/null
   fi
   awg_setup
