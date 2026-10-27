@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,6 +41,8 @@ type Fetcher struct {
 	// name (see IsWorker); nil leaves the Worker out then.
 	Private  *http.Client
 	CacheDir string
+	// Now is the clock for dated addresses (see fetchDated); nil is time.Now.
+	Now func() time.Time
 
 	bytes atomic.Int64
 }
@@ -81,6 +85,16 @@ const (
 // Fetch downloads one source. When every path fails it falls back to the
 // last copy on disk and reports the error alongside it.
 func (f *Fetcher) Fetch(ctx context.Context, s Source) Result {
+	switch {
+	case s.Kind == KindFeed:
+		return f.fetchFeed(ctx, s)
+	case s.Kind == KindSubscription && strings.Contains(s.URL, "{YYYY}"):
+		return f.fetchDated(ctx, s)
+	}
+	return f.fetchOne(ctx, s)
+}
+
+func (f *Fetcher) fetchOne(ctx context.Context, s Source) Result {
 	res := Result{Source: s}
 	var attempts []attempt
 	proxy := (*http.Client)(nil)
@@ -580,4 +594,195 @@ func (f *Fetcher) fetchLEAP(ctx context.Context, api string, clients []*http.Cli
 		lastErr = errors.New("no way to reach source")
 	}
 	return "", lastErr
+}
+
+func (f *Fetcher) now() time.Time {
+	if f.Now != nil {
+		return f.Now()
+	}
+	return time.Now()
+}
+
+// datedURL fills {YYYY}, {MM} and {DD} in an address with the day d.
+func datedURL(tpl string, d time.Time) string {
+	return strings.NewReplacer("{YYYY}", d.Format("2006"), "{MM}", d.Format("01"), "{DD}", d.Format("02")).Replace(tpl)
+}
+
+// datedDays are the days a dated address may name right now, newest first:
+// the date in China (UTC+8, which several of these sites publish by), the
+// date in UTC, and the day before.
+func datedDays(now time.Time) []time.Time {
+	utc := now.UTC()
+	cn := utc.Add(8 * time.Hour)
+	return []time.Time{cn, utc, cn.AddDate(0, 0, -1)}
+}
+
+// fetchDated reads a site that publishes one file a day under an address
+// with the date in it (.../uploads/{YYYY}/{MM}/{YYYY}{MM}{DD}.txt): the
+// newest day that answers wins. The copy on disk is the source's, whatever
+// the day.
+func (f *Fetcher) fetchDated(ctx context.Context, s Source) Result {
+	var last Result
+	tried := map[string]bool{}
+	for _, d := range datedDays(f.now()) {
+		u := datedURL(s.URL, d)
+		if tried[u] {
+			continue
+		}
+		tried[u] = true
+		day := s
+		day.URL = u
+		r := f.fetchOne(ctx, day)
+		r.Source = s
+		if r.Err == nil {
+			return r
+		}
+		last = r
+	}
+	return last
+}
+
+const (
+	feedEntries = 4       // the newest entries of a feed that are read
+	feedLinks   = 8       // the most links followed from one feed
+	feedPageMax = 4 << 20 // the most read from one linked page
+)
+
+var feedLinkRe = regexp.MustCompile(`https?://[^\s<>"'\x60)\]]+`)
+
+// feedSkipHosts are sites a description links to that never hold a list.
+var feedSkipHosts = []string{
+	"youtube.com", "youtu.be", "google.com", "googleusercontent.com", "ggpht.com", "ytimg.com",
+	"facebook.com", "instagram.com", "twitter.com", "x.com", "t.me", "telegram.me", "telegram.org",
+	"github.com", "apple.com", "microsoft.com", "amazon.com", "paypal.com", "patreon.com",
+}
+
+func feedSkipHost(host string) bool {
+	host = strings.ToLower(host)
+	for _, h := range feedSkipHosts {
+		if host == h || strings.HasSuffix(host, "."+h) {
+			return true
+		}
+	}
+	return false
+}
+
+// feedLinksOf returns the addresses in the newest entries of an RSS or Atom
+// feed, newest first and without repeats, leaving out sites that never hold
+// a list. A channel repeats its links in every video, so repeats are common.
+func feedLinksOf(feed string) []string {
+	var blocks []string
+	for _, tag := range []string{"<entry", "<item"} {
+		if parts := strings.Split(feed, tag)[1:]; len(parts) > 0 {
+			blocks = parts
+			break
+		}
+	}
+	if len(blocks) > feedEntries {
+		blocks = blocks[:feedEntries]
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, b := range blocks {
+		for _, m := range feedLinkRe.FindAllString(html.UnescapeString(b), -1) {
+			m = strings.TrimRight(m, ".,;:!?")
+			u, err := neturl.Parse(m)
+			if err != nil || u.Host == "" || feedSkipHost(u.Hostname()) || seen[m] {
+				continue
+			}
+			seen[m] = true
+			out = append(out, m)
+		}
+	}
+	if len(out) > feedLinks {
+		out = out[:feedLinks]
+	}
+	return out
+}
+
+// getBody downloads one address, following redirects, and returns the body
+// with the address it ended at.
+func (f *Fetcher) getBody(ctx context.Context, c *http.Client, u string, max int64) (string, string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("User-Agent", userAgent)
+	resp, err := c.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	if ct := strings.ToLower(resp.Header.Get("Content-Type")); strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "video/") || strings.HasPrefix(ct, "audio/") || strings.HasPrefix(ct, "font/") || strings.Contains(ct, "zip") {
+		return "", "", errors.New("not text: " + ct)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, max))
+	f.bytes.Add(int64(len(b)))
+	if err != nil {
+		return "", "", err
+	}
+	return string(b), resp.Request.URL.String(), nil
+}
+
+// fetchFeed reads a channel's feed (YouTube's videos.xml) and follows the
+// lists its newest entries link to, one hop: some channels post a fresh
+// paste of servers in every video. The text is the feed's lists joined; an
+// address that answers with the servers in its own address (a redirect to
+// ...?config=vless%3A%2F%2F...) adds the decoded address.
+func (f *Fetcher) fetchFeed(ctx context.Context, s Source) Result {
+	res := Result{Source: s}
+	var proxy *http.Client
+	if f.Proxy != nil {
+		proxy = f.Proxy()
+	}
+	if f.Mode != nil && f.Mode() == ModeDomestic && proxy == nil {
+		return f.fallback(res, errors.New("foreign addresses are cut"))
+	}
+	var clients []*http.Client
+	if proxy != nil {
+		clients = append(clients, proxy)
+	}
+	clients = append(clients, f.Direct)
+	var feed string
+	var client *http.Client
+	var lastErr error
+	for _, c := range clients {
+		b, _, err := f.getBody(ctx, c, s.URL, 4<<20)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		feed, client = b, c
+		break
+	}
+	if client == nil {
+		return f.fallback(res, lastErr)
+	}
+	var parts []string
+	for _, l := range feedLinksOf(feed) {
+		if ctx.Err() != nil {
+			break
+		}
+		body, final, err := f.getBody(ctx, client, l, feedPageMax)
+		if err != nil {
+			continue
+		}
+		parts = append(parts, body)
+		if final != l {
+			if dec, err := neturl.QueryUnescape(final); err == nil {
+				parts = append(parts, dec)
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return f.fallback(res, errors.New("no link in the feed answered"))
+	}
+	res.Text, res.Via = strings.Join(parts, "\n"), "direct"
+	f.store(s, cacheMeta{URL: s.URL, FetchedAt: time.Now()}, res.Text)
+	return res
 }

@@ -173,3 +173,48 @@ func TestKeyedLists(t *testing.T) {
 		}
 	}
 }
+
+func TestCollectedSourcesAreUnique(t *testing.T) {
+	ids := map[string]string{}
+	urls := map[string]string{}
+	for _, s := range Collected() {
+		if prev, dup := ids[s.ID]; dup {
+			t.Errorf("%s %q is listed twice (%s)", s.Kind, s.URL, prev)
+		}
+		ids[s.ID] = s.URL
+		if s.Kind == KindTelegram {
+			continue
+		}
+		u := strings.ToLower(s.URL)
+		if prev, dup := urls[u]; dup {
+			t.Errorf("%q is listed as %s and %s", s.URL, prev, s.Kind)
+		}
+		urls[u] = string(s.Kind)
+		if s.Kind == KindFeed || s.Kind == KindSubscription {
+			if !strings.HasPrefix(u, "https://") {
+				t.Errorf("%s %q is not an https address", s.Kind, s.URL)
+			}
+		}
+	}
+	feeds, dated := 0, 0
+	for _, s := range Collected() {
+		if s.Kind == KindFeed {
+			feeds++
+		}
+		if strings.Contains(s.URL, "{YYYY}") {
+			dated++
+			if s.Kind != KindSubscription {
+				t.Errorf("%s %q holds a date but is not a subscription", s.Kind, s.URL)
+			}
+		}
+	}
+	if feeds == 0 || dated == 0 {
+		t.Fatalf("%d feeds and %d dated files, want some of each", feeds, dated)
+	}
+	// The apps read the built-in lists themselves: none of the collector-only ones may leak in.
+	for _, s := range Builtin() {
+		if s.Kind == KindFeed || strings.Contains(s.URL, "{YYYY}") {
+			t.Errorf("the app would read %s %q", s.Kind, s.URL)
+		}
+	}
+}

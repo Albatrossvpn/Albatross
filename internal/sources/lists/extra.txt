@@ -1,0 +1,60 @@
+# Albatross VPN: sources only the collector reads (sources.Collected), found by the source hunt of Oct 2026.
+# One URL per line; lines starting with # are comments. An address with {YYYY}{MM}{DD} is a file published
+# per day: the fetcher fills in the newest day that answers (fetchDated). Every list here was measured with
+# the app parser: it holds servers that none of the other lists had, and was updated within two weeks.
+#
+# GitVerse (gitverse.ru, a Russian git host whose public API needs no login): Russian whitelist and bypass lists.
+# cyberportal/wl is an hourly aggregator cut into slices; each slice is a list of its own.
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-001.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-002.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-003.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-005.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-006.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-007.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-008.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-009.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-012.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-013.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-014.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-015.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-016.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-017.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-018.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-020.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-021.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-022.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-023.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-025.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-026.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-027.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-028.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-029.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-030.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-031.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-034.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-035.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-036.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-037.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-038.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-039.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-040.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-041.txt
+https://gitverse.ru/api/repos/cyberportal/wl/raw/branch/master/CP-042.txt
+# Other GitVerse lists.
+https://gitverse.ru/api/repos/Anchetka/sub-mirror/raw/branch/master/aetris.txt
+https://gitverse.ru/api/repos/RKP_channel/RKP_bypass_configs/raw/branch/master/blacklist.txt
+https://gitverse.ru/api/repos/FREEVPN2149034/FREEVPN/raw/branch/master/FREEVPNkeys
+https://gitverse.ru/api/repos/vansfenix/vpnparser/raw/branch/main/all.txt
+https://gitverse.ru/api/repos/XWeL/subs-check/raw/branch/main/backup.yaml
+#
+# Free-node sites with their own addresses.
+https://freenode.biz/api/featured?format=nsubscribe
+https://freenode.biz/api/featured?format=clash
+https://sub.shadowsharing.com/static/sub_en
+https://raw.githubusercontent.com/IranV2raysub/sub/refs/heads/main/sub
+#
+# Daily files: the free-node blogs that publish one file a day under an address with the date in it.
+https://node.freeclashnode.com/uploads/{YYYY}/{MM}/0-{YYYY}{MM}{DD}.txt
+https://node.freeclashnode.com/uploads/{YYYY}/{MM}/1-{YYYY}{MM}{DD}.txt
+https://node.freeclashnode.com/uploads/{YYYY}/{MM}/2-{YYYY}{MM}{DD}.txt
+https://nodebus.net/cfn/7b81de21b8c613b1/{YYYY}{MM}{DD}-v2ray.txt
