@@ -123,27 +123,77 @@ func readLines(path string) []string {
 	return strings.Fields(string(b))
 }
 
-// refreshHot re-tests the servers listed in path (the last hot.txt and the
-// top of fresh.txt) and writes the ones that still work to hot.txt. It runs
-// between full collections so the list the apps try first stays current.
-func refreshHot(path, out string, n int, crowd crowdStats, report, tester string) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		log.Fatal(err)
-	}
+// hotCandidates is the most servers refreshHot reads from its lists, in
+// their order (the last hot.txt first, then the top of fresh.txt).
+const hotCandidates = 4000
+
+// hotInput reads the candidates for refreshHot from the lists at paths, in
+// order and without repeats, up to hotCandidates. A sealed list (the
+// collector's .sealed files) is opened with keys; one that no key opens is
+// skipped.
+func hotInput(paths []string, keys []sources.ListKey) []*entry {
 	var list []*entry
 	seen := map[string]bool{}
-	for _, l := range strings.Fields(string(b)) {
-		nd, err := node.ParseLink(l)
-		if err != nil || seen[nd.Key()] {
+	for _, path := range paths {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			log.Printf("hot: %v", err)
 			continue
 		}
-		seen[nd.Key()] = true
-		e := &entry{link: l, proto: nd.Proto, key: node.Key64(nd.Key())}
-		if !nd.UDPBased() {
-			e.endpoint = nd.Endpoint()
+		text := string(b)
+		if _, sealed := sources.KeyedID(text); sealed {
+			if text = sources.OpenKeyed(keys, text); text == "" {
+				log.Printf("hot: no list key opens %s", path)
+				continue
+			}
 		}
-		list = append(list, e)
+		for _, l := range strings.Fields(text) {
+			if len(list) >= hotCandidates {
+				return list
+			}
+			nd, err := node.ParseLink(l)
+			if err != nil || seen[nd.Key()] {
+				continue
+			}
+			seen[nd.Key()] = true
+			e := &entry{link: l, proto: nd.Proto, key: node.Key64(nd.Key())}
+			if !nd.UDPBased() {
+				e.endpoint = nd.Endpoint()
+			}
+			list = append(list, e)
+		}
+	}
+	return list
+}
+
+// writeHot writes hot.txt to out: sealed with the newest of keys as
+// hot.txt.sealed, which the apps read, and plain as well when plain is set
+// or there is no key to seal it with.
+func writeHot(out string, links []string, keys []sources.ListKey, plain bool) error {
+	text := strings.Join(links, "\n") + "\n"
+	if plain || len(keys) == 0 {
+		if err := os.WriteFile(filepath.Join(out, "hot.txt"), []byte(text), 0o644); err != nil {
+			return err
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	sealed, err := sources.SealKeyed(keys[0], text)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(out, "hot.txt"+sources.KeyedSuffix), sealed, 0o644)
+}
+
+// refreshHot re-tests the servers listed in paths (the last hot.txt and the
+// top of fresh.txt, plain or sealed) and writes the ones that still work to
+// hot.txt. It runs between full collections (hot.yml) and on a tester inside
+// the country (deploy/tester), so the list the apps try first stays current.
+func refreshHot(paths []string, out string, n int, crowd crowdStats, report, tester string, keys []sources.ListKey, plain bool) {
+	list := hotInput(paths, keys)
+	if len(list) == 0 {
+		log.Fatal("hot: no candidates")
 	}
 	first, tested := realTest(list, n)
 	passed := confirm(first)
@@ -172,7 +222,7 @@ func refreshHot(path, out string, n int, crowd crowdStats, report, tester string
 		log.Print("nothing passed; hot.txt left as it was")
 		return
 	}
-	if err := os.WriteFile(filepath.Join(out, "hot.txt"), []byte(strings.Join(links(hot), "\n")+"\n"), 0o644); err != nil {
+	if err := writeHot(out, links(hot), keys, plain); err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("wrote %d hot servers", len(hot))
@@ -262,7 +312,7 @@ func main() {
 	}
 	crowd := loadCrowd(*crowdPath)
 	if *hotFrom != "" {
-		refreshHot(*hotFrom, *out, *real, crowd, *report, *tester)
+		refreshHot(strings.Split(*hotFrom, ","), *out, *real, crowd, *report, *tester, readListKeys(*keysIn), *plain)
 		return
 	}
 

@@ -110,6 +110,8 @@ jobs:
           for arch in amd64 arm64; do
             CGO_ENABLED=0 GOARCH=$arch go build -trimpath -buildvcs=false -ldflags "-s -w" -o "$RUNNER_TEMP/tools/collect-linux-$arch" ./cmd/collect
           done
+          # install.sh carries run.sh inline: the two must not drift apart.
+          diff <(sed -n "/^cat > run.sh <<'RUN'$/,/^RUN$/{//!p}" deploy/tester/install.sh) deploy/tester/run.sh
           cp deploy/tester/install.sh "$RUNNER_TEMP/tools/tester-install.sh"
       - name: Publish
         working-directory: ${{ runner.temp }}/servers

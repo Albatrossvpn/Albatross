@@ -50,37 +50,48 @@ curl -fsSL --retry 4 -o x.zip "$gh/XTLS/Xray-core/releases/download/v${XRAY_VERS
 unzip -oq x.zip xray -d cores && rm x.zip
 chmod +x cores/sing-box cores/xray
 
-cat > env <<ENV
-ACCOUNT_URL=$ACCOUNT_URL
-ADMIN_USER=$ADMIN_USER
-ADMIN_PASSWORD=$ADMIN_PASSWORD
-REAL=$REAL
-ENV
-chmod 600 env
+# The settings, for run.sh: shell-quoted, so a password with any
+# character in it reaches the account service as it is, and readable by
+# root only from the start.
+(umask 077 && {
+  printf 'ACCOUNT_URL=%q\n' "$ACCOUNT_URL"
+  printf 'ADMIN_USER=%q\n' "$ADMIN_USER"
+  printf 'ADMIN_PASSWORD=%q\n' "$ADMIN_PASSWORD"
+  printf 'REAL=%q\n' "$REAL"
+} > ./env)
 
-# One run (deploy/tester/run.sh in the repository).
+# One run (deploy/tester/run.sh in the repository; CI checks the two match).
 cat > run.sh <<'RUN'
 #!/usr/bin/env bash
 # One run of the tester inside the country (install.sh sets it up):
-# fetches the candidates (the current hot.txt and the top of fresh.txt),
-# connects through them for real from here, twice, and publishes the report
-# (servers/iran.json) and, when enough servers were confirmed, hot.txt.
+# fetches the candidates (the current hot.txt and the top of fresh.txt, as
+# the collector publishes them: sealed), connects through them for real
+# from here, twice, and publishes the report (servers/iran.json) and, when
+# enough servers were confirmed, hot.txt.
 set -euo pipefail
-: "${ACCOUNT_URL:?}" "${ADMIN_USER:?}" "${ADMIN_PASSWORD:?}"
 cd "$(dirname "$0")"
+# The settings install.sh wrote, shell-quoted so any password works.
+if [ -f ./env ]; then . ./env; fi
+: "${ACCOUNT_URL:?}" "${ADMIN_USER:?}" "${ADMIN_PASSWORD:?}"
 account="${ACCOUNT_URL%/}"
 work=work
-rm -rf "$work" && mkdir -p "$work"
-# The candidates: whatever the collector abroad found, hot first.
-{ curl -fsSL --retry 3 "$account/list/servers/hot.txt"; curl -fsSL --retry 3 "$account/list/servers/fresh.txt" | head -n 3000; } > "$work/try.txt"
-[ -s "$work/try.txt" ] || { echo "no candidates" >&2; exit 1; }
-SING_BOX="$PWD/cores/sing-box" XRAY="$PWD/cores/xray" ./collect -hot-from "$work/try.txt" -real "${REAL:-1500}" -report "$work/iran.json" -tester iran -out "$work"
+rm -rf "$work" && mkdir -p "$work/in"
 
-# Publish through the account service as its administrator.
+# Signed in as the administrator: for the keys that open the sealed lists,
+# and later to publish.
 token="$(curl -fsS --retry 3 --max-time 60 -H 'Content-Type: application/json' \
   --data "$(jq -cn --arg u "$ADMIN_USER" --arg p "$ADMIN_PASSWORD" '{username:$u,password:$p}')" \
   "$account/api/v1/admin/login" | jq -r .token)"
 [ -n "$token" ] && [ "$token" != null ] || { echo "could not sign in to $account" >&2; exit 1; }
+(umask 077 && curl -fsS --retry 3 --max-time 60 -H "Authorization: Bearer $token" "$account/api/v1/admin/listkeys" > "$work/keys.json")
+
+# The candidates: whatever the collector abroad found, hot first.
+for f in hot.txt fresh.txt; do
+  curl -fsS --retry 3 --max-time 300 -o "$work/in/$f.sealed" "$account/list/servers/$f.sealed" || echo "no $f.sealed to test yet" >&2
+done
+SING_BOX="$PWD/cores/sing-box" XRAY="$PWD/cores/xray" ./collect -hot-from "$work/in/hot.txt.sealed,$work/in/fresh.txt.sealed" \
+  -keys "$work/keys.json" -real "${REAL:-1500}" -report "$work/iran.json" -tester iran -out "$work"
+
 put() { # name file
   curl -fsS --retry 3 --max-time 300 -X PUT -H "Authorization: Bearer $token" -H 'Content-Type: application/octet-stream' \
     --data-binary @"$2" "$account/api/v1/admin/list/servers/$1" > /dev/null && echo "published servers/$1 ($(stat -c%s "$2") bytes)"
@@ -89,8 +100,8 @@ put iran.json "$work/iran.json"
 # hot.txt from here only when this run confirmed enough servers; a thin run
 # leaves the collector's list in place.
 confirmed="$(jq '[.servers[] | select(.[0] == 2)] | length' "$work/iran.json")"
-if [ -s "$work/hot.txt" ] && [ "$confirmed" -ge 100 ]; then
-  put hot.txt "$work/hot.txt"
+if [ -s "$work/hot.txt.sealed" ] && [ "$confirmed" -ge 100 ]; then
+  put hot.txt.sealed "$work/hot.txt.sealed"
 else
   echo "only $confirmed servers confirmed; hot.txt left to the collector"
 fi
@@ -106,7 +117,6 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=$dir
-EnvironmentFile=$dir/env
 ExecStart=$dir/run.sh
 Nice=10
 UNIT

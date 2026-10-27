@@ -141,7 +141,13 @@ test("the lists' keys go to signed-in users who may connect, newest first", asyn
   assert.equal(r.headers.get("cache-control"), "no-store");
   assert.ok(Array.isArray(r.body.keys), "a list of keys, empty before the first collection");
   for (let i = 1; i < r.body.keys.length; i++) assert.ok(r.body.keys[i - 1].id > r.body.keys[i].id, "newest first");
-  await call("POST", "admin/users/keys-1", { token: admin, body: { enabled: false } }).catch(() => {});
+  // The administrator gets them too (deploy/tester); a user's session is not the administrator's.
+  assert.equal((await call("GET", "admin/listkeys")).status, 401);
+  assert.equal((await call("GET", "admin/listkeys", { token })).status, 401);
+  const a = await call("GET", "admin/listkeys", { token: admin });
+  assert.equal(a.status, 200);
+  assert.equal(a.headers.get("cache-control"), "no-store");
+  assert.deepEqual(a.body.keys, r.body.keys);
 });
 
 test("a usage report sent again with the same id is counted once", async () => {
