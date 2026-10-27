@@ -199,14 +199,19 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 			proxy := &url.URL{Scheme: "http", User: url.UserPassword(tag, pass), Host: "127.0.0.1:" + strconv.Itoa(port)}
 			limit := timeout
 			switch {
-			case n.Engine() == node.EngineWarpPlus, n.Engine() == node.EngineSidecar, n.DNSTunnel():
-				// warp-plus and the sidecars negotiate first; a DNS
-				// tunnel moves a few hundred bytes per query.
+			case n.Engine() == node.EngineWarpPlus, n.Engine() == node.EngineSidecar, n.DNSTunnel(), sessionFirst(n):
+				// warp-plus, the sidecars and OpenVPN negotiate first; a
+				// DNS tunnel moves a few hundred bytes per query.
 				limit = 3 * timeout
 			case n.ICMP():
 				limit = 2 * timeout
 			}
-			r := Probe(ctx, proxy, limit)
+			var r Result
+			if sessionFirst(n) {
+				r = probeSession(ctx, proxy, limit, Probe)
+			} else {
+				r = Probe(ctx, proxy, limit)
+			}
 			if !run.Alive() || ctx.Err() != nil {
 				// The core crashed, or the test was cut off; the result
 				// says nothing about the node.
@@ -249,6 +254,34 @@ func (t *Tester) Through(ctx context.Context, name string, nodes []*node.Node, t
 		}
 	}
 	return nil
+}
+
+// sessionFirst says whether a node's outbound takes connections only once
+// its session stands. sing-box's OpenVPN refuses them at once until then
+// ("not ready yet"), which a request right after the core starts took for
+// a dead server: every OpenVPN server failed its test.
+func sessionFirst(n *node.Node) bool { return n.Proto == "openvpn" }
+
+// sessionPause is the wait between the tries of probeSession.
+var sessionPause = time.Second
+
+// probeSession is probe for a sessionFirst node: a failure that came at
+// once is tried again, sessionPause apart, until limit; a slow one (a
+// timeout, a server that answered wrong) is the answer.
+func probeSession(ctx context.Context, proxy *url.URL, limit time.Duration, probe func(context.Context, *url.URL, time.Duration) Result) Result {
+	start := time.Now()
+	for {
+		tried := time.Now()
+		r := probe(ctx, proxy, limit-time.Since(start))
+		if r.OK || r.Tampered || ctx.Err() != nil || time.Since(tried) > sessionPause || limit-time.Since(start) < 2*sessionPause {
+			return r
+		}
+		select {
+		case <-time.After(sessionPause):
+		case <-ctx.Done():
+			return r
+		}
+	}
 }
 
 // Probe makes one real request through a proxy and returns delay, exit IP
