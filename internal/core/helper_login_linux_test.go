@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -21,6 +22,8 @@ func TestHelperPortsTakeOnlyTheLogin(t *testing.T) {
 		t.Skip("ALBATROSS_HELPERS not set")
 	}
 	r := &Runtime{Bin: Locate(dir), Dir: t.TempDir()}
+	// What a helper says goes in the log, for when one fails here.
+	r.OnLine = func(name, line string) { t.Logf("%s| %s", name, line) }
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	for _, link := range []string{
@@ -57,7 +60,7 @@ func TestHelperPortsTakeOnlyTheLogin(t *testing.T) {
 			t.Errorf("%s: its port takes a wrong password", name)
 		}
 		if !socksLogin(addr, node.SocksUser, pass) {
-			t.Errorf("%s: its port refuses the run's login", name)
+			t.Errorf("%s: its port refuses the run's login (%s)", name, socksTrace(addr, node.SocksUser, pass))
 		}
 		p.Stop()
 	}
@@ -107,4 +110,30 @@ func socksLogin(addr, user, pass string) bool {
 		return false
 	}
 	return b[1] == 0
+}
+
+// socksTrace says what a SOCKS5 server at addr answers to a login, byte
+// by byte, for the log.
+func socksTrace(addr, user, pass string) string {
+	c, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	if err != nil {
+		return "dial: " + err.Error()
+	}
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	c.Write([]byte{5, 1, 2})
+	b := make([]byte, 64)
+	k, err := io.ReadAtLeast(c, b, 2)
+	out := fmt.Sprintf("greeting answered % x", b[:k])
+	if err != nil {
+		return out + ", then " + err.Error()
+	}
+	req := append([]byte{1, byte(len(user))}, user...)
+	c.Write(append(append(req, byte(len(pass))), pass...))
+	k, err = io.ReadAtLeast(c, b, 2)
+	out += fmt.Sprintf(", login answered % x", b[:k])
+	if err != nil {
+		out += ", then " + err.Error()
+	}
+	return out
 }
