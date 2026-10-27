@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -223,7 +224,12 @@ func TestRareProtocolsAreTestedAndKept(t *testing.T) {
 
 	out := list[:4]
 	cands := list
-	got := reserveProto(append([]*entry(nil), out...), cands, "wireguard", 2)
+	got := keepReserves(out, cands, 4, func(p string) int {
+		if p == "wireguard" {
+			return 2
+		}
+		return 0
+	})
 	wg = 0
 	for _, e := range got {
 		if e.proto == "wireguard" {
@@ -265,5 +271,59 @@ func TestHotListHasEveryProtocol(t *testing.T) {
 	}
 	if count["trojan"] < protoReserve || count["ss"] < protoReserve || count["wireguard"] < wgReserve || count["tuic"] != 3 {
 		t.Fatalf("protocol counts: %v", count)
+	}
+}
+
+// Every protocol keeps its reserve when several need room at once, and
+// still after the probes inside the country put the addresses that answer
+// first and the list is cut to hotSize: UDP servers have no answer there
+// and sort last, where the cut falls.
+func TestHotListReservesSurviveTheCut(t *testing.T) {
+	var ordered []*entry
+	passed := map[*entry]time.Duration{}
+	seen := map[string]bool{}
+	add := func(proto string, n int, udp bool) {
+		for i := 0; i < n; i++ {
+			host := fmt.Sprintf("%s%d", proto, i)
+			e := &entry{link: proto + "://x@" + host + ":1#X", proto: proto}
+			if !udp {
+				e.endpoint = host + ":1"
+				seen[e.endpoint] = true // answers from inside
+			}
+			ordered = append(ordered, e)
+			passed[e] = time.Second
+		}
+	}
+	add("vless", 600, false)
+	protos := []string{"trojan", "ss", "vmess", "hysteria2", "tuic", "anytls", "ssh", "socks", "http", "naive", "mieru", "wireguard"}
+	for _, p := range protos {
+		udp := p == "hysteria2" || p == "tuic" || p == "wireguard"
+		n := 30
+		if p == "wireguard" {
+			n = 60
+		}
+		add(p, n, udp)
+	}
+	hot := hotList(ordered, passed, hotSize+hotSpare, crowdStats{rates: map[uint64][2]float64{}})
+	check := func(stage string, hot []*entry, max int) {
+		t.Helper()
+		count := map[string]int{}
+		for _, e := range hot {
+			count[e.proto]++
+		}
+		for _, p := range protos {
+			if count[p] < reserveOf(p, max) {
+				t.Errorf("%s: %d %s servers, want %d (%v)", stage, count[p], p, reserveOf(p, max), count)
+			}
+		}
+		if len(hot) > max {
+			t.Errorf("%s: %d servers, want at most %d", stage, len(hot), max)
+		}
+	}
+	check("hot list", hot, hotSize+hotSpare)
+	hot = fitHot(iranFirst(hot, seen), hotSize)
+	check("after the cut", hot, hotSize)
+	if len(hot) != hotSize {
+		t.Fatalf("%d servers after the cut", len(hot))
 	}
 }
