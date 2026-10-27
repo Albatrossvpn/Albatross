@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 func TestDatedDays(t *testing.T) {
@@ -120,5 +122,35 @@ func TestFetchFeedFollowsTheLinksOneHop(t *testing.T) {
 	res = f.Fetch(context.Background(), s)
 	if res.Err == nil || !res.FromCache || !strings.Contains(res.Text, "192.0.2.7") {
 		t.Fatalf("got err %v cache %v text %q", res.Err, res.FromCache, res.Text)
+	}
+}
+
+// A LEAP provider answers with JSON and PEM, not a channel preview: the
+// three answers are joined into one document the parser reads.
+func TestFetchLEAP(t *testing.T) {
+	eip := `{"gateways":[{"capabilities":{"transport":[{"ports":["53"],"protocols":["udp"],"type":"openvpn"}]},"host":"vpn01-sea.riseup.net","ip_address":"192.0.2.9","location":"Seattle"}],"locations":{"Seattle":{"country_code":"US"}},"openvpn_configuration":{"auth":"SHA512","cipher":"AES-256-GCM"},"version":3}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/3/config/eip-service.json":
+			fmt.Fprint(w, eip)
+		case "/3/cert":
+			fmt.Fprint(w, "-----BEGIN RSA PRIVATE KEY-----\nMIIE\n-----END RSA PRIVATE KEY-----\n-----BEGIN CERTIFICATE-----\nMIID\n-----END CERTIFICATE-----\n")
+		case "/ca.crt":
+			fmt.Fprint(w, "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	leapProviders[srv.URL] = srv.URL + "/ca.crt"
+	defer delete(leapProviders, srv.URL)
+	f := &Fetcher{Direct: srv.Client(), CacheDir: t.TempDir()}
+	res := f.Fetch(context.Background(), Source{ID: "l", Kind: KindLEAP, URL: srv.URL, Enabled: true})
+	if res.Err != nil {
+		t.Fatalf("fetch: %v", res.Err)
+	}
+	got := node.ParseLEAP(res.Text)
+	if len(got) != 1 || got[0].Node.Server != "192.0.2.9" || got[0].Node.Port != 53 {
+		t.Fatalf("parsed %d servers from %q", len(got), res.Text)
 	}
 }
