@@ -11,7 +11,7 @@ rest:
 | VLESS + XHTTP + Reality (Xray) | 8443/tcp |
 | Trojan + TLS | 2098/tcp |
 | VLESS + WebSocket + TLS (also through Cloudflare with `CDN_HOST`) | 2083/tcp |
-| VLESS + gRPC + TLS (also through Cloudflare with `CDN_HOST`) | 2087/tcp |
+| VLESS + gRPC + TLS | 2087/tcp |
 | VMess + HTTPUpgrade + TLS (also through Cloudflare with `CDN_HOST`) | 2096/tcp |
 | AnyTLS | 8880/tcp |
 | Shadowsocks 2022 | 8388/tcp+udp |
@@ -44,8 +44,9 @@ neither TCP nor UDP to foreign addresses gets out but ping still does: the
 session travels inside echo packets, slowly, but it connects.
 
 One address can be blocked at any time, so the server also offers its
-WebSocket, gRPC and HTTPUpgrade protocols through Cloudflare's edge when
-`CDN_HOST` names a proxied record pointing at it: those connections go to
+WebSocket and HTTPUpgrade protocols through Cloudflare's edge (which
+carries gRPC on port 443 alone) when `CDN_HOST` names a proxied record
+pointing at it: those connections go to
 Cloudflare's addresses (the app picks the edge addresses that answer from
 inside the country), the server's own address never appears, and blocking
 it leaves them working. A machine with a public IPv6 address gets links
@@ -83,7 +84,10 @@ instead of a closed connection.
    `A` record (orange cloud) such as `in.<domain>` pointing at the machine,
    with the zone's SSL/TLS mode *Full* or *Full (strict)*, and run the
    script with `CDN_HOST=in.<domain>` (remembered); the certificate then
-   covers that name too. The workflow *Cloudflare DNS for the own server*
+   covers that name too. The zone's *Bot fight mode* (Security → Settings,
+   Bot traffic) must be off: it challenges the cores' connections, and
+   every request from a data center (the app's own requests through a
+   server among them), with a page they cannot pass. The workflow *Cloudflare DNS for the own server*
    (`.github/workflows/cloudflare-dns.yml`) makes both kinds of record
    from the repository's Cloudflare token.
    It installs sing-box and Xray, makes the keys (kept in
