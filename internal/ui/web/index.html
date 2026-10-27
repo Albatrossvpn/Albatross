@@ -11,7 +11,7 @@
 <div id="app">
   <header class="top">
     <div class="brand">
-      <img src="icon.svg" alt="" width="28" height="28">
+      <img src="icon.svg" alt="" width="30" height="30">
       <span class="brand-name">Albatross</span>
     </div>
     <div class="top-actions">
@@ -38,6 +38,7 @@
           <svg viewBox="0 0 24 24" class="power-icon"><path d="M12 3v8"/><path d="M6.3 6.9a8 8 0 1 0 11.4 0"/></svg>
         </button>
         <div class="status-title" id="status-title">Not connected</div>
+        <div class="ornament" aria-hidden="true"></div>
         <div class="status-sub" id="status-sub">Getting ready…</div>
       </div>
 
@@ -46,7 +47,7 @@
       </div>
 
       <button class="country-card" id="country-btn">
-        <span class="flag big" id="cc-flag">⚡</span>
+        <span class="flag big" id="cc-flag"><svg class="bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg></span>
         <span class="cc-text">
           <span class="cc-label">Location</span>
           <span class="cc-name" id="cc-name">Fastest location</span>
@@ -208,7 +209,8 @@
   <!-- Sign in: shown while this build asks for an account and nobody is signed in -->
   <div class="login hidden" id="login">
     <form class="login-card" id="login-form">
-      <img src="icon.svg" alt="" width="44" height="44">
+      <img src="icon.svg" alt="" width="68" height="68">
+      <div class="wordmark">Albatross</div>
       <h1>Sign in</h1>
       <p>Use the username and password you were given.</p>
       <input id="login-user" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Username" required>

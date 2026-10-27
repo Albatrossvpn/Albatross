@@ -69,6 +69,9 @@ function pingClass(ms) {
   return "slow";
 }
 
+// "Fastest location" wears a gold bolt where a country shows its flag.
+var BOLT = '<svg class="bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>';
+
 var statusTitles = {
   idle: "Not connected",
   searching: "Looking for a server",
@@ -104,7 +107,8 @@ function render(s) {
 
   var locations = s.countries.length;
   var target = first(s.countries, function (x) { return x.code === s.target; });
-  $("cc-flag").textContent = s.target ? s.target_flag : "⚡";
+  if (s.target) $("cc-flag").textContent = s.target_flag;
+  else $("cc-flag").innerHTML = BOLT;
   $("cc-name").textContent = s.target ? s.target_name : "Fastest location";
   if (!s.target) {
     $("cc-meta").textContent = s.servers ? num(s.servers) + " servers in " + num(locations) + " locations" : "Looking for servers…";
@@ -314,7 +318,7 @@ function renderSheet() {
     var q = $("country-search").value.trim().toLowerCase();
     var match = function (c) { return !q || c.name.toLowerCase().includes(q) || c.code.toLowerCase() === q; };
     if (!q || "fastest".includes(q)) {
-      html += countryItem({ code: "", flag: "⚡", name: "Fastest location", meta: "Lowest ping", badge: "" });
+      html += countryItem({ code: "", name: "Fastest location", meta: "Lowest ping", badge: "" });
     }
     state.countries.filter(match).forEach(function (c) {
       html += countryItem({ code: c.code, flag: c.flag, name: c.name, meta: num(c.servers) + " servers", badge: '<span class="badge ' + pingClass(c.best_delay) + '">' + num(c.best_delay) + " ms</span>" });
@@ -348,7 +352,7 @@ var privacyNotes = [
 function countryItem(c) {
   var sel = (state.target || "") === c.code ? " selected" : "";
   return '<button class="item' + sel + '" data-value="' + esc(c.code) + '" data-country="1">\n' +
-    '    <span class="flag big">' + esc(c.flag) + "</span>\n" +
+    '    <span class="flag big">' + (c.code ? esc(c.flag) : BOLT) + "</span>\n" +
     '    <span class="main"><span class="title">' + esc(c.name) + '</span><span class="sub">' + esc(c.meta) + "</span></span>\n" +
     "    " + c.badge + "</button>";
 }

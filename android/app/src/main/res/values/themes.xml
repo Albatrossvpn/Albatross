@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Albatross" parent="android:Theme.Material.NoActionBar">
+    <!-- The page's pearl white behind dark status-bar icons. Android 8.0 and
+         older cannot darken the navigation bar's buttons: the bar keeps the
+         page's ink there (values-v27 turns it light). -->
+    <style name="Theme.Albatross" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/bg</item>
         <item name="android:statusBarColor">@color/bg</item>
-        <item name="android:navigationBarColor">@color/bg</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">@color/ink</item>
     </style>
-    <color name="bg">#0A0F1D</color>
-    <color name="accent">#22C55E</color>
+    <color name="bg">#F6F7FB</color>
+    <color name="ink">#0F1B3D</color>
+    <color name="accent">#2F5FE0</color>
 </resources>
