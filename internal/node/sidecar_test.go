@@ -120,3 +120,30 @@ func TestAmneziaWGKeyForms(t *testing.T) {
 		t.Fatalf("sections:\n%s", conf)
 	}
 }
+
+// A NaiveProxy link with a TLS name of its own (a relay's) connects to its
+// address and says the name: the helper's resolver rules send the name to
+// the address.
+func TestNaiveWithSNI(t *testing.T) {
+	n, err := ParseLink("naive+https://albatross:pw@203.0.113.9:2052?sni=srv.example.com#Naive-relay")
+	if err != nil || n.Validate() != nil {
+		t.Fatalf("parse %v, validate %v", err, n.Validate())
+	}
+	_, _, files := n.SidecarArgs(1080, "/tmp/x")
+	var cfg map[string]string
+	if err := json.Unmarshal([]byte(files["config.json"]), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg["proxy"] != "https://albatross:pw@srv.example.com:2052" || cfg["host-resolver-rules"] != "MAP srv.example.com 203.0.113.9" {
+		t.Fatalf("config %v", cfg)
+	}
+	// Without one, as before: the address is the name.
+	n, _ = ParseLink("naive+https://albatross:pw@srv.example.com:2052#Naive")
+	_, _, files = n.SidecarArgs(1080, "/tmp/x")
+	if strings.Contains(files["config.json"], "host-resolver-rules") || !strings.Contains(files["config.json"], "srv.example.com:2052") {
+		t.Fatalf("config %s", files["config.json"])
+	}
+	if n, err := ParseLink("naive+https://albatross:pw@203.0.113.9:2052?sni=a.example%2CMAP%20*%206.6.6.6#x"); err == nil && n.Validate() == nil {
+		t.Fatal("a name that adds resolver rules is refused")
+	}
+}

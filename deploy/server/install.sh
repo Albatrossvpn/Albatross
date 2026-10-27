@@ -911,11 +911,14 @@ relay_rules() {
     echo 'done'
     echo 'iptables -t nat -A ALBATROSS_POSTROUTING -d "$to" -j MASQUERADE'
     echo 'iptables -A ALBATROSS_FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT'
-    for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_HTTP; do
+    # Every port the server's links use, the sidecar protocols' too; not
+    # 22, which is this machine's own SSH (relay_links leaves that link out).
+    for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_HTTP \
+      $P_OVPN $P_TGO $P_NAIVE $P_MIERU $P_BROOK $P_WST $P_OC; do
       echo "iptables -t nat -A ALBATROSS_PREROUTING -p tcp --dport $p -j DNAT --to-destination \"\$to\""
       echo "iptables -A ALBATROSS_FORWARD -p tcp -d \"\$to\" --dport $p -j ACCEPT"
     done
-    for p in $P_SS $P_HY2 $P_TUIC 53 $HOP_RANGE; do
+    for p in $P_SS $P_HY2 $P_TUIC $P_JUICITY $P_AWG $P_OC 53 $HOP_RANGE; do
       echo "iptables -t nat -A ALBATROSS_PREROUTING -p udp --dport $p -j DNAT --to-destination \"\$to\""
       echo "iptables -A ALBATROSS_FORWARD -p udp -d \"\$to\" --dport $p -j ACCEPT"
     done
@@ -1008,15 +1011,39 @@ EOF
 
 # relay_links rewrites the server's links to point at this machine: the
 # address changes, the names used for TLS (sni, host) stay the server's.
+# The SSH link is left out: port 22 here is this machine's own.
 relay_links() {
   local here="$1" src="$2" script
   # The script is passed as an argument: the links come in on stdin.
   script="$(cat <<'PY'
 import base64, json, re, sys
+from urllib.parse import parse_qs, urlencode
 here = sys.argv[1]
+# Schemes whose TLS name is the link's host unless it names one (sni=).
+tls_by_default = ("trojan", "trojan-go", "anytls", "hysteria2", "tuic", "juicity", "wstunnel", "naive+https", "naive+quic")
 for line in sys.stdin:
     line = line.strip()
-    if not line:
+    if not line or line.startswith("ssh://"):
+        continue
+    if line.startswith("albatross://"):
+        # A node as JSON (OpenVPN): its server is this machine.
+        b = line[12:]
+        v = json.loads(base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)))
+        v["server"] = here
+        v["name"] = v.get("name", "") + "-relay"
+        print("albatross://" + base64.urlsafe_b64encode(json.dumps(v, separators=(",", ":")).encode()).decode().rstrip("="))
+        continue
+    if line.startswith("brook://"):
+        # Brook names its server inside a parameter; address= sends the
+        # connection here and keeps the name for TLS.
+        kind, _, qs = line[8:].partition("?")
+        q = {k: v[0] for k, v in parse_qs(qs, keep_blank_values=True).items()}
+        hp = re.match(r"^wss?://([^/]+)", q.get(kind, ""))
+        if not hp or ":" not in hp.group(1):
+            continue
+        q["address"] = here + ":" + hp.group(1).rsplit(":", 1)[1]
+        q["name"] = q.get("name", "") + "-relay"
+        print("brook://" + kind + "?" + urlencode(q))
         continue
     if line.startswith("vmess://"):
         v = json.loads(base64.b64decode(line[8:] + "=" * (-len(line[8:]) % 4)))
@@ -1034,8 +1061,12 @@ for line in sys.stdin:
     if not m:
         continue
     head, host, port, rest = m.groups()
-    if "security=tls" in rest and "sni=" not in rest:
-        rest = re.sub(r"(\?|&)", lambda mm: mm.group(1) + "sni=" + host + "&", rest, count=1)
+    scheme = head.split("://", 1)[0]
+    if ("security=tls" in rest or scheme in tls_by_default) and "sni=" not in rest:
+        if rest.startswith("?"):
+            rest = "?sni=" + host + "&" + rest[1:]
+        else:
+            rest = "?sni=" + host + rest
     rest = re.sub(r"#(.*)$", lambda mm: "#" + mm.group(1) + "-relay", rest) if "#" in rest else rest + "#relay"
     print(head + here + port + rest)
 PY
