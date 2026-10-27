@@ -98,7 +98,9 @@ printf 'WStunnel (https://github.com/erebe/wstunnel) is under the BSD 3-Clause l
 # AmneziaWG as a SOCKS5 proxy: wireproxy's AmneziaWG fork, built from its
 # source (it publishes no binaries).
 git clone -q --depth 1 --branch "$WIREPROXY_AWG_REF" https://github.com/artem-russkikh/wireproxy-awg "$tmp/wpawg"
-(cd "$tmp/wpawg" && GOTOOLCHAIN=auto GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w -checklinkname=0" -o "$out/core/wireproxy-awg.exe" .)
+(cd "$tmp/wpawg" && GOTOOLCHAIN=auto GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w -checklinkname=0" -o "$out/core/wireproxy-awg.exe" ./cmd/wireproxy)
+# A Windows executable starts with "MZ"; building the repository's root (a library) writes an archive instead.
+[ "$(head -c2 "$out/core/wireproxy-awg.exe")" = MZ ] || { echo "wireproxy-awg.exe is not a Windows executable" >&2; exit 1; }
 cp "$tmp/wpawg/LICENSE" "$out/licenses/wireproxy-awg-LICENSE.txt"
 # The Snowflake proxy for "Help others" is its own module: its library
 # needs a newer Go than the app.

@@ -149,11 +149,13 @@ ship_prebuilt() {
 # the same source and Go as the phone's, and fails the build if it crashes
 # at start (a dependency that checks Go's internals panics before main).
 smoke() {
-  local name="$1" out
+  local name="$1" out rc=0
   shift
-  out="$("$@" 2>&1 || true)"
-  if [ -z "$out" ] || printf '%s' "$out" | grep -qE 'panic:|fatal error:'; then
-    echo "$name crashes at start:" >&2
+  out="$("$@" 2>&1)" || rc=$?
+  # 126 and 127: the file could not be run at all (not an executable, or
+  # missing), for example a library package built by mistake.
+  if [ "$rc" = 126 ] || [ "$rc" = 127 ] || [ -z "$out" ] || printf '%s' "$out" | grep -qE 'panic:|fatal error:'; then
+    echo "$name crashes at start (exit $rc):" >&2
     printf '%s\n' "$out" | head -20 >&2
     exit 1
   fi
@@ -233,8 +235,10 @@ sidecars() {
   src="$(gosrc brook txthinking/brook "v$BROOK_VERSION" ./cli/brook)"
   (cd "$src" && gobuild "$abi" "$out/libbrook.so" -ldflags "-s -w -checklinkname=0" ./cli/brook)
   cp "$src/LICENSE" "$lic/brook-LICENSE.txt" 2>/dev/null || printf 'Brook (https://github.com/txthinking/brook) is under the GNU GPL v3; its source is at that address.\n' > "$lic/brook-LICENSE.txt"
-  src="$(gosrc wireproxy-awg artem-russkikh/wireproxy-awg "$WIREPROXY_AWG_REF" .)"
-  (cd "$src" && gobuild "$abi" "$out/libwireproxyawg.so" -ldflags "-s -w -checklinkname=0" .)
+  # The program is in cmd/wireproxy; the repository's root is a library, and
+  # building it writes an archive that is not an executable.
+  src="$(gosrc wireproxy-awg artem-russkikh/wireproxy-awg "$WIREPROXY_AWG_REF" ./cmd/wireproxy)"
+  (cd "$src" && gobuild "$abi" "$out/libwireproxyawg.so" -ldflags "-s -w -checklinkname=0" ./cmd/wireproxy)
   cp "$src/LICENSE" "$lic/wireproxy-awg-LICENSE.txt"
   if [ "$abi" = arm64-v8a ]; then
     fetch "$gh/erebe/wstunnel/releases/download/v$WSTUNNEL_VERSION/wstunnel_${WSTUNNEL_VERSION}_android_arm64.tar.gz" "$dl/wstunnel-$WSTUNNEL_VERSION-android.tgz"
@@ -368,6 +372,10 @@ cp app/build/outputs/apk/release/app-release.apk "$apk"
 # libc has (the NDK's stubs for that version list it). Every problem is
 # reported before the build fails, not only the first.
 x="$tmp/apk" && rm -rf "$x" && mkdir -p "$x" && unzip -q "$apk" 'lib/*' -d "$x"
+# A command that fails here stops the build; say which one, since the checks
+# run in subshells and would otherwise end without a word.
+set -E
+trap 'echo "build.sh line $LINENO failed: $BASH_COMMAND" >&2' ERR
 failed=0
 for dir in "$x"/lib/*; do
   abi="$(basename "$dir")"
@@ -387,5 +395,6 @@ for dir in "$x"/lib/*; do
   done
   echo "$abi: $(ls "$dir" | tr '\n' ' ')"
 done
+trap - ERR
 [ "$failed" = 0 ] || exit 1
 ls -la "$apk"
