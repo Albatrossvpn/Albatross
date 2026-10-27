@@ -25,8 +25,9 @@ import (
 // TestSpeedRoundMovesOffSlowServer runs a real core in front of three local
 // servers that answer pings equally fast but carry very different amounts:
 // the one in use is throttled. A speed round must move to a fast one, leave
-// a fast member alone, and not swap again right after a swap. Everything is
-// local, so it needs only sing-box.
+// a fast member alone, and not swap again right after a swap for speed
+// alone; a member that carries next to nothing, or nothing, is left even
+// then. Everything is local, so it needs only sing-box.
 //
 //	SING_BOX=... go test -run SpeedRound ./internal/engine
 func TestSpeedRoundMovesOffSlowServer(t *testing.T) {
@@ -109,7 +110,7 @@ func TestSpeedRoundMovesOffSlowServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.switched = time.Time{}
-	e.speedRound(ctx, c)
+	e.speedRound(ctx, c, false)
 	if got := now(); got == "m0" {
 		t.Fatalf("still on the slow server (speeds %v)", speeds(c))
 	}
@@ -127,10 +128,46 @@ func TestSpeedRoundMovesOffSlowServer(t *testing.T) {
 		}
 	}
 	c.speedAt = time.Time{}
-	e.speedRound(ctx, c)
+	e.speedRound(ctx, c, false)
 	if now() != cur {
 		t.Fatal("swapped again right after a swap")
 	}
+	// Settled but young: slow is kept, unusable is not, and a member that
+	// nothing comes through at all is unusable.
+	settle := func() {
+		c.mu.Lock()
+		c.switched, c.speedAt = time.Now().Add(-2*settleFor), time.Time{}
+		c.mu.Unlock()
+	}
+	setLimit := func(tag string, lim int64) {
+		for i, tg := range tags {
+			if tg == tag {
+				limits[i].Store(lim)
+			}
+		}
+	}
+	settle()
+	e.speedRound(ctx, c, false)
+	if now() != cur {
+		t.Fatalf("left a young member that is slow but usable (speeds %v)", speeds(c))
+	}
+	for _, l := range limits {
+		l.Store(0)
+	}
+	setLimit(cur, 8<<10)
+	settle()
+	e.speedRound(ctx, c, true)
+	if now() == cur {
+		t.Fatalf("stayed on a member at 8 KB/s (speeds %v)", speeds(c))
+	}
+	cur = now()
+	setLimit(cur, -1)
+	settle()
+	e.speedRound(ctx, c, true)
+	if now() == cur {
+		t.Fatal("stayed on a member nothing comes through")
+	}
+	cur = now()
 
 	// A fast member is left alone and its backups are not tested.
 	for _, l := range limits {
@@ -142,7 +179,7 @@ func TestSpeedRoundMovesOffSlowServer(t *testing.T) {
 		m.speedAt = time.Time{}
 	}
 	c.mu.Unlock()
-	e.speedRound(ctx, c)
+	e.speedRound(ctx, c, false)
 	if now() != cur {
 		t.Fatal("left a fast server")
 	}
@@ -174,7 +211,7 @@ func speeds(c *connection) map[string]string {
 }
 
 // throttleProxy is an HTTP CONNECT proxy that copies at most limit bytes a
-// second towards the client (0 = no limit).
+// second towards the client (0 = no limit, below 0 = it refuses).
 func throttleProxy(t *testing.T, limit *atomic.Int64) int {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -182,6 +219,10 @@ func throttleProxy(t *testing.T, limit *atomic.Int64) int {
 	}
 	t.Cleanup(func() { l.Close() })
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if limit.Load() < 0 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
 		up, err := net.Dial("tcp", r.Host)
 		if err != nil {
 			w.WriteHeader(http.StatusBadGateway)
