@@ -49,13 +49,26 @@ jobs:
           # result <json> prints "<success> <error messages>".
           result() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("success"), "; ".join(e.get("message","") for e in d.get("errors") or []))'; }
           first_id() { python3 -c 'import json,sys; r=json.load(sys.stdin).get("result") or []; print(r[0]["id"] if r else "")'; }
-          name="${CDN_HOST:-$DNS_TUNNEL}"
-          [ -n "$name" ] || { echo "::error::Give cdn_host or dns_tunnel."; exit 1; }
-          # The zone is the last two labels of the name.
-          zone_name="$(printf '%s' "$name" | awk -F. '{print $(NF-1)"."$NF}')"
-          zone="$(api GET "/zones?name=$zone_name" | first_id)"
-          [ -n "$zone" ] || { echo "::error::The zone $zone_name is not in this Cloudflare account, or the token cannot read zones."; exit 1; }
-          echo "zone $zone_name found"
+          [ -n "$CDN_HOST$DNS_TUNNEL" ] || { echo "::error::Give cdn_host or dns_tunnel."; exit 1; }
+          # use_zone <name> picks the account's zone that holds name: the
+          # longest of its parent names that is one (example.co.uk for
+          # in.example.co.uk, not co.uk). Each name gets its own, so the
+          # two may be in different zones.
+          use_zone() {
+            local n="$1"
+            zone="" zone_name=""
+            while [[ "$n" == *.* ]]; do
+              zone="$(api GET "/zones?name=$n" | first_id)"
+              if [ -n "$zone" ]; then
+                zone_name="$n"
+                echo "zone $zone_name found for $1"
+                return
+              fi
+              n="${n#*.}"
+            done
+            echo "::error::No zone in this Cloudflare account holds $1, or the token cannot read zones."
+            exit 1
+          }
           upsert() { # type name content proxied
             local id body out
             id="$(api GET "/zones/$zone/dns_records?type=$1&name=$2" | first_id)"
@@ -69,6 +82,7 @@ jobs:
             case "$out" in True*) ;; *) exit 1 ;; esac
           }
           if [ -n "$CDN_HOST" ]; then
+            use_zone "$CDN_HOST"
             upsert A "$CDN_HOST" "$ORIGIN_IP" true
             mode="$(api GET "/zones/$zone/settings/ssl" | python3 -c 'import json,sys; print((json.load(sys.stdin).get("result") or {}).get("value", "unknown"))')"
             echo "SSL/TLS encryption mode of the zone: $mode"
@@ -78,6 +92,7 @@ jobs:
             esac
           fi
           if [ -n "$DNS_TUNNEL" ]; then
+            use_zone "$DNS_TUNNEL"
             upsert A "ns1.$zone_name" "$ORIGIN_IP" false
             upsert NS "$DNS_TUNNEL" "ns1.$zone_name" false
           fi
