@@ -758,9 +758,11 @@ awg_setup() {
   local d="$OUT/awg"
   mkdir -p "$d" && chmod 700 "$d"
   if [ ! -s "$d/params.env" ]; then
-    awg genkey >"$d/server.key"; awg pubkey <"$d/server.key" >"$d/server.pub"
-    awg genkey >"$d/client.key"; awg pubkey <"$d/client.key" >"$d/client.pub"
-    chmod 600 "$d"/*.key
+    # Keys are private from the moment they are written (awg warns of a
+    # key file others could read).
+    (umask 077
+      awg genkey >"$d/server.key"; awg pubkey <"$d/server.key" >"$d/server.pub"
+      awg genkey >"$d/client.key"; awg pubkey <"$d/client.key" >"$d/client.pub")
     python3 - >"$d/params.env" <<'PY2'
 import random
 r = random.SystemRandom()
