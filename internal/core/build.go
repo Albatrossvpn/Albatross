@@ -588,17 +588,19 @@ func (r *Runtime) startUsque(ctx context.Context, n *node.Node, port int) *Proce
 }
 
 // startSidecar runs the helper program of a sidecar protocol as a SOCKS5
-// proxy on port, with its configuration files in a directory of the
-// node's own, and waits for the port.
+// proxy on port, with its configuration files in a directory of this run's
+// own (the node and the port: a test and the connection may run one node at
+// once), removed when the helper ends, and waits for the port.
 func (r *Runtime) startSidecar(ctx context.Context, n *node.Node, port int) *Process {
 	name := n.Sidecar()
-	dir := filepath.Join(r.Dir, "sidecar", name+"-"+n.Key()[:12])
+	dir := filepath.Join(r.Dir, "sidecar", name+"-"+n.Key()[:12]+"-"+strconv.Itoa(port))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil
 	}
 	args, env, files := n.SidecarArgs(port, dir)
 	for f, body := range files {
 		if err := os.WriteFile(filepath.Join(dir, f), []byte(body), 0o600); err != nil {
+			os.RemoveAll(dir)
 			return nil
 		}
 	}
@@ -608,8 +610,13 @@ func (r *Runtime) startSidecar(ctx context.Context, n *node.Node, port int) *Pro
 	}
 	p, err := Start(name, r.Bin.Sidecar(name), args, env, onLine)
 	if err != nil {
+		os.RemoveAll(dir)
 		return nil
 	}
+	go func() {
+		<-p.Done()
+		os.RemoveAll(dir)
+	}()
 	bind := "127.0.0.1:" + strconv.Itoa(port)
 	if err := p.WaitListening(ctx, bind, sidecarBudget(ctx, 45*time.Second)); err != nil {
 		p.Stop()
