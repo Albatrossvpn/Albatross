@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"sort"
@@ -95,4 +96,24 @@ func writeListKeys(path string, keys []listKeyFile) error {
 		return err
 	}
 	return os.WriteFile(path, b, 0o600)
+}
+
+// openList returns the sealed list (sources.SealKeyed) in the file at path
+// opened with keys. The build bundles the collector's list in the app this
+// way (build/snapshot.sh), so a first start has servers before anyone
+// signs in.
+func openList(path string, keys []sources.ListKey) (string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	id, ok := sources.KeyedID(string(b))
+	if !ok {
+		return "", fmt.Errorf("%s is not a sealed list", path)
+	}
+	text := sources.OpenKeyed(keys, string(b))
+	if text == "" {
+		return "", fmt.Errorf("no list key opens %s (its key is %d)", path, id)
+	}
+	return text, nil
 }

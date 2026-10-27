@@ -101,3 +101,24 @@ func TestHotFromSealedLists(t *testing.T) {
 		t.Fatalf("plain hot.txt %q", b)
 	}
 }
+
+// The build opens the newest lists with the keys to bundle them in the app;
+// a list without its key, or one that is not sealed, is refused.
+func TestOpenList(t *testing.T) {
+	dir := t.TempDir()
+	keys := []sources.ListKey{{ID: 21, Key: bytes.Repeat([]byte{2}, 32)}, {ID: 20, Key: bytes.Repeat([]byte{1}, 32)}}
+	text := "trojan://pw@192.0.2.3:443#c\n"
+	sealed, _ := sources.SealKeyed(keys[1], text)
+	other, _ := sources.SealKeyed(sources.ListKey{ID: 99, Key: bytes.Repeat([]byte{9}, 32)}, text)
+	for name, data := range map[string][]byte{"fresh.txt.sealed": sealed, "other.sealed": other, "fresh.txt": []byte(text)} {
+		os.WriteFile(filepath.Join(dir, name), data, 0o644)
+	}
+	if got, err := openList(filepath.Join(dir, "fresh.txt.sealed"), keys); err != nil || got != text {
+		t.Fatalf("sealed list: %q, %v", got, err)
+	}
+	for _, name := range []string{"other.sealed", "fresh.txt", "missing"} {
+		if got, err := openList(filepath.Join(dir, name), keys); err == nil {
+			t.Fatalf("%s opened: %q", name, got)
+		}
+	}
+}

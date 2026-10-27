@@ -178,6 +178,34 @@ jobs:
             exit 1
           fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
+      # The collector's lists go out sealed with keys only signed-in apps
+      # get; the build opens the newest with them to bundle it in the app
+      # (build/snapshot.sh), so a first start has servers before anyone
+      # signs in. wrangler is installed in a step of its own, without the
+      # credentials; the keys stay on the runner (never in the log or an
+      # artifact). A fork's pull request has no credentials and bundles
+      # nothing new.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: wrangler, for the list keys
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+      - name: List keys for the bundled server list
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "no Cloudflare credentials: the bundled server list stays as it is"
+          elif npx wrangler r2 object get albatross-files/private/listkeys.json --file "$RUNNER_TEMP/listkeys.json" --remote > /dev/null; then
+            echo "LIST_KEYS=$RUNNER_TEMP/listkeys.json" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The list keys could not be read: the bundled server list stays as it is."
+          fi
       - name: Package
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -190,6 +218,8 @@ jobs:
           # Mirrors inside the country (deploy/server MIRROR mode), comma separated.
           DOMESTIC_MIRROR: ${{ vars.DOMESTIC_MIRROR }}
         run: |
+          # The list keys are of no use to the later steps.
+          trap 'rm -f "$RUNNER_TEMP/listkeys.json"' EXIT
           # Releases ask users to sign in (backend/); test builds connect
           # without an account.
           if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
@@ -238,6 +268,28 @@ jobs:
           yes | "$sdk" --licenses > /dev/null || true
           "$sdk" "platforms;android-36" "build-tools;36.0.0" "ndk;27.3.13750724" > /dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724" >> "$GITHUB_ENV"
+      # The server list bundled in the app, as in the build job.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: wrangler, for the list keys
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+      - name: List keys for the bundled server list
+        working-directory: backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "no Cloudflare credentials: the bundled server list stays as it is"
+          elif npx wrangler r2 object get albatross-files/private/listkeys.json --file "$RUNNER_TEMP/listkeys.json" --remote > /dev/null; then
+            echo "LIST_KEYS=$RUNNER_TEMP/listkeys.json" >> "$GITHUB_ENV"
+          else
+            echo "::warning::The list keys could not be read: the bundled server list stays as it is."
+          fi
       - name: Build APKs
         env:
           OWN_KEY: ${{ secrets.OWN_KEY }}
@@ -251,6 +303,9 @@ jobs:
           ALBATROSS_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           RELEASE: ${{ inputs.release }}
         run: |
+          # The list keys and the signing key are of no use to the later
+          # steps, one of which is someone else's action (the emulator).
+          trap 'rm -f "$RUNNER_TEMP/listkeys.json" "$RUNNER_TEMP/albatross.jks"' EXIT
           # Without a key in the repository secrets the APKs get the runner's
           # debug key, which is new on every run: Android then refuses to
           # install the next version over the old one. Fine for test builds,

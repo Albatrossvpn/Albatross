@@ -292,7 +292,16 @@ func main() {
 	discoverMinutes := flag.Int("discover-minutes", 40, "with -discover: stop looking after this many minutes and write what was found")
 	extraSubs := flag.String("sources", "", "a discovered sources.txt to read beside the shipped lists")
 	extraTG := flag.String("channels", "", "a discovered channels.txt to read beside the shipped lists")
+	openPath := flag.String("open", "", "print the sealed list in this file opened with the keys in -keys (for the copy the build bundles in the app); nothing else is done")
 	flag.Parse()
+	if *openPath != "" {
+		text, err := openList(*openPath, readListKeys(*keysIn))
+		if err != nil {
+			log.Fatal(err)
+		}
+		os.Stdout.WriteString(text)
+		return
+	}
 	if *discover != "" {
 		runDiscover(context.Background(), *discover, *discoverPrev, os.Getenv("GITHUB_TOKEN"), *discoverMinutes)
 		return
