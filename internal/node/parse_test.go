@@ -177,6 +177,33 @@ func TestParseClash(t *testing.T) {
 	}
 }
 
+// HTTP proxies come from Clash lists (type http): plain, or HTTPS with tls.
+func TestClashHTTPProxy(t *testing.T) {
+	yaml := `proxies:
+  - {name: h, type: http, server: 1.2.3.4, port: 8080, username: u, password: p}
+  - {name: hs, type: http, server: proxy.example.com, port: 443, tls: true, sni: proxy.example.com}
+`
+	nodes, _ := ParseText(yaml)
+	if len(nodes) != 2 {
+		t.Fatalf("nodes = %+v", nodes)
+	}
+	plain, secure := nodes[0], nodes[1]
+	if plain.Proto != "http" || plain.Username != "u" || plain.Security != "" || plain.Engine() != EngineSingBox {
+		t.Fatalf("plain = %+v, engine %v", plain, plain.Engine())
+	}
+	out, _ := plain.SingBox("p", SingBoxOptions{})
+	if out["type"] != "http" || out["server_port"] != 8080 || out["username"] != "u" || out["tls"] != nil {
+		t.Fatalf("plain outbound = %v", out)
+	}
+	if secure.Security != "tls" || secure.Engine() != EngineSingBox {
+		t.Fatalf("https = %+v", secure)
+	}
+	out, _ = secure.SingBox("s", SingBoxOptions{})
+	if tls, _ := out["tls"].(map[string]any); out["type"] != "http" || tls["server_name"] != "proxy.example.com" {
+		t.Fatalf("https outbound = %v", out)
+	}
+}
+
 func TestKeyIgnoresName(t *testing.T) {
 	a := mustParse(t, "trojan://p@5.6.7.8:443?sni=y.com#one")
 	b := mustParse(t, "trojan://p@5.6.7.8:443?sni=y.com#two")
