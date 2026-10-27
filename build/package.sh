@@ -14,7 +14,7 @@ JUICITY_VERSION="${JUICITY_VERSION:-0.5.0}"
 MIERU_VERSION="${MIERU_VERSION:-3.39.0}"
 BROOK_VERSION="${BROOK_VERSION:-20270101}"
 WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
-WIREPROXY_AWG_REF="${WIREPROXY_AWG_REF:-master}"
+WIREPROXY_AWG_REF="${WIREPROXY_AWG_REF:-v1.0.18}"
 # The TUN driver sing-box loads on Windows for the whole-device mode; it
 # must sit next to sing-box.exe. Prebuilt by WireGuard, checked by hash.
 WINTUN_VERSION="${WINTUN_VERSION:-0.14.1}"
