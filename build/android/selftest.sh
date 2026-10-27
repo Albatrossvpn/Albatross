@@ -17,7 +17,7 @@ adb shell appops set app.albatross.vpn ACTIVATE_VPN allow
 adb logcat -c
 adb shell am start -a app.albatross.vpn.SELF_TEST -n app.albatross.vpn/.MainActivity
 ok=1
-for i in $(seq 1 60); do
+for _ in $(seq 1 60); do
   sleep 5
   if adb logcat -d -s AlbatrossTest:I | grep -q '"status":"connected"'; then ok=0; break; fi
 done
@@ -26,7 +26,7 @@ if [ $ok -eq 0 ]; then
   adb shell ip -o link | grep -E ': tun[0-9]+:' || true
   # SelfTest disconnects 15 s after connecting; the tunnel must then go
   # (a core that inherited it used to keep the VPN up).
-  for i in $(seq 1 12); do
+  for _ in $(seq 1 12); do
     sleep 5
     if adb logcat -d -s AlbatrossTest:I | grep -q 'disconnect: 200'; then break; fi
   done
@@ -54,6 +54,21 @@ for c in "libsingbox.so version|sing-box" "libxray.so version|Xray" "libwarpplus
     ok=1
   elif ! printf '%s' "$out" | grep -qiF "$want"; then
     summary "Android emulator: FAIL, ${c% *} did not start: $(printf '%s' "$out" | head -c 200)" >&2
+    ok=1
+  fi
+done
+# The sidecar helpers in the APK (internal/core sidecarNames) must start
+# here as well. Each prints its usage for --help, so only a crash, a linker
+# error or a program that cannot run fails. The listing is read as text:
+# adb on Android 6 does not pass the exit status on.
+libs="$(adb shell run-as app.albatross.vpn ls "$libdir" 2>&1 | tr -d '\r')"
+for lib in libnaive.so libjuicityclient.so libmieru.so libbrook.so libwstunnel.so libwireproxyawg.so; do
+  printf '%s\n' "$libs" | grep -qx "$lib" || continue
+  out="$(adb shell run-as app.albatross.vpn "$libdir/$lib" --help 2>&1 | tr -d '\r' | head -c 4000)"
+  echo "== $lib --help: $(printf '%s' "$out" | head -3)"
+  bad='panic:|fatal error:|SIGSYS|CANNOT LINK EXECUTABLE|not executable|Permission denied|inaccessible or not found'
+  if printf '%s' "$out" | grep -qE "$bad"; then
+    summary "Android emulator: FAIL, $lib does not start: $(printf '%s' "$out" | grep -m1 -E "$bad")" >&2
     ok=1
   fi
 done

@@ -598,10 +598,8 @@ func (e *Engine) forceUpdate(version string) {
 		// wait for it rather than treating it as done. Failures back off,
 		// from a few minutes to two hours: each try may fetch 100 MB
 		// through a metered connection.
-		wait := updateRetry
-		if errors.Is(err, errUpdating) {
-			wait = updatePoll
-		} else {
+		wait := updatePoll
+		if !errors.Is(err, errUpdating) {
 			wait = min(updateRetry<<min(fails, 6), 2*time.Hour)
 			fails++
 		}

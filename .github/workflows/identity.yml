@@ -29,7 +29,8 @@ jobs:
             range=("$BASE..$HEAD")
           else
             # History replaced by a forced push: check what no other branch has.
-            range=("$HEAD" --not $(git for-each-ref --format='%(refname)' refs/remotes/origin | grep -v '/main$'))
+            mapfile -t others < <(git for-each-ref --format='%(refname)' refs/remotes/origin | grep -v '/main$')
+            range=("$HEAD" --not "${others[@]}")
           fi
           bad="$(git log --date=format:%z --format='%h %ae %ce %ad %cd' "${range[@]}" | awk '{
             for (i = 2; i <= 3; i++)
