@@ -722,7 +722,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		FragmentFor: func(n *node.Node) bool { return fragFor[n] },
 		OnLine:      c.watchLog,
 		LineMbps:    e.net.lineMbps(),
-		LocalDNS:    e.dns(),
+		LocalDNS:    e.tunnelDNS(),
 	}
 	if set.SpoofSNI != "" && e.opt.IsAdmin() {
 		build.Spoof = set.SpoofSNI

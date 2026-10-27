@@ -350,7 +350,7 @@ jobs:
         # The packages whose behaviour differs on Windows (files, renames,
         # paths): the tests run on Linux otherwise, and a compaction of the
         # server pool failed on Windows only, unseen.
-        run: go test -count=1 ./internal/pool ./internal/node ./internal/sources ./internal/account ./internal/updatesig ./internal/geo
+        run: go test -count=1 ./internal/pool ./internal/node ./internal/sources ./internal/account ./internal/updatesig ./internal/geo ./internal/platform
       - name: Smoke test on Windows
         shell: pwsh
         run: |
