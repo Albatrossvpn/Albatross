@@ -115,7 +115,9 @@ func (f *Fetcher) fetchOne(ctx context.Context, s Source) Result {
 		if proxy != nil {
 			attempts = append(attempts, attempt{"proxy", u, proxy, 0})
 		}
-		attempts = append(attempts, attempt{"direct", u, f.Direct, 0})
+		if mode != ModeDomestic {
+			attempts = append(attempts, attempt{"direct", u, f.Direct, 0})
+		}
 		text, via, err := f.fetchTelegram(ctx, attempts)
 		if err == nil {
 			res.Text, res.Via = text, via
@@ -131,9 +133,8 @@ func (f *Fetcher) fetchOne(ctx context.Context, s Source) Result {
 		if proxy != nil {
 			clients = append(clients, proxy)
 		}
-		clients = append(clients, f.Direct)
-		if f.Private != nil {
-			clients = append(clients, f.Private)
+		if mode != ModeDomestic {
+			clients = append(clients, f.Direct, f.Private)
 		}
 		text, err := f.fetchLEAP(ctx, s.URL, clients)
 		if err == nil {
@@ -149,26 +150,22 @@ func (f *Fetcher) fetchOne(ctx context.Context, s Source) Result {
 			url = "https://" + strings.TrimPrefix(url, "ssconf://")
 		}
 		n := 0
+		var dom []attempt
 		for _, u := range Addresses(url) {
 			switch {
 			case IsDomestic(u):
-				// A mirror inside the country: first when foreign addresses
-				// are cut, last otherwise; plain and direct.
+				// A mirror inside the country: plain and direct.
 				n++
-				a := attempt{"domestic" + strconv.Itoa(n), u, f.Direct, 20 * time.Second}
-				if mode == ModeDomestic {
-					attempts = append([]attempt{a}, attempts...)
-				} else {
-					attempts = append(attempts, a)
-				}
+				dom = append(dom, attempt{"domestic" + strconv.Itoa(n), u, f.Direct, 20 * time.Second})
 			case IsWorker(u):
 				// The project's own storage: through the VPN, or the
 				// private client, never a plain direct call (IsWorker).
+				// Where foreign addresses are cut only the VPN gets there.
 				c := proxy
-				if c == nil {
+				if c == nil && mode != ModeDomestic {
 					c = f.Private
 				}
-				if c != nil && mode != ModeDomestic {
+				if c != nil {
 					n++
 					attempts = append(attempts, attempt{"mirror" + strconv.Itoa(n), u, c, 0})
 				}
@@ -194,6 +191,13 @@ func (f *Fetcher) fetchOne(ctx context.Context, s Source) Result {
 				}
 				attempts = append(attempts, attempt{"mirror" + strconv.Itoa(n), u, f.Direct, t})
 			}
+		}
+		// The domestic mirrors, in their order: first when foreign
+		// addresses are cut, last otherwise.
+		if mode == ModeDomestic {
+			attempts = append(dom, attempts...)
+		} else {
+			attempts = append(attempts, dom...)
 		}
 		// The proxy attempt belongs first whatever the mode.
 		for i, a := range attempts {
@@ -752,7 +756,9 @@ func (f *Fetcher) fetchFeed(ctx context.Context, s Source) Result {
 	if proxy != nil {
 		clients = append(clients, proxy)
 	}
-	clients = append(clients, f.Direct)
+	if f.Mode == nil || f.Mode() != ModeDomestic {
+		clients = append(clients, f.Direct)
+	}
 	var feed string
 	var client *http.Client
 	var lastErr error
