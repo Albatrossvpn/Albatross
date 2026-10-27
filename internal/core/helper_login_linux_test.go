@@ -26,8 +26,16 @@ func TestHelperPortsTakeOnlyTheLogin(t *testing.T) {
 	r.OnLine = func(name, line string) { t.Logf("%s| %s", name, line) }
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	// NaiveProxy answers its first client only once it has loaded the
+	// server's page (its preamble, which makes it look like a browser);
+	// at an address that drops packets that takes minutes to fail, at a
+	// closed port no time.
+	closed, err := FreePorts(1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, link := range []string{
-		"naive+https://u:p@192.0.2.1:443#N",
+		"naive+https://u:p@127.0.0.1:" + strconv.Itoa(closed[0]) + "#N",
 		"juicity://11111111-1111-1111-1111-111111111111:pw@192.0.2.1:443?sni=a.example#J",
 		"mieru://u:p@192.0.2.1:2086?protocol=tcp#M",
 		"wstunnel://192.0.2.1:443?path=secret#W",
