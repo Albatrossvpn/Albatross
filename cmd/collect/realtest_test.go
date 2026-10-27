@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -355,5 +356,28 @@ func TestPromoteRareKeepsOtherMinimums(t *testing.T) {
 			t.Fatal("an entry is listed twice")
 		}
 		seen[e] = true
+	}
+}
+
+// A probe budget of zero is no limit, not "probe nothing".
+func TestProbeAllWithoutBudget(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	e := &entry{link: "x", endpoint: ln.Addr().String()}
+	alive, probed := probeAll([]*entry{e}, 4, 0)
+	if probed != 1 || !alive[e.endpoint] {
+		t.Fatalf("probed %d, alive %v", probed, alive)
 	}
 }
