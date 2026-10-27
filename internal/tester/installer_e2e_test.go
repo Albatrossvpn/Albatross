@@ -19,12 +19,13 @@ import (
 
 // installerDryRun runs deploy/server/install.sh in its dry run, which
 // writes a server's configs into the returned directory and prints its
-// links: here a server at 127.0.0.1 with a DNS tunnel and a Cloudflare
-// name, its secrets made with the real cores.
+// links: here a server with a DNS tunnel and a Cloudflare name, its
+// secrets made with the real cores, at a documentation address (the app
+// refuses links to the loopback one) that no test connects to.
 func installerDryRun(t *testing.T, sb, xr string) (dir string, links []string) {
 	dir = t.TempDir()
 	cmd := exec.Command("bash", filepath.Join("..", "..", "deploy", "server", "install.sh"))
-	cmd.Env = append(os.Environ(), "DRY_RUN=1", "OUT="+dir, "IP=127.0.0.1", "IP6=::1", "DOMAIN=test.example",
+	cmd.Env = append(os.Environ(), "DRY_RUN=1", "OUT="+dir, "IP=192.0.2.1", "IP6=2001:db8::1", "DOMAIN=test.example",
 		"SIDECARS=0", "DNS_TUNNEL=t.test.example", "CDN_HOST=cdn.test.example", "MIRROR=0", "RELAY_TO=",
 		"SB="+sb, "XRAY="+xr)
 	var stderr bytes.Buffer
