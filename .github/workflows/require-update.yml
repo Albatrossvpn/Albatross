@@ -1,0 +1,56 @@
+name: Require the latest release
+
+# Run by hand to make the latest release required after it was published
+# without force_update: copies older than it stop connecting until they
+# update (from 0.3.3 on they first download it through their own
+# connection), as with a release run with force_update, but nothing is
+# built again and the copies already on it download nothing. update.json
+# is written as a release writes it (build/update-manifest.sh), with the
+# usual steps to reinstall unless a message is given.
+on:
+  workflow_dispatch:
+    inputs:
+      update_message:
+        description: "Shown with the update in installed copies (English); empty for the usual steps"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: require-update
+  cancel-in-progress: false
+
+jobs:
+  require:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # wrangler, to put the files straight into the project's own storage
+      # (deploy/files/lib.sh).
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Tell installed copies
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
+          FORCE: "true"
+          MESSAGE: ${{ inputs.update_message }}
+        run: |
+          VERSION="$(jq -r .latest_version update.json)"
+          export VERSION
+          bash build/update-manifest.sh
