@@ -187,7 +187,10 @@ func (n *Node) SidecarArgs(port int, dir, pass string) (args, env []string, file
 		// name of its own (sni=, as a relay's links carry) the address
 		// names it and the resolver rules send it to the server.
 		host := n.Server
-		cfg := map[string]any{"listen": "socks://" + auth + bind}
+		// NaiveProxy prints nothing unless asked: its log goes to the
+		// output the app reads (and keeps only in memory), which is
+		// where a reason it fails shows.
+		cfg := map[string]any{"listen": "socks://" + auth + bind, "log": ""}
 		if n.SNI != "" && n.SNI != n.Server && !strings.Contains(n.Server, ":") {
 			host = n.SNI
 			cfg["host-resolver-rules"] = "MAP " + n.SNI + " " + n.Server
@@ -254,8 +257,10 @@ func (n *Node) SidecarArgs(port int, dir, pass string) (args, env []string, file
 		if pass != "" {
 			listen += "?login=" + SocksUser + "&password=" + pass
 		}
-		args = []string{"client", "-L", listen, "--http-upgrade-path-prefix", strings.TrimPrefix(n.Path, "/"),
-			"--connection-min-idle", "2"}
+		// No pool of idle connections (--connection-min-idle): WStunnel
+		// opens its port only once the pool is full, so a server that
+		// does not answer kept the port shut and its test waiting.
+		args = []string{"client", "-L", listen, "--http-upgrade-path-prefix", strings.TrimPrefix(n.Path, "/")}
 		if host != n.Server {
 			// The server by its address, the name only for the handshake.
 			args = append(args, "--tls-sni-override", host, "--http-headers", "Host: "+host)

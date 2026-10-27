@@ -42,9 +42,19 @@ func TestHelperPortsTakeOnlyTheLogin(t *testing.T) {
 			t.Errorf("%s: not in %s", name, dir)
 			continue
 		}
-		ports, err := FreePorts(1)
+		ports, err := FreePorts(2)
 		if err != nil {
 			t.Fatal(err)
+		}
+		// Without a login the port answers anyone: the helper works at
+		// all, whatever the login does.
+		if p := r.startSidecar(ctx, n, ports[1], ""); p == nil {
+			t.Errorf("%s did not start without a login", name)
+		} else {
+			if a := "127.0.0.1:" + strconv.Itoa(ports[1]); !socksNoAuth(a) {
+				t.Errorf("%s: without a login its port does not answer a client (%s)", name, socksTrace(a, "", ""))
+			}
+			p.Stop()
 		}
 		pass := helperPass()
 		p := r.startSidecar(ctx, n, ports[0], pass)
@@ -121,12 +131,19 @@ func socksTrace(addr, user, pass string) string {
 	}
 	defer c.Close()
 	c.SetDeadline(time.Now().Add(5 * time.Second))
-	c.Write([]byte{5, 1, 2})
+	method := byte(2)
+	if user == "" {
+		method = 0
+	}
+	c.Write([]byte{5, 1, method})
 	b := make([]byte, 64)
 	k, err := io.ReadAtLeast(c, b, 2)
 	out := fmt.Sprintf("greeting answered % x", b[:k])
-	if err != nil {
-		return out + ", then " + err.Error()
+	if err != nil || method == 0 {
+		if err != nil {
+			out += ", then " + err.Error()
+		}
+		return out
 	}
 	req := append([]byte{1, byte(len(user))}, user...)
 	c.Write(append(append(req, byte(len(pass))), pass...))
