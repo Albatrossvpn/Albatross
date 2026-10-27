@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 7 has no adaptive icons. -->
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@drawable/ic_launcher_background" />
-    <item android:drawable="@drawable/ic_launcher_foreground" />
-</layer-list>
+<!-- Android 7 and older have no adaptive icons and Android 6 draws no
+     gradients in vectors: the shield in flat colours, filling the icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="-16.12" android:translateY="-16.16" android:scaleX="0.0726" android:scaleY="0.0726">
+        <path android:pathData="M449,503 L966,322 L1482,503 L1482,990 C1482,1096 1450,1196 1387,1286 Q1330,1366 1258,1435 Q1130,1550 966,1610 Q802,1550 674,1435 Q602,1366 546,1286 C482,1196 449,1096 449,990 Z" android:fillColor="#D6AA52" android:strokeColor="#D6AA52" android:strokeWidth="44" android:strokeLineJoin="round" />
+        <path android:pathData="M449,503 L966,322 L546,1286 C482,1196 449,1096 449,990 Z" android:fillColor="#6593F6" android:strokeColor="#38FFFFFF" android:strokeWidth="10" android:strokeLineJoin="round" />
+        <path android:pathData="M966,322 L1482,503 L1482,990 C1482,1096 1450,1196 1387,1286 Z" android:fillColor="#3A68DF" android:strokeColor="#38FFFFFF" android:strokeWidth="10" android:strokeLineJoin="round" />
+        <path android:pathData="M966,683 L1086,990 Q966,950 846,990 Z" android:fillColor="#5584F1" android:strokeColor="#38FFFFFF" android:strokeWidth="10" android:strokeLineJoin="round" />
+        <path android:pathData="M760,1197 Q966,1027 1172,1197 L1258,1435 Q1130,1550 966,1610 Q802,1550 674,1435 Z" android:fillColor="#3E6BE0" android:strokeColor="#38FFFFFF" android:strokeWidth="10" android:strokeLineJoin="round" />
+    </group>
+</vector>
