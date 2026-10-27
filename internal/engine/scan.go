@@ -396,7 +396,7 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 		if s.Sealed {
 			en.Flags |= pool.FlagOwn
 		}
-		if e.domesticEndpoint(n) {
+		if e.domesticEndpoint(n, s.Sealed) {
 			en.Flags |= pool.FlagDomestic
 		}
 		if isPlain(n) {
@@ -1038,7 +1038,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 		p.LastTest = pool.Minutes(now)
 		own = p.Flags&pool.FlagOwn != 0
 	})
-	domestic := e.domesticEndpoint(n)
+	domestic := e.domesticEndpoint(n, own)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.httpsOK = now
