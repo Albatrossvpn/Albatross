@@ -100,6 +100,7 @@ func (e *Engine) refreshListKeys() {
 			os.WriteFile(listKeysPath(e.dir), b, 0o600)
 		}
 		e.logf("info", "The lists' keys were refreshed (%d).", len(keys))
+		go e.rereadKeyed()
 	case errors.Is(err, account.ErrSignedOut), e.ctx.Err() != nil:
 	default:
 		e.logf("warn", "The lists' keys could not be fetched: %v", err)
@@ -120,6 +121,34 @@ func (e *Engine) openKeyed(text string) string {
 	keys := listKeys
 	listKeysMu.Unlock()
 	return sources.OpenKeyed(keys, text)
+}
+
+// rereadKeyed opens the copies of the keyed lists that came while their
+// key was missing, once the keys are here: after signing in, or once the
+// service answers at last, the servers should not wait hours for each
+// list's next download.
+func (e *Engine) rereadKeyed() {
+	e.mu.Lock()
+	var todo []int
+	for i, s := range e.srcs {
+		if s.Keyed && s.Enabled && i < len(e.srcStats) && e.srcStats[i].Nodes == 0 {
+			todo = append(todo, i)
+		}
+	}
+	srcs := append([]sources.Source(nil), e.srcs...)
+	e.mu.Unlock()
+	added := 0
+	for _, i := range todo {
+		if e.ctx.Err() != nil {
+			return
+		}
+		if text, ok := e.cachedText(srcs[i]); ok && opens(srcs[i], text) {
+			added += e.ingest(i, srcs[i], text, nil)
+		}
+	}
+	if added > 0 {
+		e.poke()
+	}
 }
 
 // forgetListKeys drops the keys, on sign-out.

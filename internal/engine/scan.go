@@ -148,11 +148,13 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 	}
 	// A recent copy of the collector's list already holds what the other
 	// built-in sources had; their older copies would only bring back
-	// servers the collector dropped.
+	// servers the collector dropped. Not one this device cannot open.
 	skipBuiltin := false
 	for _, s := range srcs {
-		if s.Central && s.Tier == sources.TierPriority {
-			skipBuiltin = time.Since(e.fetcher.CachedAt(s)) < 24*time.Hour
+		if collection(s) && !s.Hot && !s.Delta && time.Since(e.fetcher.CachedAt(s)) < 24*time.Hour {
+			if text, ok := e.cachedText(s); ok && opens(s, text) {
+				skipBuiltin = true
+			}
 		}
 	}
 	for i, s := range srcs {
@@ -180,10 +182,6 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 // system right away instead of keeping it for later.
 func releaseMemory() { debug.FreeOSMemory() }
 
-// refreshDue downloads every source whose refresh time has come. The
-// collector's lists go first; while they are reachable they stand in for
-// every other built-in source, which saves the device hundreds of
-// downloads (and Telegram, which is blocked on the direct path anyway).
 // refreshHotNow downloads the hot and new lists at once, for when the
 // servers in use stop answering: the collector may already know better
 // ones.
@@ -198,21 +196,45 @@ func (e *Engine) refreshHotNow() {
 	e.triggerRefill()
 }
 
+// refreshDue downloads every source whose refresh time has come. The
+// collector's lists go first; while they are reachable and open they stand
+// in for every other built-in source, which saves the device hundreds of
+// downloads (and Telegram, which is blocked on the direct path anyway).
 func (e *Engine) refreshDue() {
 	e.refreshSources(true)
 	e.refreshSources(false)
 }
 
-// centralOK reports whether the collector's list was downloaded lately.
+// centralOK reports whether the collector's list was downloaded lately and
+// gave servers: a copy sealed with a key this device lacks (signed out, the
+// keys not fetched yet) gives none, and the other lists are needed then.
 // Callers hold e.mu.
 func (e *Engine) centralOK(now time.Time) bool {
 	for i, s := range e.srcs {
-		if s.Central && s.Enabled && s.Tier == sources.TierPriority {
+		if collection(s) && s.Enabled {
 			st := e.srcStats[i]
-			return st.LastError == "" && !st.Fetched.IsZero() && now.Sub(st.Fetched) < 6*time.Hour
+			if st.LastError == "" && !st.Fetched.IsZero() && now.Sub(st.Fetched) < 6*time.Hour && st.Nodes > 0 {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// collection says whether s is one of the collector's lists of what it
+// collected (hot, new and fresh), not of the project's own servers.
+func collection(s sources.Source) bool {
+	return s.Central && s.Tier == sources.TierPriority && !s.Sealed
+}
+
+// opens says whether this device can open a copy of the list s: a keyed
+// one only with its key.
+func opens(s sources.Source, text string) bool {
+	if !s.Keyed {
+		return text != ""
+	}
+	id, ok := sources.KeyedID(text)
+	return ok && haveListKey(id)
 }
 
 func (e *Engine) refreshSources(central bool) {
@@ -348,6 +370,11 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 	// still sealed with the build key.
 	if s.Keyed {
 		if text = e.openKeyed(text); text == "" {
+			// No servers came from this copy (centralOK); it is read
+			// again once the key is here (rereadKeyed).
+			e.mu.Lock()
+			e.srcStats[idx].Nodes = 0
+			e.mu.Unlock()
 			return 0
 		}
 	}
