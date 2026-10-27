@@ -248,8 +248,11 @@ func (d *discoverer) gitlabFiles(ctx context.Context, q string) ([]string, error
 	}
 	var out []string
 	for _, p := range projects {
-		if ctx.Err() != nil || p.DefaultBranch == "" {
+		if ctx.Err() != nil {
 			break
+		}
+		if p.DefaultBranch == "" {
+			continue // an empty project
 		}
 		tb, st, err := d.apiGet(ctx, "https://gitlab.com/api/v4/projects/"+strconv.Itoa(p.ID)+"/repository/tree?recursive=true&per_page=100", 4<<20)
 		if err != nil || st != http.StatusOK {
@@ -291,8 +294,11 @@ func (d *discoverer) codebergFiles(ctx context.Context, q string) ([]string, err
 	}
 	var out []string
 	for _, r := range res.Data {
-		if ctx.Err() != nil || r.DefaultBranch == "" {
+		if ctx.Err() != nil {
 			break
+		}
+		if r.DefaultBranch == "" {
+			continue // an empty repository
 		}
 		tb, st, err := d.apiGet(ctx, "https://codeberg.org/api/v1/repos/"+r.FullName+"/git/trees/"+url.PathEscape(r.DefaultBranch)+"?recursive=true&per_page=1000", 4<<20)
 		if err != nil || st != http.StatusOK {
@@ -345,6 +351,12 @@ func (d *discoverer) webSearch(ctx context.Context, hour int) (pages, files []st
 		go func(name string, fn func(context.Context, string) ([]string, error)) {
 			defer wg.Done()
 			n := 0
+			// Counted however the loop ends: a refusal ends it early.
+			defer func() {
+				mu.Lock()
+				d.stats["web_"+name] += n
+				mu.Unlock()
+			}()
 			for _, q := range queries {
 				if ctx.Err() != nil {
 					return
@@ -366,9 +378,6 @@ func (d *discoverer) webSearch(ctx context.Context, hour int) (pages, files []st
 					return
 				}
 			}
-			mu.Lock()
-			d.stats["web_"+name] += n
-			mu.Unlock()
 		}(e.name, e.fn)
 	}
 	hosts := []struct {
@@ -380,6 +389,11 @@ func (d *discoverer) webSearch(ctx context.Context, hour int) (pages, files []st
 		go func(name string, fn func(context.Context, string) ([]string, error)) {
 			defer wg.Done()
 			n := 0
+			defer func() {
+				mu.Lock()
+				d.stats["web_"+name] += n
+				mu.Unlock()
+			}()
 			for _, q := range rotate(repoQueries, hour, 3) {
 				if ctx.Err() != nil {
 					return
@@ -394,9 +408,6 @@ func (d *discoverer) webSearch(ctx context.Context, hour int) (pages, files []st
 				mu.Unlock()
 				n += len(res)
 			}
-			mu.Lock()
-			d.stats["web_"+name] += n
-			mu.Unlock()
 		}(h.name, h.fn)
 	}
 	wg.Wait()
@@ -456,8 +467,15 @@ func (d *discoverer) readPages(ctx context.Context, pages []string) (subs, chann
 func skipHost(h string) bool {
 	h = strings.ToLower(h)
 	for _, s := range []string{"duckduckgo.com", "bing.com", "google.", "youtube.com", "youtu.be", "facebook.com", "instagram.com",
-		"twitter.com", "x.com", "tiktok.com", "apple.com", "play.google.com", "microsoft.com", "wikipedia.org", "amazon.", "linkedin.com"} {
-		if h == s || strings.HasSuffix(h, "."+s) || strings.Contains(h, s) {
+		"twitter.com", "x.com", "tiktok.com", "apple.com", "microsoft.com", "wikipedia.org", "amazon.", "linkedin.com"} {
+		// The site or a subdomain of it; a name ending in a dot stands for
+		// the site under any top-level domain (google.de, amazon.co.uk). A
+		// plain substring would also take v2rayx.com for x.com.
+		if strings.HasSuffix(s, ".") {
+			if strings.HasPrefix(h, s) || strings.Contains(h, "."+s) {
+				return true
+			}
+		} else if h == s || strings.HasSuffix(h, "."+s) {
 			return true
 		}
 	}
