@@ -78,17 +78,17 @@ func main() {
 			return nil
 		},
 		Sources: only,
-		// The network's own resolver, for the DNS tunnel: the one address
-		// that keeps answering when foreign ones are cut.
-		LocalDNS:  platform.SystemDNS(),
-		DataDir:   dir,
-		AppDirs:   []string{platform.ExeDir()},
-		ExeName:   platform.ExeName(),
-		IsAdmin:   platform.IsAdmin,
-		SysProxy:  sysProxy,
-		Version:   version,
-		Autostart: platform.SetAutostart,
-		Badge:     setBadge,
+		// The network's own resolver, for the DNS tunnel only: the cores
+		// ask the system's resolver themselves.
+		NetworkDNS: platform.SystemDNS,
+		DataDir:    dir,
+		AppDirs:    []string{platform.ExeDir()},
+		ExeName:    platform.ExeName(),
+		IsAdmin:    platform.IsAdmin,
+		SysProxy:   sysProxy,
+		Version:    version,
+		Autostart:  platform.SetAutostart,
+		Badge:      setBadge,
 	})
 	if err != nil {
 		platform.Alert(windowTitle, "The app could not start:\n"+err.Error())
