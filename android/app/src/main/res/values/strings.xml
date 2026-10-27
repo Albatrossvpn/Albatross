@@ -7,6 +7,11 @@
     <string name="connecting">Connecting</string>
     <string name="connecting_text">Looking for a working server…</string>
     <string name="disconnect">Disconnect</string>
+    <string name="channel_updates">New versions</string>
+    <string name="update_title">Albatross %1$s</string>
+    <string name="update_required">Required update</string>
+    <string name="update_optional">Optional update</string>
+    <string name="update_install">Install</string>
     <string name="start_failed">The app could not start</string>
     <string name="vpn_denied">Albatross cannot connect without VPN permission.</string>
 </resources>

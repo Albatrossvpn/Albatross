@@ -61,7 +61,7 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle saved) {
         super.onCreate(saved);
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.parseColor("#0A0F1D"));
+        root.setBackgroundColor(Color.parseColor("#F6F7FB"));
         web = new WebView(this);
         web.setBackgroundColor(Color.TRANSPARENT);
         WebSettings ws = web.getSettings();

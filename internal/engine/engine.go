@@ -128,10 +128,12 @@ type Engine struct {
 	proxyOn      bool       // guarded by proxyMu
 	status       string
 	message      string
-	target       string // country the user wants ("" = fastest anywhere)
-	wantConnect  bool   // keep trying to connect until a server is found
-	updating     bool   // GetUpdate is downloading
-	forcing      bool   // forceUpdate's retry loop is running
+	target       string    // country the user wants ("" = fastest anywhere)
+	wantConnect  bool      // keep trying to connect until a server is found
+	updating     bool      // GetUpdate is downloading
+	forcing      bool      // forceUpdate's retry loop is running
+	updateAt     time.Time // when the manifest was last fetched (checkUpdateIf)
+	checking     bool      // a fetch of the manifest is running
 	// badDownloads counts installers of a version that did not match
 	// their checksum, so a broken file is not fetched again and again.
 	badDownloads map[string]int

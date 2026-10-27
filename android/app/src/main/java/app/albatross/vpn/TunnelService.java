@@ -12,6 +12,7 @@ import android.os.ParcelFileDescriptor;
 import android.util.Log;
 
 import app.albatross.mobile.Mobile;
+import app.albatross.mobile.UpdateOffer;
 
 /**
  * The device-wide VPN. Every app's traffic enters this tunnel; the Go side
@@ -165,9 +166,31 @@ public final class TunnelService extends VpnService {
                 getSystemService(android.app.NotificationManager.class).notify(1, notification(connected));
             }
             mockLocation();
+            updateNotice();
             ticker.postDelayed(this, 2000);
         }
     };
+
+    // A new version is announced once, in a notification of its own that
+    // opens the app on its update banner; again if one that was optional
+    // becomes required.
+    private void updateNotice() {
+        UpdateOffer u = Mobile.offeredUpdate();
+        if (u == null) return;
+        String seen = u.getVersion() + (u.getRequired() ? " required" : "");
+        android.content.SharedPreferences prefs = getSharedPreferences("notices", MODE_PRIVATE);
+        if (seen.equals(prefs.getString("update", ""))) return;
+        prefs.edit().putString("update", seen).apply();
+        PendingIntent open = PendingIntent.getActivity(this, 2, Badges.openIntent(this), PendingIntent.FLAG_IMMUTABLE);
+        Notification.Builder nb = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, App.UPDATES) : new Notification.Builder(this);
+        getSystemService(android.app.NotificationManager.class).notify(2, nb.setSmallIcon(R.drawable.ic_stat)
+                .setContentTitle(getString(R.string.update_title, u.getVersion()))
+                .setContentText(getString(u.getRequired() ? R.string.update_required : R.string.update_optional))
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .addAction(new Notification.Action.Builder(null, getString(R.string.update_install), open).build())
+                .build());
+    }
 
     private void mockLocation() {
         String at = Mobile.mockLocation();

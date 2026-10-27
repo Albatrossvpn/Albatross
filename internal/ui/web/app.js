@@ -69,6 +69,9 @@ function pingClass(ms) {
   return "slow";
 }
 
+// "Fastest location" wears a gold bolt where a country shows its flag.
+var BOLT = '<svg class="bolt" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>';
+
 var statusTitles = {
   idle: "Not connected",
   searching: "Looking for a server",
@@ -104,7 +107,8 @@ function render(s) {
 
   var locations = s.countries.length;
   var target = first(s.countries, function (x) { return x.code === s.target; });
-  $("cc-flag").textContent = s.target ? s.target_flag : "⚡";
+  if (s.target) $("cc-flag").textContent = s.target_flag;
+  else $("cc-flag").innerHTML = BOLT;
   $("cc-name").textContent = s.target ? s.target_name : "Fastest location";
   if (!s.target) {
     $("cc-meta").textContent = s.servers ? num(s.servers) + " servers in " + num(locations) + " locations" : "Looking for servers…";
@@ -147,12 +151,21 @@ function render(s) {
     // line of known length, else the step (connecting, another address,
     // megabytes so far), so the user sees it is at work.
     var doing = u.step || (u.progress + "%");
-    $("update-banner").textContent = downloading ? "Downloading version " + u.latest + " · " + doing
-      : u.error ? u.error
-      : "Version " + u.latest + " is available. Tap to " + (u.in_app ? "install" : "get") + " it." + (u.message ? " " + u.message : "");
-    if (u.message) $("update-text").textContent = u.message;
-    $("update-get").textContent = downloading ? "Downloading… " + (u.step ? "" : u.progress + "%") : u.error ? "Try again" : u.in_app ? "Install" : "Download";
-    $("update-get").disabled = downloading;
+    // A badge, the version and one button: the manifest's message is for
+    // copies too old to update themselves.
+    $("update-badge").textContent = u.required ? "Required" : "Optional";
+    $("update-badge").className = "badge " + (u.required ? "slow" : "good");
+    $("update-version").textContent = "Version " + u.latest;
+    $("update-modal-version").textContent = "Version " + u.latest;
+    var label = downloading ? "Downloading… " + (u.step ? "" : u.progress + "%") : u.error ? "Try again" : u.in_app ? "Install" : "Download";
+    ["update-install", "update-get"].forEach(function (id) {
+      $(id).textContent = label;
+      $(id).disabled = downloading;
+    });
+    ["update-error", "update-modal-error"].forEach(function (id) {
+      $(id).textContent = u.error || "";
+      $(id).classList.toggle("hidden", !u.error);
+    });
     $("update-progress").classList.toggle("hidden", !downloading);
     $("update-bar").style.width = (u.step && u.progress <= 1 ? 3 : u.progress) + "%";
     $("update-bar").classList.toggle("busy", !!u.step);
@@ -249,7 +262,9 @@ $("logout-btn").addEventListener("click", function () {
 });
 
 function poll() {
-  return api("GET", "/api/state").then(render).catch(function () {
+  // look=1 while the page shows: the engine then looks for a new version,
+  // unless it did a few minutes ago.
+  return api("GET", "/api/state" + (document.hidden ? "" : "?look=1")).then(render).catch(function () {
     $("status-sub").textContent = "Connection to the app was lost…";
   });
 }
@@ -303,7 +318,7 @@ function renderSheet() {
     var q = $("country-search").value.trim().toLowerCase();
     var match = function (c) { return !q || c.name.toLowerCase().includes(q) || c.code.toLowerCase() === q; };
     if (!q || "fastest".includes(q)) {
-      html += countryItem({ code: "", flag: "⚡", name: "Fastest location", meta: "Lowest ping", badge: "" });
+      html += countryItem({ code: "", name: "Fastest location", meta: "Lowest ping", badge: "" });
     }
     state.countries.filter(match).forEach(function (c) {
       html += countryItem({ code: c.code, flag: c.flag, name: c.name, meta: num(c.servers) + " servers", badge: '<span class="badge ' + pingClass(c.best_delay) + '">' + num(c.best_delay) + " ms</span>" });
@@ -337,7 +352,7 @@ var privacyNotes = [
 function countryItem(c) {
   var sel = (state.target || "") === c.code ? " selected" : "";
   return '<button class="item' + sel + '" data-value="' + esc(c.code) + '" data-country="1">\n' +
-    '    <span class="flag big">' + esc(c.flag) + "</span>\n" +
+    '    <span class="flag big">' + (c.code ? esc(c.flag) : BOLT) + "</span>\n" +
     '    <span class="main"><span class="title">' + esc(c.name) + '</span><span class="sub">' + esc(c.meta) + "</span></span>\n" +
     "    " + c.badge + "</button>";
 }
@@ -528,7 +543,7 @@ function getUpdate() {
     else toast(e.message);
   });
 }
-$("update-banner").addEventListener("click", getUpdate);
+$("update-install").addEventListener("click", getUpdate);
 $("update-get").addEventListener("click", getUpdate);
 
 // ---------- Diagnostics ----------

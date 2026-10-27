@@ -107,6 +107,9 @@ cp "$tmp/wpawg/LICENSE" "$out/licenses/wireproxy-awg-LICENSE.txt"
 (cd "$root/tools/snowflake" && GOTOOLCHAIN="${SNOWFLAKE_GO:-go1.26.10}" GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
   go build -trimpath -ldflags "-s -w -H windowsgui" -o "$out/core/snowflake-helper.exe" .)
 
+# The serif fonts of the app's headings, under the SIL Open Font License.
+cp internal/ui/web/fonts/OFL-*.txt "$out/licenses/"
+
 cat > "$out/README.txt" <<TXT
 Albatross VPN $VERSION
 
@@ -127,6 +130,7 @@ Bundled components (see the licenses folder):
   Tor Expert Bundle         https://www.torproject.org (BSD-3-Clause; transports under their own licenses)
   Snowflake proxy           https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/snowflake (BSD-3-Clause)
   Twemoji country flags     https://github.com/talkjs/country-flag-emoji-polyfill (CC-BY 4.0 graphics by Twitter)
+  Cinzel, Cormorant fonts   https://github.com/NDISCOVER/Cinzel, https://github.com/CatharsisFonts/Cormorant (SIL OFL 1.1)
   Site rule sets            https://github.com/SagerNet/sing-geoip, https://github.com/SagerNet/sing-geosite (GPL-3.0-or-later),
                             https://github.com/Chocolate4U/Iran-sing-box-rules
   Ad list (updated daily)   HaGeZi, OISD, AdGuard DNS filter (GPL-3.0), PersianBlocker (AGPL-3.0);

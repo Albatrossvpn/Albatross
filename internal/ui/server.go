@@ -179,6 +179,11 @@ func fail(w http.ResponseWriter, err error) {
 func ok(w http.ResponseWriter) { writeJSON(w, map[string]bool{"ok": true}) }
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
+	// The page asks with look=1 while it shows: whoever opens the app sees
+	// a new version without waiting for the hourly look.
+	if r.URL.Query().Get("look") == "1" {
+		s.eng.Looked()
+	}
 	st := publicState(s.eng.Snapshot())
 	if st.Settings.OverrideGPS && s.hooks.LocationSetup != nil {
 		st.LocationSetup = s.hooks.LocationSetup()

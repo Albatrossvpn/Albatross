@@ -8,7 +8,7 @@
   function check() {
     if (window.albatrossStarted) return;
     var android = /Android/i.test(navigator.userAgent);
-    document.body.style.cssText = "background: #0a0f1d; color: #e9edf7; overflow: auto";
+    document.body.style.cssText = "background: #f6f7fb; color: #0f1b3d; overflow: auto";
     document.body.innerHTML =
       '<div style="max-width: 420px; margin: 0 auto; padding: 48px 24px; text-align: center; font: 16px/1.5 sans-serif">' +
       '<h1 style="font-size: 22px; margin: 0 0 12px">' +

@@ -1,20 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The shield of icon.svg with the vip plan's badge (Badges.java). -->
+<!-- The shield of icon.svg with the vip plan's badge (Badges.java), in the 66dp safe zone. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <group android:translateX="7.55" android:translateY="7.5" android:scaleX="0.0481" android:scaleY="0.0481">
-        <path android:pathData="M449,503 L966,322 L546,1286 C482,1196 449,1096 449,990 Z">
-            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="560" android:startY="1500" android:endX="1470" android:endY="520"><item android:offset="0" android:color="#0B1B55" /><item android:offset="0.5" android:color="#1F31B8" /><item android:offset="1" android:color="#6F2FF5" /></gradient></aapt:attr>
+    <group android:translateX="9.50" android:translateY="9.48" android:scaleX="0.0461" android:scaleY="0.0461">
+        <path android:pathData="M449,503 L966,322 L1482,503 L1482,990 C1482,1096 1450,1196 1387,1286 Q1330,1366 1258,1435 Q1130,1550 966,1610 Q802,1550 674,1435 Q602,1366 546,1286 C482,1196 449,1096 449,990 Z" android:strokeWidth="44" android:strokeLineJoin="round">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="520" android:startY="330" android:endX="1410" android:endY="1610"><item android:offset="0" android:color="#FFF1C4" /><item android:offset="0.22" android:color="#E6BF68" /><item android:offset="0.42" android:color="#B98A35" /><item android:offset="0.56" android:color="#F7E2A4" /><item android:offset="0.74" android:color="#D1A24A" /><item android:offset="1" android:color="#94681F" /></gradient></aapt:attr>
+            <aapt:attr name="android:strokeColor"><gradient android:type="linear" android:startX="520" android:startY="330" android:endX="1410" android:endY="1610"><item android:offset="0" android:color="#FFF1C4" /><item android:offset="0.22" android:color="#E6BF68" /><item android:offset="0.42" android:color="#B98A35" /><item android:offset="0.56" android:color="#F7E2A4" /><item android:offset="0.74" android:color="#D1A24A" /><item android:offset="1" android:color="#94681F" /></gradient></aapt:attr>
         </path>
-        <path android:pathData="M966,322 L1482,503 L1482,990 C1482,1096 1450,1196 1387,1286 Z">
-            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="560" android:startY="1500" android:endX="1470" android:endY="520"><item android:offset="0" android:color="#0B1B55" /><item android:offset="0.5" android:color="#1F31B8" /><item android:offset="1" android:color="#6F2FF5" /></gradient></aapt:attr>
+        <path android:pathData="M449,503 L966,322 L546,1286 C482,1196 449,1096 449,990 Z" android:strokeColor="#38FFFFFF" android:strokeWidth="10" android:strokeLineJoin="round">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="500" android:startY="440" android:endX="800" android:endY="1290"><item android:offset="0" android:color="#9CC0FF" /><item android:offset="0.5" android:color="#5888F5" /><item android:offset="1" android:color="#3463DE" /></gradient></aapt:attr>
         </path>
-        <path android:pathData="M966,683 L1086,990 Q966,950 846,990 Z">
-            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="560" android:startY="1500" android:endX="1470" android:endY="520"><item android:offset="0" android:color="#0B1B55" /><item android:offset="0.5" android:color="#1F31B8" /><item android:offset="1" android:color="#6F2FF5" /></gradient></aapt:attr>
+        <path android:pathData="M966,322 L1482,503 L1482,990 C1482,1096 1450,1196 1387,1286 Z" android:strokeColor="#38FFFFFF" android:strokeWidth="10" android:strokeLineJoin="round">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="1050" android:startY="350" android:endX="1440" android:endY="1290"><item android:offset="0" android:color="#5888F5" /><item android:offset="0.6" android:color="#3463DE" /><item android:offset="1" android:color="#2449B5" /></gradient></aapt:attr>
         </path>
-        <path android:pathData="M760,1197 Q966,1027 1172,1197 L1258,1435 Q1130,1550 966,1610 Q802,1550 674,1435 Z">
-            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="560" android:startY="1500" android:endX="1470" android:endY="520"><item android:offset="0" android:color="#0B1B55" /><item android:offset="0.5" android:color="#1F31B8" /><item android:offset="1" android:color="#6F2FF5" /></gradient></aapt:attr>
+        <path android:pathData="M966,683 L1086,990 Q966,950 846,990 Z" android:strokeColor="#38FFFFFF" android:strokeWidth="10" android:strokeLineJoin="round">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="966" android:startY="690" android:endX="966" android:endY="990"><item android:offset="0" android:color="#9CC0FF" /><item android:offset="1" android:color="#3463DE" /></gradient></aapt:attr>
+        </path>
+        <path android:pathData="M760,1197 Q966,1027 1172,1197 L1258,1435 Q1130,1550 966,1610 Q802,1550 674,1435 Z" android:strokeColor="#38FFFFFF" android:strokeWidth="10" android:strokeLineJoin="round">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="780" android:startY="1110" android:endX="1160" android:endY="1610"><item android:offset="0" android:color="#5888F5" /><item android:offset="0.6" android:color="#3463DE" /><item android:offset="1" android:color="#2449B5" /></gradient></aapt:attr>
         </path>
     </group>
     <!-- The vip plan's badge, inside the 66dp safe zone. -->
