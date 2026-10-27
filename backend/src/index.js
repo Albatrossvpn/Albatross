@@ -115,6 +115,8 @@ async function route(request, env, url) {
 // ---------- Helpers ----------
 
 async function body(request) {
+  // A body announced as too large is refused before it is read.
+  if (Number(request.headers.get("Content-Length") || 0) > MAX_BODY) throw new HttpError(413, "Request too large.");
   const text = await request.text();
   if (text.length > MAX_BODY) throw new HttpError(413, "Request too large.");
   try {
