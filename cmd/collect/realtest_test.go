@@ -327,3 +327,33 @@ func TestHotListReservesSurviveTheCut(t *testing.T) {
 		t.Fatalf("%d servers after the cut", len(hot))
 	}
 }
+
+// Bringing a rare protocol forward never pushes another protocol's
+// servers out of the tested range below their own minimum.
+func TestPromoteRareKeepsOtherMinimums(t *testing.T) {
+	var list []*entry
+	add := func(proto string, n int) {
+		for i := 0; i < n; i++ {
+			list = append(list, &entry{link: fmt.Sprintf("%s://x@h%d:1", proto, len(list)), proto: proto})
+		}
+	}
+	add("vless", 17)
+	add("wireguard", 3) // at the end of the tested range, exactly at the minimum
+	add("trojan", 2)
+	add("vless", 10)
+	promoteRare(list, 20, 3)
+	count := map[string]int{}
+	for _, e := range list[:20] {
+		count[e.proto]++
+	}
+	if count["wireguard"] != 3 || count["trojan"] != 2 || count["vless"] != 15 || len(list) != 32 {
+		t.Fatalf("first 20: %v (%d entries)", count, len(list))
+	}
+	seen := map[*entry]bool{}
+	for _, e := range list {
+		if seen[e] {
+			t.Fatal("an entry is listed twice")
+		}
+		seen[e] = true
+	}
+}

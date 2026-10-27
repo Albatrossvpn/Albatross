@@ -58,36 +58,25 @@ const minProtoTests = 200
 
 // promoteRare moves servers of protocols that have fewer than min entries
 // among the first n of list forward into that range, keeping the order
-// otherwise, so the real test (which takes the first n) covers them.
+// otherwise, so the real test (which takes the first n) covers them. They
+// take the places of the last servers in the range of protocols that hold
+// more than min there (keepReserves), so no protocol drops below min to
+// make room for another; those move to just after the range.
 func promoteRare(list []*entry, n, min int) {
 	if n <= 0 || n >= len(list) {
 		return
 	}
-	have := map[string]int{}
-	for _, e := range list[:n] {
-		have[e.proto]++
+	head := keepReserves(list[:n], list[n:], n, func(string) int { return min })
+	in := make(map[*entry]bool, len(head))
+	for _, e := range head {
+		in[e] = true
 	}
-	var pulled []*entry
-	rest := make([]*entry, 0, len(list)-n)
-	for _, e := range list[n:] {
-		if have[e.proto] < min {
-			have[e.proto]++
-			pulled = append(pulled, e)
-		} else {
-			rest = append(rest, e)
+	out := head
+	for _, e := range list {
+		if !in[e] {
+			out = append(out, e)
 		}
 	}
-	if len(pulled) == 0 {
-		return
-	}
-	// The pulled servers take the places of the least shared in the head.
-	head := append([]*entry(nil), list[:n]...)
-	keep := n - len(pulled)
-	if keep < 0 {
-		keep = 0
-	}
-	out := append(append(append([]*entry(nil), head[:keep]...), pulled...), head[keep:]...)
-	out = append(out, rest...)
 	copy(list, out)
 }
 
