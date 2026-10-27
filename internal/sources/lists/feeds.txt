@@ -1,0 +1,6 @@
+# Albatross VPN: channel feeds the collector reads (sources.Collected). One feed address per line.
+# The newest entries of a feed are read and the lists they link to are followed one hop (fetchFeed): some
+# channels put a fresh paste of servers into every video's description. YouTube feeds need no login.
+# Chinese channels that post a new list of vless servers with every daily video (Oct 2026).
+https://www.youtube.com/feeds/videos.xml?channel_id=UCrQmjPdPg4RNsK3h80AcMJg
+https://www.youtube.com/feeds/videos.xml?channel_id=UCRuSbtQHJHyDoCnaH2n6LTw
