@@ -1152,9 +1152,11 @@ func canGetOut(r regime, p regimeProbe, en *pool.Entry) bool {
 // no longer parses), so it is neither offered nor rechecked again.
 func (e *Engine) forget(key uint64) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	if s := e.good[key]; s != nil {
-		delete(e.good, key)
+	s := e.good[key]
+	delete(e.good, key)
+	e.mu.Unlock()
+	// After the lock: logf takes it too.
+	if s != nil {
 		e.logf("info", "Server %s is no longer usable here and was removed.", s.Name)
 	}
 }
