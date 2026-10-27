@@ -147,6 +147,47 @@ func TestDomesticMirrors(t *testing.T) {
 	}
 }
 
+// Where foreign addresses are cut, the domestic mirrors come first and in
+// their own order, the project's storage is still reached through the VPN,
+// and foreign sites are not called directly, where they cannot answer.
+func TestDomesticModeAttempts(t *testing.T) {
+	defer func(a, b string) { WorkerMirror, DomesticMirror = a, b }(WorkerMirror, DomesticMirror)
+	WorkerMirror, DomesticMirror = "https://accounts.example", "http://5.6.7.8:8081/tok,http://9.9.9.9:8081/tok"
+	var mu sync.Mutex
+	var direct, proxied []string
+	record := func(to *[]string) *http.Client {
+		return &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+			mu.Lock()
+			*to = append(*to, r.URL.String())
+			mu.Unlock()
+			return nil, errors.New("offline")
+		})}
+	}
+	f := &Fetcher{Direct: record(&direct), Private: record(&direct), Mode: func() Mode { return ModeDomestic }, CacheDir: t.TempDir()}
+	own := Source{ID: "own", URL: CentralBase + "own-0.bin"}
+	f.Fetch(context.Background(), own)
+	if len(direct) < 2 || !strings.HasPrefix(direct[0], "http://5.6.7.8:8081/") || !strings.HasPrefix(direct[1], "http://9.9.9.9:8081/") {
+		t.Fatalf("disconnected: %v", direct)
+	}
+	f.Proxy = func() *http.Client { return record(&proxied) }
+	direct = nil
+	f.Fetch(context.Background(), own)
+	if !slices.ContainsFunc(proxied, IsWorker) || slices.ContainsFunc(direct, IsWorker) {
+		t.Fatalf("connected: through the VPN %v, direct %v", proxied, direct)
+	}
+	direct = nil
+	for _, s := range []Source{
+		{ID: "tg", Kind: KindTelegram, URL: "somechannel"},
+		{ID: "leap", Kind: KindLEAP, URL: "https://api.black.riseup.net"},
+		{ID: "feed", Kind: KindFeed, URL: "https://www.youtube.com/feeds/videos.xml?channel_id=x"},
+	} {
+		f.Fetch(context.Background(), s)
+	}
+	if len(direct) != 0 {
+		t.Fatalf("foreign sites called directly: %v", direct)
+	}
+}
+
 // A keyed list opens only with the key of its id; the collector's lists
 // are offered keyed.
 func TestKeyedLists(t *testing.T) {
