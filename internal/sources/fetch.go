@@ -558,6 +558,9 @@ func writeAtomic(path string, data []byte) error {
 	return os.Rename(tmp, path)
 }
 
+// leapMax bounds each LEAP answer (Riseup's gateway list is about 10 KB).
+const leapMax = 1 << 20
+
 // fetchLEAP downloads a LEAP provider's gateway list, an anonymous client
 // certificate and the provider's CA, and joins them as a node.LEAPDoc.
 func (f *Fetcher) fetchLEAP(ctx context.Context, api string, clients []*http.Client) (string, error) {
@@ -573,11 +576,13 @@ func (f *Fetcher) fetchLEAP(ctx context.Context, api string, clients []*http.Cli
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		eip, err := f.getPage(ctx, c, api+"/3/config/eip-service.json")
+		// getBody, not getPage: getPage takes nothing but a channel preview,
+		// and with it no LEAP provider ever answered.
+		eip, _, err := f.getBody(ctx, c, api+"/3/config/eip-service.json", leapMax)
 		if err == nil {
 			var cert, ca string
-			if cert, err = f.getPage(ctx, c, api+"/3/cert"); err == nil {
-				ca, err = f.getPage(ctx, c, caURL)
+			if cert, _, err = f.getBody(ctx, c, api+"/3/cert", leapMax); err == nil {
+				ca, _, err = f.getBody(ctx, c, caURL, leapMax)
 			}
 			if err == nil {
 				if !json.Valid([]byte(eip)) || !strings.Contains(cert, "PRIVATE KEY") || !strings.Contains(ca, "CERTIFICATE") {
