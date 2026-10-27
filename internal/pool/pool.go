@@ -322,14 +322,10 @@ func (p *Pool) Compact(keep time.Duration, limit int) error {
 	tmp.Close()
 	old := p.f
 	old.Close()
-	f, err := os.OpenFile(tmpPath, os.O_RDWR, 0o644)
-	if err == nil {
-		err = os.Rename(tmpPath, p.path)
-		if err != nil {
-			f.Close()
-		}
-	}
-	if err != nil {
+	// Renamed before it is opened: Windows refuses to rename a file that
+	// is open (Go opens files without FILE_SHARE_DELETE), and every
+	// compaction there failed, so the pool grew without bound.
+	if err := os.Rename(tmpPath, p.path); err != nil {
 		// The old file is intact where it was: keep it, the entries and
 		// the index as they were, so the pool goes on working.
 		os.Remove(tmpPath)
@@ -337,6 +333,13 @@ func (p *Pool) Compact(keep time.Duration, limit int) error {
 			of.Seek(0, io.SeekEnd)
 			p.f, p.w = of, bufio.NewWriterSize(of, 1<<16)
 		}
+		return err
+	}
+	f, err := os.OpenFile(p.path, os.O_RDWR, 0o644)
+	if err != nil {
+		// The compacted file is in place but cannot be opened: the entries
+		// follow it, and writes fail until the next start reopens it.
+		p.entries, p.index, p.size = kept, index, size
 		return err
 	}
 	// The history of what was dropped (tested entries only) outlives the
