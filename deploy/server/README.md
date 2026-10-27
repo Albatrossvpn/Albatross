@@ -91,10 +91,13 @@ instead of a closed connection.
    gets the certificate, opens the machine's own firewall, turns on BBR and
    starts both cores as services. The links end up in
    `/root/albatross-links.txt`.
-4. Add the links to the app: paste them into the repository secret
-   `OWN_SERVERS`, one per line. The collector then publishes them for the
-   apps, encrypted, so public collectors do not pick them up and overload
-   them.
+4. Add the links to the app: run [`publish-links.sh`](publish-links.sh)
+   on the server through `server.yml` (below), which stores them in the
+   project's private storage (`private/own-servers.txt`, never served),
+   or paste them into the repository secret `OWN_SERVERS`, one per line.
+   Each collection reads both and publishes the links for the apps,
+   encrypted, so public collectors do not pick them up and overload them.
+   A reinstall stores its links again the same way.
 
 ## A relay inside the country
 
@@ -159,7 +162,11 @@ installed in `/opt/runner` as the service
 `actions.runner.Albatrossvpn-Albatross.relay-in`) runs the shell script
 given to `.github/workflows/server.yml` when it is run by hand, as root;
 its output is the job's log, which anyone who can read the repository's
-Actions can read, so a script never carries a secret.
+Actions can read, so a script never carries a secret. The Cloudflare
+credentials are in its environment (masked in the log) for
+`publish-links.sh`; for example, to store the server's links:
+
+    curl -fsSL https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/deploy/server/publish-links.sh | bash
 
 A runner attached to a public repository takes the jobs of any workflow
 whose `runs-on` matches it, a pull request's from a fork included. It is

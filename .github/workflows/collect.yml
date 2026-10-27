@@ -74,6 +74,12 @@ jobs:
               rm -f "$RUNNER_TEMP/listkeys.json"; sleep 10
             done
             [ -s "$RUNNER_TEMP/listkeys.json" ] || echo "::notice::no list keys yet; starting the first"
+            # The links the project's own servers and relays stored
+            # themselves (deploy/server/publish-links.sh), read with the
+            # secrets' in the next step.
+            for f in own-servers.txt own-relays.txt; do
+              npx wrangler r2 object get "albatross-files/private/$f" --file "$RUNNER_TEMP/$f" --remote >/dev/null 2>&1 || rm -f "$RUNNER_TEMP/$f"
+            done
           fi
       - name: Cores
         env:
@@ -102,6 +108,14 @@ jobs:
         # 15,000 real tests take a few minutes (most fail at once); the
         # address probe before them stops after ten (cmd/collect -probe-minutes).
         run: |
+          # The own servers and relays: the secrets' links and the ones the
+          # servers stored themselves, each once, kept out of the log.
+          merge() { printf '%s\n' "$1"; cat "$2" 2>/dev/null; }
+          OWN_SERVERS="$(merge "${OWN_SERVERS:-}" "$RUNNER_TEMP/own-servers.txt" | awk 'NF && !seen[$0]++')"
+          OWN_RELAYS="$(merge "${OWN_RELAYS:-}" "$RUNNER_TEMP/own-relays.txt" | awk 'NF && !seen[$0]++')"
+          while IFS= read -r l; do [ -n "$l" ] && echo "::add-mask::$l"; done <<<"$OWN_SERVERS"$'\n'"$OWN_RELAYS"
+          export OWN_SERVERS OWN_RELAYS
+          echo "own servers: $(grep -c . <<<"$OWN_SERVERS" || true) links; relays: $(grep -c . <<<"$OWN_RELAYS" || true)"
           # The lists go out sealed; the plain copies only while LISTS_PLAIN
           # is 1 (apps from before 1.0.2 were cut off by the forced update).
           go run ./cmd/collect -prev prev -real 15000 -probe-minutes 10 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" \
