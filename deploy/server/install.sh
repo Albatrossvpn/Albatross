@@ -664,7 +664,10 @@ sidecar_setup() {
       rm -f /swapfile
     fi
   fi
-  export PATH="/usr/local/go/bin:/root/go/bin:$PATH" GOFLAGS="-buildvcs=false -p=1" GOTOOLCHAIN=auto GOGC=40
+  # Go's caches in fixed places: run from a service or a cron job there is
+  # no HOME, without which go finds none and builds nothing.
+  export PATH="/usr/local/go/bin:/root/go/bin:$PATH" GOFLAGS="-buildvcs=false -p=1" GOTOOLCHAIN=auto GOGC=40 \
+    GOPATH=/root/go GOCACHE=/root/.cache/go-build
   # NaiveProxy's server is Caddy with klzgrad's forward proxy.
   if [ ! -x /usr/local/bin/caddy-naive ]; then
     go install "github.com/caddyserver/xcaddy/cmd/xcaddy@$XCADDY_VERSION" >/dev/null
