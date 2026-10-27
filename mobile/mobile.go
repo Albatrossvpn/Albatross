@@ -212,6 +212,30 @@ func MockLocation() string {
 	return mockPoint(lat, lon, c.ExitIP)
 }
 
+// UpdateOffer is a newer version the app offers, for the VPN service's
+// ticker, which posts a notification once for each.
+type UpdateOffer struct {
+	Version string
+	// Required says this version must be installed for the app to connect.
+	Required bool
+}
+
+// OfferedUpdate is the newer version on offer, or nil when there is none
+// (or the engine is not running).
+func OfferedUpdate() *UpdateOffer {
+	mu.Lock()
+	e := eng
+	mu.Unlock()
+	if e == nil {
+		return nil
+	}
+	u := e.Snapshot().Update
+	if u == nil || u.Latest == "" {
+		return nil
+	}
+	return &UpdateOffer{Version: u.Latest, Required: u.Required}
+}
+
 // mockPoint moves a place by up to about 0.02 degrees each way, by an amount
 // that comes from the exit address: the point changes with the server, not
 // every time it is asked for.

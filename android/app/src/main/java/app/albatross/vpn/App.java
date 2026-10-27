@@ -18,6 +18,8 @@ import app.albatross.mobile.Mobile;
 /** Starts the Go engine once per process and keeps it told about the network's resolver. */
 public final class App extends Application {
     static final String CHANNEL = "status";
+    // A new version is news, unlike the status: its notice may sound once.
+    static final String UPDATES = "updates";
     // Used when the network does not say which resolver it has.
     private static final String FALLBACK_DNS = "8.8.8.8";
 
@@ -27,9 +29,11 @@ public final class App extends Application {
     public void onCreate() {
         super.onCreate();
         if (Build.VERSION.SDK_INT >= 26) {
+            NotificationManager nm = getSystemService(NotificationManager.class);
             NotificationChannel ch = new NotificationChannel(CHANNEL, getString(R.string.channel_name), NotificationManager.IMPORTANCE_LOW);
             ch.setShowBadge(false);
-            getSystemService(NotificationManager.class).createNotificationChannel(ch);
+            nm.createNotificationChannel(ch);
+            nm.createNotificationChannel(new NotificationChannel(UPDATES, getString(R.string.channel_updates), NotificationManager.IMPORTANCE_DEFAULT));
         }
         // This app is left out of its own VPN, so its default network is the
         // real one (Wi-Fi or mobile data) even while connected.

@@ -147,12 +147,21 @@ function render(s) {
     // line of known length, else the step (connecting, another address,
     // megabytes so far), so the user sees it is at work.
     var doing = u.step || (u.progress + "%");
-    $("update-banner").textContent = downloading ? "Downloading version " + u.latest + " · " + doing
-      : u.error ? u.error
-      : "Version " + u.latest + " is available. Tap to " + (u.in_app ? "install" : "get") + " it." + (u.message ? " " + u.message : "");
-    if (u.message) $("update-text").textContent = u.message;
-    $("update-get").textContent = downloading ? "Downloading… " + (u.step ? "" : u.progress + "%") : u.error ? "Try again" : u.in_app ? "Install" : "Download";
-    $("update-get").disabled = downloading;
+    // A badge, the version and one button: the manifest's message is for
+    // copies too old to update themselves.
+    $("update-badge").textContent = u.required ? "Required" : "Optional";
+    $("update-badge").className = "badge " + (u.required ? "slow" : "good");
+    $("update-version").textContent = "Version " + u.latest;
+    $("update-modal-version").textContent = "Version " + u.latest;
+    var label = downloading ? "Downloading… " + (u.step ? "" : u.progress + "%") : u.error ? "Try again" : u.in_app ? "Install" : "Download";
+    ["update-install", "update-get"].forEach(function (id) {
+      $(id).textContent = label;
+      $(id).disabled = downloading;
+    });
+    ["update-error", "update-modal-error"].forEach(function (id) {
+      $(id).textContent = u.error || "";
+      $(id).classList.toggle("hidden", !u.error);
+    });
     $("update-progress").classList.toggle("hidden", !downloading);
     $("update-bar").style.width = (u.step && u.progress <= 1 ? 3 : u.progress) + "%";
     $("update-bar").classList.toggle("busy", !!u.step);
@@ -249,7 +258,9 @@ $("logout-btn").addEventListener("click", function () {
 });
 
 function poll() {
-  return api("GET", "/api/state").then(render).catch(function () {
+  // look=1 while the page shows: the engine then looks for a new version,
+  // unless it did a few minutes ago.
+  return api("GET", "/api/state" + (document.hidden ? "" : "?look=1")).then(render).catch(function () {
     $("status-sub").textContent = "Connection to the app was lost…";
   });
 }
@@ -528,7 +539,7 @@ function getUpdate() {
     else toast(e.message);
   });
 }
-$("update-banner").addEventListener("click", getUpdate);
+$("update-install").addEventListener("click", getUpdate);
 $("update-get").addEventListener("click", getUpdate);
 
 // ---------- Diagnostics ----------
