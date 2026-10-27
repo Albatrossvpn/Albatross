@@ -122,3 +122,28 @@ func TestOpenList(t *testing.T) {
 		}
 	}
 }
+
+// The last run's lists are read from their sealed copies (the only ones
+// published once -plain is off), else from the plain ones.
+func TestReadLastRun(t *testing.T) {
+	dir := t.TempDir()
+	keys := []sources.ListKey{{ID: 30, Key: bytes.Repeat([]byte{3}, 32)}}
+	a := "trojan://pw@192.0.2.1:443#a"
+	b := "trojan://pw@192.0.2.2:443#b"
+	fresh, _ := sources.SealKeyed(keys[0], a+"\n"+b+"\n")
+	hot, _ := sources.SealKeyed(sources.ListKey{ID: 99, Key: bytes.Repeat([]byte{9}, 32)}, a+"\n")
+	os.WriteFile(filepath.Join(dir, "fresh.txt.sealed"), fresh, 0o644)
+	os.WriteFile(filepath.Join(dir, "hot.txt.sealed"), hot, 0o644)
+	os.WriteFile(filepath.Join(dir, "new.txt"), []byte(b+"\n"), 0o644)
+	got := readLastRun(dir, keys)
+	if strings.Join(got.fresh, " ") != a+" "+b || len(got.hot) != 0 || strings.Join(got.new, " ") != b {
+		t.Fatalf("fresh %q, hot %q, new %q", got.fresh, got.hot, got.new)
+	}
+	// new.txt is what fresh.txt gained since then.
+	if added := newList([]string{b, "trojan://pw@192.0.2.3:443#c"}, got.fresh, got.new, 10); strings.Join(added, " ") != "trojan://pw@192.0.2.3:443#c "+b {
+		t.Fatalf("new.txt %q", added)
+	}
+	if got := readLastRun("", keys); got.fresh != nil || got.hot != nil || got.new != nil {
+		t.Fatalf("without -prev: %+v", got)
+	}
+}

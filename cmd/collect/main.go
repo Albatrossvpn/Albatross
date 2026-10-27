@@ -112,6 +112,30 @@ func readLines(path string) []string {
 	return strings.Fields(string(b))
 }
 
+// lastRun is what the last run published (-prev).
+type lastRun struct {
+	hot, fresh, new []string
+}
+
+// readLastRun reads the lists the last run published in dir: their sealed
+// copies opened with keys, else the plain ones (written while -plain is
+// on). Nothing for a list that is missing or that no key opens.
+func readLastRun(dir string, keys []sources.ListKey) lastRun {
+	read := func(name string) []string {
+		if dir == "" {
+			return nil
+		}
+		if b, err := os.ReadFile(filepath.Join(dir, name+sources.KeyedSuffix)); err == nil {
+			if text := sources.OpenKeyed(keys, string(b)); text != "" {
+				return strings.Fields(text)
+			}
+			log.Printf("prev: no list key opens %s", name+sources.KeyedSuffix)
+		}
+		return readLines(filepath.Join(dir, name))
+	}
+	return lastRun{hot: read("hot.txt"), fresh: read("fresh.txt"), new: read("new.txt")}
+}
+
 // hotCandidates is the most servers refreshHot reads from its lists, in
 // their order (the last hot.txt first, then the top of fresh.txt).
 const hotCandidates = 4000
@@ -427,6 +451,7 @@ func main() {
 		ids[i] = s.ID
 	}
 	stats := loadStats(*prev)
+	last := readLastRun(*prev, readListKeys(*keysIn))
 	plan := planLanes(ids, perSrc, stats, rand.New(rand.NewSource(time.Now().UnixNano())))
 	log.Printf("lanes: %d sources on probation, %d proven, %d duds, %d normal; %d servers put forward", plan.counts["probation"], plan.counts["proven"], plan.counts["dud"], plan.counts["normal"], plan.counts["marked"])
 
@@ -440,15 +465,14 @@ func main() {
 		// in a run: the ones in the last published lists and the most
 		// shared go first, and the budget decides how far down it gets.
 		known := map[string]bool{}
-		if *prev != "" {
-			for _, name := range []string{"hot.txt", "fresh.txt", "new.txt"} {
-				for _, l := range readLines(filepath.Join(*prev, name)) {
-					if nd, err := node.ParseLink(l); err == nil && !nd.UDPBased() {
-						known[nd.Endpoint()] = true
-					}
+		for _, list := range [][]string{last.hot, last.fresh, last.new} {
+			for _, l := range list {
+				if nd, err := node.ParseLink(l); err == nil && !nd.UDPBased() {
+					known[nd.Endpoint()] = true
 				}
 			}
 		}
+		log.Printf("%d addresses from the last published lists go first", len(known))
 		sort.SliceStable(list, func(i, j int) bool {
 			if list[i].lane != list[j].lane {
 				return list[i].lane
@@ -552,7 +576,7 @@ func main() {
 	hot = fitHot(hot, hotSize)
 	write("hot.txt", links(hot))
 	if *prev != "" {
-		write("new.txt", newList(fresh, readLines(filepath.Join(*prev, "fresh.txt")), readLines(filepath.Join(*prev, "new.txt")), newSize))
+		write("new.txt", newList(fresh, last.fresh, last.new, newSize))
 	}
 	for i := range *shards {
 		lo, hi := len(rest)*i / *shards, len(rest)*(i+1) / *shards
