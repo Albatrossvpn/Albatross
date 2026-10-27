@@ -46,13 +46,18 @@ JUICITY_VERSION="${JUICITY_VERSION:-0.5.0}"
 MIERU_VERSION="${MIERU_VERSION:-3.39.0}"
 BROOK_VERSION="${BROOK_VERSION:-20270101}"
 WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
-# Built from source here, so pinned like the rest: Caddy's builder, the
-# NaiveProxy forward proxy (a commit of its naive branch) and AmneziaWG.
+# NaiveProxy's server is Caddy with klzgrad's forward proxy, which builds
+# its releases on a Caddy patched for it (the newest needs that patch's
+# idle timeouts): on x86-64 its release is taken, checked against the
+# hash it had when pinned.
+NAIVE_RELEASE="${NAIVE_RELEASE:-v2.11.7-naive2}"
+NAIVE_SHA256="${NAIVE_SHA256:-c273dc07dd79c5919f97639cbdcb559d40ce90475dbd8aac80641b0a8c8065ff}"
+# Elsewhere it is built from source, so pinned like the rest: Caddy's
+# builder, the forward proxy (the commit of its release v2.11.7-naive,
+# the newest that stock Caddy builds), the Caddy it is built on (xcaddy
+# left alone picks one of its own) and AmneziaWG.
 XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"
-NAIVE_PROXY_REF="${NAIVE_PROXY_REF:-e747854e78743dba85c039b38ed185fb11d93667}"
-# The Caddy that forward proxy is built for (its release v2.11.7-naive2):
-# it uses Caddy's idle timeouts, which older Caddy lacks, while xcaddy
-# left alone picks a Caddy of its own.
+NAIVE_PROXY_REF="${NAIVE_PROXY_REF:-c096d6a00cb28e019cc1995b04bdc6a9311d8024}"
 CADDY_VERSION="${CADDY_VERSION:-v2.11.7}"
 AWG_GO_REF="${AWG_GO_REF:-v3.1.20260828}"
 AWG_TOOLS_REF="${AWG_TOOLS_REF:-v3.1.20260812}"
@@ -647,11 +652,12 @@ sidecar_links() {
 }
 
 # sidecar_setup installs and runs the server side of the sidecar
-# protocols. Each has its own program; Go builds the two that publish no
-# server binary (Caddy with NaiveProxy's forward proxy, AmneziaWG).
+# protocols. Each has its own program; Go builds the ones that publish no
+# server binary for this machine (AmneziaWG, and NaiveProxy's Caddy off
+# x86-64).
 sidecar_setup() {
   local a; a="$(arch)"
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git build-essential ocserv >/dev/null
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq git build-essential xz-utils ocserv >/dev/null
   local tmp; tmp="$(mktemp -d)"
   if [ ! -x /usr/local/go/bin/go ] || ! /usr/local/go/bin/go version | grep -q "go$GO_VERSION "; then
     curl -fsSL -o "$tmp/go.tgz" "https://go.dev/dl/go$GO_VERSION.linux-$a.tar.gz"
@@ -672,10 +678,17 @@ sidecar_setup() {
   # no HOME, without which go finds none and builds nothing.
   export PATH="/usr/local/go/bin:/root/go/bin:$PATH" GOFLAGS="-buildvcs=false -p=1" GOTOOLCHAIN=auto GOGC=40 \
     GOPATH=/root/go GOCACHE=/root/.cache/go-build
-  # NaiveProxy's server is Caddy with klzgrad's forward proxy.
+  # NaiveProxy's server: the release on x86-64, else built (see the pins).
   if [ ! -x /usr/local/bin/caddy-naive ]; then
-    go install "github.com/caddyserver/xcaddy/cmd/xcaddy@$XCADDY_VERSION" >/dev/null
-    xcaddy build "$CADDY_VERSION" --with "github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@$NAIVE_PROXY_REF" --output /usr/local/bin/caddy-naive >/dev/null
+    if [ "$a" = amd64 ]; then
+      curl -fsSL -o "$tmp/naive.tar.xz" "https://github.com/klzgrad/forwardproxy/releases/download/$NAIVE_RELEASE/caddy-forwardproxy-naive.tar.xz"
+      echo "$NAIVE_SHA256  $tmp/naive.tar.xz" | sha256sum -c --quiet -
+      tar -xJf "$tmp/naive.tar.xz" -C "$tmp" caddy-forwardproxy-naive/caddy
+      install -m 755 "$tmp/caddy-forwardproxy-naive/caddy" /usr/local/bin/caddy-naive
+    else
+      go install "github.com/caddyserver/xcaddy/cmd/xcaddy@$XCADDY_VERSION" >/dev/null
+      xcaddy build "$CADDY_VERSION" --with "github.com/caddyserver/forwardproxy=github.com/klzgrad/forwardproxy@$NAIVE_PROXY_REF" --output /usr/local/bin/caddy-naive >/dev/null
+    fi
   fi
   cat >"$OUT/Caddyfile" <<EOF
 {
