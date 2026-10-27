@@ -4,7 +4,8 @@ name: Run on the relay server
 # labelled "relay", deploy/server/README.md), by hand only, so the server
 # can be looked after without a terminal. The script's output is the job
 # log. Secrets never go in the script: the log is readable by whoever
-# reads the repository's Actions.
+# reads the repository's Actions. The runner refuses every other job,
+# a pull request's above all, before it runs (deploy/server/runner-guard.sh).
 on:
   workflow_dispatch:
     inputs:
