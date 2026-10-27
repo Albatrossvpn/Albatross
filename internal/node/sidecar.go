@@ -49,6 +49,9 @@ func (n *Node) validateSidecar() error {
 		if n.Transport != "https" && n.Transport != "quic" {
 			return fmt.Errorf("naive runs over https or quic")
 		}
+		if n.SNI != "" && !plainHost(n.SNI) {
+			return fmt.Errorf("bad sni")
+		}
 	case "juicity":
 		if n.UUID == "" || n.Password == "" {
 			return fmt.Errorf("juicity needs a uuid and a password")
@@ -166,8 +169,17 @@ func (n *Node) SidecarArgs(port int, dir string) (args, env []string, files map[
 	files = map[string]string{}
 	switch n.Proto {
 	case "naive":
-		u := n.Transport + "://" + urlUser(n.Username) + ":" + urlUser(n.Password) + "@" + n.hostPort()
-		c, _ := json.Marshal(map[string]any{"listen": "socks://" + bind, "proxy": u})
+		// NaiveProxy takes the TLS name from the proxy's address. With a
+		// name of its own (sni=, as a relay's links carry) the address
+		// names it and the resolver rules send it to the server.
+		host := n.Server
+		cfg := map[string]any{"listen": "socks://" + bind}
+		if n.SNI != "" && n.SNI != n.Server && !strings.Contains(n.Server, ":") {
+			host = n.SNI
+			cfg["host-resolver-rules"] = "MAP " + n.SNI + " " + n.Server
+		}
+		cfg["proxy"] = n.Transport + "://" + urlUser(n.Username) + ":" + urlUser(n.Password) + "@" + net.JoinHostPort(host, strconv.Itoa(n.Port))
+		c, _ := json.Marshal(cfg)
 		files["config.json"] = string(c)
 		args = []string{dir + sep + "config.json"}
 	case "juicity":
