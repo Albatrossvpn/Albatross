@@ -146,6 +146,18 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 			out["username"] = n.Username
 			out["password"] = n.Password
 		}
+	case "http":
+		// An HTTP proxy (Clash's type http): CONNECT through it, over TLS
+		// when it serves HTTPS.
+		out["type"] = "http"
+		n.sbServer(out)
+		if n.Username != "" || n.Password != "" {
+			out["username"] = n.Username
+			out["password"] = n.Password
+		}
+		if t := n.sbTLS(o); t != nil {
+			out["tls"] = t
+		}
 	case "wireguard":
 		out["type"] = "wireguard"
 		mtu := n.MTU

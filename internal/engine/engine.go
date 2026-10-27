@@ -46,6 +46,12 @@ type Options struct {
 	// server names on systems whose resolver they cannot ask themselves
 	// (Android). Empty means the system's. SetLocalDNS changes it.
 	LocalDNS string
+	// NetworkDNS, when set, returns the network's resolver as it is now,
+	// for DNS tunnels where the cores ask the system's resolver (Windows):
+	// a tunnel needs an address to send its queries to, and the network's
+	// own is the one that keeps answering when foreign ones are cut. It is
+	// asked each time cores start; LocalDNS, when set, comes first.
+	NetworkDNS func() string
 	// AccountURLs replaces the build's account service addresses (tests use
 	// it); nil means AccountURL.
 	AccountURLs []string
@@ -363,6 +369,18 @@ func (e *Engine) dns() string {
 	return e.localDNS
 }
 
+// tunnelDNS is the resolver DNS tunnels send their queries through (see
+// Options.NetworkDNS).
+func (e *Engine) tunnelDNS() string {
+	if d := e.dns(); d != "" {
+		return d
+	}
+	if e.opt.NetworkDNS != nil {
+		return e.opt.NetworkDNS()
+	}
+	return ""
+}
+
 func (e *Engine) proxyAddr() string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -418,6 +436,7 @@ func (e *Engine) applyIntensity() {
 // newTester returns a copy of the tester for one run, with the current
 // intensity and resolver.
 func (e *Engine) newTester() tester.Tester {
+	tunnel := e.tunnelDNS()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	t := *e.tester
@@ -426,7 +445,7 @@ func (e *Engine) newTester() tester.Tester {
 		// saves its battery once connected, not before.
 		t.Concurrency, t.TCPConcurrency = 32, 128
 	}
-	t.LocalDNS = e.localDNS
+	t.LocalDNS, t.TunnelDNS = e.localDNS, tunnel
 	t.Mobile = e.opt.Mobile
 	t.LineMbps = e.net.lineMbps()
 	return t
@@ -688,15 +707,19 @@ func (e *Engine) Servers(country string, limit int) []ServerInfo {
 }
 
 // domesticEndpoint reports whether a server's address is inside the
-// country: in the country's address ranges, or named as a relay.
-func (e *Engine) domesticEndpoint(n *node.Node) bool {
+// country: in the country's address ranges or, in the project's own sealed
+// lists (own says the server came from one; the relays are there), named
+// as a relay. A name in a public list says nothing: anyone may call a
+// server "x-relay", and a relay jumps the queue when foreign addresses are
+// cut.
+func (e *Engine) domesticEndpoint(n *node.Node, own bool) bool {
 	if n == nil {
 		return false
 	}
 	if a, err := netip.ParseAddr(n.Server); err == nil && ipIn(e.irRanges, a) {
 		return true
 	}
-	return strings.HasSuffix(n.Name, "-relay") || n.Name == "relay"
+	return own && (strings.HasSuffix(n.Name, "-relay") || n.Name == "relay")
 }
 
 // fetchMode is how sources are reached now: as a network where only

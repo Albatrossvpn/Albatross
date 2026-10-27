@@ -22,6 +22,7 @@ const (
 	EngineSingBox
 	EngineXray
 	EngineWarpPlus
+	EngineSidecar // a helper program of the protocol's own (see Sidecar)
 )
 
 func (e Engine) String() string {
@@ -32,6 +33,8 @@ func (e Engine) String() string {
 		return "xray"
 	case EngineWarpPlus:
 		return "warp-plus"
+	case EngineSidecar:
+		return "sidecar"
 	}
 	return "none"
 }
@@ -108,6 +111,8 @@ type Node struct {
 
 	// OpenVPN (VPN Gate) material.
 	OVPN *OpenVPN `json:"ovpn,omitempty"`
+	// AWG holds AmneziaWG's obfuscation parameters.
+	AWG *AmneziaWG `json:"awg,omitempty"`
 
 	// warp-plus methods: "warp", "gool" (WARP in WARP) or "psiphon"; "tor";
 	// and usque's "masque" (WARP over MASQUE, HTTP/3) and "masque2" (the
@@ -168,6 +173,9 @@ func (n *Node) Key() string {
 	w(n.ECH)
 	w(n.WPMode)
 	w(n.WPCountry)
+	if n.AWG != nil {
+		w(fmt.Sprint(*n.AWG))
+	}
 	if n.OVPN != nil {
 		w(n.OVPN.Network)
 		w(strings.Join(n.OVPN.CA, ""))
@@ -190,10 +198,14 @@ func Key64(key string) uint64 {
 // reachability probe says nothing about it.
 func (n *Node) UDPBased() bool {
 	switch n.Proto {
-	case "hysteria", "hysteria2", "tuic", "wireguard", "warpplus":
+	case "hysteria", "hysteria2", "tuic", "wireguard", "warpplus", "juicity", "amneziawg":
 		return true
 	case "openvpn":
 		return n.OVPN != nil && n.OVPN.Network == "udp"
+	case "mieru":
+		return n.Transport == "udp"
+	case "naive":
+		return n.Transport == "quic"
 	}
 	return n.Transport == "kcp" || n.Transport == "quic"
 }
@@ -231,6 +243,9 @@ func (n *Node) Engine() Engine {
 	}
 	if n.Proto == "warpplus" {
 		return EngineWarpPlus
+	}
+	if n.Sidecar() != "" {
+		return EngineSidecar
 	}
 	if n.needsXray() {
 		if n.xraySupported() {
@@ -376,7 +391,8 @@ func (n *Node) Validate() error {
 			return fmt.Errorf("openvpn needs a CA")
 		}
 	default:
-		return fmt.Errorf("unsupported protocol %q", n.Proto)
+		// The sidecar protocols: their helpers check the rest.
+		return n.validateSidecar()
 	}
 	if n.FinalMask != "" && !validFinalMask(n.FinalMask) {
 		return fmt.Errorf("bad fm")

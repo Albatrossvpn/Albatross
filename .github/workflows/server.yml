@@ -4,7 +4,11 @@ name: Run on the relay server
 # labelled "relay", deploy/server/README.md), by hand only, so the server
 # can be looked after without a terminal. The script's output is the job
 # log. Secrets never go in the script: the log is readable by whoever
-# reads the repository's Actions.
+# reads the repository's Actions. The Cloudflare credentials are in the
+# environment (masked in the log), for deploy/server/publish-links.sh,
+# which puts the server's links in the project's private storage. The
+# runner refuses every other job, a pull request's above all, before it
+# runs (deploy/server/runner-guard.sh).
 on:
   workflow_dispatch:
     inputs:
@@ -31,6 +35,8 @@ jobs:
       - name: Run
         env:
           SCRIPT: ${{ inputs.script }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           printf '%s\n' "$SCRIPT" > "$RUNNER_TEMP/script.sh"
           bash "$RUNNER_TEMP/script.sh"

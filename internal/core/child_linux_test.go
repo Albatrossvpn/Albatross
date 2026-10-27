@@ -51,7 +51,10 @@ func TestStartStop(t *testing.T) {
 
 // TestStartWithoutPidfd forbids the pidfd calls the way Android 8 to 11 do
 // (a seccomp filter that traps them) and checks that cores still start and
-// stop: with os/exec the first start kills the process.
+// stop: with os/exec the first start kills the process. clone3 is answered
+// as by a kernel without it (ENOSYS), which the runtime falls back from;
+// what Android itself does with clone3 is covered by the connection test
+// on the Android 11 emulator (build.yml).
 func TestStartWithoutPidfd(t *testing.T) {
 	if mode := os.Getenv("ALBATROSS_PIDFD_CHILD"); mode != "" {
 		forbidPidfd()
@@ -77,15 +80,17 @@ func TestStartWithoutPidfd(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
+	kernel, _ := os.ReadFile("/proc/sys/kernel/osrelease")
 	if out, err := run("exec"); err == nil || !strings.Contains(out, "SIGSYS") {
-		t.Fatalf("the filter did not stop os/exec (%v):\n%s", err, out)
+		t.Fatalf("the filter did not stop os/exec (%v, kernel %s):\n%s", err, strings.TrimSpace(string(kernel)), out)
 	}
 	if out, err := run("core"); err != nil || !strings.Contains(out, "started and stopped: true") {
-		t.Fatalf("the core did not start and stop (%v):\n%s", err, out)
+		t.Fatalf("the core did not start and stop (%v, kernel %s):\n%s", err, strings.TrimSpace(string(kernel)), out)
 	}
 }
 
-// forbidPidfd traps the pidfd calls and clone3 in every thread.
+// forbidPidfd traps the pidfd calls in every thread, and answers clone3
+// with ENOSYS.
 func forbidPidfd() {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
@@ -93,9 +98,10 @@ func forbidPidfd() {
 		{Code: unix.BPF_LD | unix.BPF_W | unix.BPF_ABS, K: 0}, // seccomp_data.nr
 		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 3, K: unix.SYS_PIDFD_OPEN},
 		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 2, K: unix.SYS_PIDFD_SEND_SIGNAL},
-		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 1, K: unix.SYS_CLONE3},
+		{Code: unix.BPF_JMP | unix.BPF_JEQ | unix.BPF_K, Jt: 2, K: unix.SYS_CLONE3},
 		{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_ALLOW},
 		{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_TRAP},
+		{Code: unix.BPF_RET | unix.BPF_K, K: unix.SECCOMP_RET_ERRNO | uint32(unix.ENOSYS)},
 	}
 	prog := unix.SockFprog{Len: uint16(len(filter)), Filter: &filter[0]}
 	if err := unix.Prctl(unix.PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0); err != nil {

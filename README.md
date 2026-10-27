@@ -6,7 +6,7 @@ A VPN client for Windows and Android. Pick a location, press the button, and it 
 
 - **Locations:** the fastest location overall, or any location with servers available, each shown with its server count and best ping.
 - **Instant failover:** a connection holds a group of servers in one location behind a selector. The server in use is watched continuously, backups are checked in the background, and a drop switches to the best backup without restarting anything.
-- **Protocols:** automatic, or a fixed choice of VLESS, VMess, Trojan, Shadowsocks, Hysteria 2, TUIC, AnyTLS, WireGuard or OpenVPN.
+- **Protocols:** automatic, or a fixed choice of VLESS, VMess, Trojan, Shadowsocks, Hysteria 2, Hysteria, TUIC, AnyTLS, WireGuard, AmneziaWG, OpenVPN, SSH, NaiveProxy, Juicity, Mieru, Brook, WStunnel, SOCKS5, HTTP, Cloudflare WARP or Tor.
 - **Bypass local sites:** open the sites of one region (China or Iran) directly instead of through the VPN. Besides domain and address lists, names the VPN carries are looked up and added to a list of the region's sites as they are found.
 - **Secure by default:** plain HTTP, FTP, Telnet and unprotected mail ports are refused, because whoever carries them can read them (a setting turns this off). On Android a shortcut opens the system's *Always-on VPN* and *Block connections without VPN* switches.
 - **Accounts:** users sign in with a username and password; each account can have a data allowance, a time allowance, a renewal period and an end date, managed from a website (see [backend/README.md](backend/README.md)).

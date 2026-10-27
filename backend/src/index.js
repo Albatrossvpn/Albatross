@@ -92,6 +92,7 @@ async function route(request, env, url) {
     case "GET admin/users": return adminList(request, env, url);
     case "POST admin/users": return adminCreate(request, env);
     case "POST admin/users/bulk": return adminBulk(request, env);
+    case "GET admin/listkeys": return adminListKeys(request, env);
     case "GET admin/settings": return adminSettings(request, env);
     case "PUT admin/settings": return adminSaveSettings(request, env);
     case "POST admin/files": return adminPullFile(request, env);
@@ -114,6 +115,8 @@ async function route(request, env, url) {
 // ---------- Helpers ----------
 
 async function body(request) {
+  // A body announced as too large is refused before it is read.
+  if (Number(request.headers.get("Content-Length") || 0) > MAX_BODY) throw new HttpError(413, "Request too large.");
   const text = await request.text();
   if (text.length > MAX_BODY) throw new HttpError(413, "Request too large.");
   try {
@@ -443,6 +446,9 @@ async function signup(request, env) {
   if (!checkUsername(username)) throw new HttpError(400, "Choose a username of 3 to 32 letters, digits, dots, dashes or underscores.");
   if (!checkPassword(password)) throw new HttpError(400, "Choose a password of at least 8 characters.");
 
+  // Every attempt counts, the ones turned away as taken too: otherwise the
+  // answers could be used to learn which usernames exist, without limit.
+  await count(env, ip, 3600);
   const t = now();
   const days = Number(s.default_valid_days);
   try {
@@ -456,7 +462,6 @@ async function signup(request, env) {
     if (/UNIQUE/i.test(String(e))) throw new HttpError(409, "That username is taken.");
     throw e;
   }
-  await count(env, ip, 3600);
   const user = await userByName(env, username);
   return json({ token: await session(env, user), account: accountOf(user, t) }, 201);
 }
@@ -490,11 +495,24 @@ async function listKeys(request, env) {
   const { user } = await authUser(request, env);
   const a = await viewOf(env, user, deviceOf(request), now());
   if (!a.allowed) return json({ keys: [], reason: a.reason });
-  const keys = (await storedListKeys(env))
+  return json({ keys: await recentListKeys(env), reason: "" });
+}
+
+/**
+ * The same keys for the administrator: the tester inside the country
+ * (deploy/tester) opens the sealed lists with them and seals the hot.txt it
+ * publishes with the newest.
+ */
+async function adminListKeys(request, env) {
+  await authAdmin(request, env);
+  return json({ keys: await recentListKeys(env), reason: "" });
+}
+
+async function recentListKeys(env) {
+  return (await storedListKeys(env))
     .filter((k) => Number.isSafeInteger(k.id) && typeof k.key === "string" && /^[0-9a-f]{64}$/.test(k.key))
     .sort((x, y) => y.id - x.id)
     .slice(0, LIST_KEYS_GIVEN);
-  return json({ keys, reason: "" });
 }
 
 /**
@@ -900,6 +918,11 @@ async function adminPublishCrowd(request, env) {
   return json({ servers: Object.keys(summary.servers).length });
 }
 const CROWD_DAYS = 14;
+// Reports from one address in a day. The app reports only through the VPN,
+// so a server's users all share its exit address (the project's own
+// servers many of them): the cap must hold that crowd, and still keep one
+// address from drowning the rest.
+const CROWD_REPORTS_PER_ADDRESS = 60;
 // An operator's numbers are published only once this many reports came in,
 // so no one report can be told apart.
 const CROWD_MIN_REPORTS = 3;
@@ -934,7 +957,7 @@ async function crowdReport(request, env) {
     srows.push([key, Math.round(ok * scale), Math.round(n * scale)]);
   }
   const limit = "stats:" + (await clientTag(request, env));
-  if (await blocked(env, limit, 6, DAY)) throw new HttpError(429, "Too many reports.");
+  if (await blocked(env, limit, CROWD_REPORTS_PER_ADDRESS, DAY)) throw new HttpError(429, "Too many reports.");
   await count(env, limit, DAY);
   const day = Math.floor(now() / DAY);
   const stmts = rows.map(([kind, code, ok, n]) =>

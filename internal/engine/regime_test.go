@@ -6,6 +6,7 @@ import (
 
 	"github.com/Albatrossvpn/vp/internal/node"
 	"github.com/Albatrossvpn/vp/internal/pool"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 func TestRegimeClassify(t *testing.T) {
@@ -104,5 +105,25 @@ func TestCanGetOut(t *testing.T) {
 	}
 	if !canGetOut(regimeNational, regimeProbe{UDP53: true}, e(hy53, pool.FlagUDP)) || canGetOut(regimeNational, regimeProbe{}, e(hy53, pool.FlagUDP)) {
 		t.Error("port 53 depends on UDP 53 getting out")
+	}
+}
+
+// Only the project's own lists can name a relay: a public server called
+// "x-relay" is no relay, while an address inside the country always is one.
+func TestRelayByNameOnlyFromOwnLists(t *testing.T) {
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}, Version: "1.0.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	named := &node.Node{Proto: "vless", Server: "192.0.2.10", Port: 443, Name: "fast-relay"}
+	if e.domesticEndpoint(named, false) {
+		t.Error("a public server named as a relay was taken for one")
+	}
+	if !e.domesticEndpoint(named, true) {
+		t.Error("a relay in the own list was not taken for one")
+	}
+	if len(e.irRanges) > 0 && !e.domesticEndpoint(&node.Node{Proto: "vless", Server: "5.160.0.1", Port: 443}, false) {
+		t.Error("an address inside the country was not taken for one")
 	}
 }

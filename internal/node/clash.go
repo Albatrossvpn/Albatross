@@ -189,6 +189,11 @@ func clashProxy(raw map[string]any) *Node {
 		if tlsOn {
 			return nil
 		}
+	case "http":
+		// With tls: true, an HTTPS proxy.
+		n.Proto = "http"
+		n.Username = p.s("username")
+		n.Password = p.s("password")
 	case "wireguard":
 		n.Proto = "wireguard"
 		n.PrivateKey = p.s("private-key")

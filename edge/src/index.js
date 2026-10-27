@@ -70,35 +70,40 @@ async function tcp(ws, reader, h, reply, relayList) {
     const t = relayTarget(r, h.port);
     if (t) targets.push(t);
   }
-  let sock = null;
   let writer = null;
   let pending = h.rest.length ? [h.rest] : [];
-  // Bytes from the app go to whatever socket is current.
+  // Bytes from the app go to whatever socket is current. A write the
+  // socket refuses (it failed) is dropped and the pump goes on, so the
+  // next way still gets what the app sends after.
   const pump = (async () => {
     for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
-      if (writer) await writer.write(value);
+      if (writer) await writer.write(value).catch(() => {});
       else pending.push(value);
     }
     if (writer) await writer.close().catch(() => {});
   })();
   for (let i = 0; i < targets.length && ws.readyState === 1; i++) {
+    let sock;
     try {
       sock = connect(targets[i]);
       await sock.opened;
     } catch {
-      sock = null;
       continue;
     }
-    writer = sock.writable.getWriter();
-    for (const p of pending) await writer.write(p);
+    // What waited is queued in one go, before the pump can write to this
+    // socket, so the bytes keep their order.
+    const w = sock.writable.getWriter();
+    const queued = pending.map((p) => w.write(p));
     pending = [];
-    const got = await toClient(sock, ws, reply);
-    if (got) break;
-    // Nothing came back (a site behind Cloudflare, or a dead address): try the next way.
-    try { writer.releaseLock(); } catch {}
+    writer = w;
+    const sent = await Promise.all(queued).then(() => true, () => false);
+    if (sent && (await toClient(sock, ws, reply))) break;
+    // Nothing came back (a site behind Cloudflare, or a dead address), or
+    // the socket failed under the first bytes: try the next way.
     writer = null;
+    try { w.releaseLock(); } catch {}
     try { sock.close(); } catch {}
     pending = h.rest.length ? [h.rest] : [];
   }

@@ -50,6 +50,8 @@ jobs:
           if [ -n "$CLOUDFLARE_API_TOKEN" ]; then
             npx wrangler r2 object get albatross-files/list/servers/crowd.json --file "$RUNNER_TEMP/crowd.json" --remote || echo "::warning::no crowd.json yet"
             npx wrangler r2 object get albatross-files/list/servers/iran.json --file "$RUNNER_TEMP/iran.json" --remote || echo "::warning::no report from a tester inside the country yet (deploy/tester)"
+            # The keys that open the sealed lists and seal the new hot.txt.
+            npx wrangler r2 object get albatross-files/private/listkeys.json --file "$RUNNER_TEMP/listkeys.json" --remote || echo "::warning::no list keys yet"
           fi
       - name: Cores
         env:
@@ -68,26 +70,33 @@ jobs:
           GLOBALPING_TOKEN: ${{ secrets.GLOBALPING_TOKEN }}
           # Tags of the project's own probes inside the country (dashboard), comma separated.
           GLOBALPING_TAGS: ${{ vars.GLOBALPING_TAGS }}
+          LISTS_PLAIN: ${{ vars.LISTS_PLAIN }}
         run: |
-          cat published/hot.txt published/fresh.txt 2>/dev/null | head -n 4000 > "$RUNNER_TEMP/try.txt"
-          go run ./cmd/collect -hot-from "$RUNNER_TEMP/try.txt" -real 1500 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" -out published
+          # The lists are sealed (the plain copies exist only while
+          # LISTS_PLAIN is 1); the collector opens them with the keys and
+          # seals hot.txt with the newest.
+          go run ./cmd/collect -hot-from published/hot.txt.sealed,published/fresh.txt.sealed,published/hot.txt,published/fresh.txt \
+            -keys "$RUNNER_TEMP/listkeys.json" -plain="${LISTS_PLAIN:-0}" -real 1500 -crowd "$RUNNER_TEMP/crowd.json,$RUNNER_TEMP/iran.json" -out published
       - name: Publish
         working-directory: published
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add hot.txt
+          files=()
+          for f in hot.txt.sealed hot.txt; do [ -f "$f" ] && files+=("$f"); done
+          [ ${#files[@]} -gt 0 ] || exit 0
+          git add "${files[@]}"
           git diff --cached --quiet && exit 0
           git commit -qm "Hot servers $(date -u +%Y-%m-%dT%H:%MZ)"
           # A full collection may have replaced the branch meanwhile: put
           # this hot.txt on top of the new one.
           url="https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          cp hot.txt "$RUNNER_TEMP/hot.txt"
-          for try in 1 2 3; do
+          mkdir -p "$RUNNER_TEMP/hot" && cp "${files[@]}" "$RUNNER_TEMP/hot/"
+          for _ in 1 2 3; do
             git push -q "$url" HEAD:servers && exit 0
             git fetch -q "$url" servers && git reset -q --hard FETCH_HEAD
-            cp "$RUNNER_TEMP/hot.txt" hot.txt
-            git add hot.txt
+            cp "${files[@]/#/$RUNNER_TEMP/hot/}" .
+            git add "${files[@]}"
             git diff --cached --quiet && exit 0
             git commit -qm "Hot servers $(date -u +%Y-%m-%dT%H:%MZ)"
           done
@@ -98,4 +107,8 @@ jobs:
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: bash deploy/files/publish-lists.sh "$(bash build/account-url.sh | cut -d, -f1)" servers published/hot.txt
+        run: |
+          files=()
+          for f in hot.txt.sealed hot.txt; do [ -f "published/$f" ] && files+=("published/$f"); done
+          [ ${#files[@]} -gt 0 ] || exit 0
+          bash deploy/files/publish-lists.sh "$(bash build/account-url.sh | cut -d, -f1)" servers "${files[@]}"

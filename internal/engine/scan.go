@@ -27,11 +27,19 @@ type scanState struct {
 	Found        int       `json:"found"`
 	Testing      int       `json:"testing"`
 	recent       []time.Time
+	// shardAt is when a long-tail list was last downloaded (shards.go);
+	// exhausted, when the scan last ran out of servers to test while none
+	// worked, zero since it found some.
+	shardAt   time.Time
+	exhausted time.Time
 }
 
+// protoCodes number the protocols in the pool. Every protocol the user may
+// choose needs one: without it a choice tests every protocol.
 var protoCodes = map[string]uint8{
 	"vmess": 1, "vless": 2, "trojan": 3, "shadowsocks": 4, "hysteria2": 5, "hysteria": 6,
 	"tuic": 7, "anytls": 8, "wireguard": 9, "socks": 10, "http": 11, "openvpn": 12, "ssh": 13, "direct": 14,
+	"naive": 15, "juicity": 16, "mieru": 17, "brook": 18, "wstunnel": 19, "amneziawg": 20,
 }
 
 // refreshEvery says how often each kind of source is downloaded again.
@@ -45,10 +53,10 @@ func refreshEvery(s sources.Source, mobile bool) time.Duration {
 		return 30 * time.Minute
 	case s.Hot || s.Delta:
 		return 20 * time.Minute
-	case s.Central && s.Tier == sources.TierDeep && mobile:
-		return 24 * time.Hour
-	case s.Central && s.Tier == sources.TierDeep:
-		return 6 * time.Hour
+	case shard(s):
+		// One at a time, by nextShard.
+		_, age := shardTiming(mobile)
+		return age
 	case s.Central && mobile:
 		// new.txt brings the additions in between.
 		return 8 * time.Hour
@@ -145,15 +153,24 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 	}
 	// A recent copy of the collector's list already holds what the other
 	// built-in sources had; their older copies would only bring back
-	// servers the collector dropped.
+	// servers the collector dropped. Not one this device cannot open.
 	skipBuiltin := false
 	for _, s := range srcs {
-		if s.Central && s.Tier == sources.TierPriority {
-			skipBuiltin = time.Since(e.fetcher.CachedAt(s)) < 24*time.Hour
+		if collection(s) && !s.Hot && !s.Delta && time.Since(e.fetcher.CachedAt(s)) < 24*time.Hour {
+			if text, ok := e.cachedText(s); ok && opens(s, text) {
+				skipBuiltin = true
+			}
 		}
 	}
+	_, shardAge := shardTiming(e.opt.Mobile)
 	for i, s := range srcs {
 		if !s.Enabled || (skipBuiltin && s.Builtin && !s.Central) {
+			continue
+		}
+		if shard(s) && time.Since(e.fetcher.CachedAt(s)) >= shardAge {
+			// Ten megabytes of servers the collector could not confirm,
+			// days old: not worth the parsing, nor the space.
+			e.fetcher.Forget(s)
 			continue
 		}
 		select {
@@ -177,10 +194,6 @@ func (e *Engine) warmStart(states map[uint64][2]uint32) {
 // system right away instead of keeping it for later.
 func releaseMemory() { debug.FreeOSMemory() }
 
-// refreshDue downloads every source whose refresh time has come. The
-// collector's lists go first; while they are reachable they stand in for
-// every other built-in source, which saves the device hundreds of
-// downloads (and Telegram, which is blocked on the direct path anyway).
 // refreshHotNow downloads the hot and new lists at once, for when the
 // servers in use stop answering: the collector may already know better
 // ones.
@@ -195,21 +208,45 @@ func (e *Engine) refreshHotNow() {
 	e.triggerRefill()
 }
 
+// refreshDue downloads every source whose refresh time has come. The
+// collector's lists go first; while they are reachable and open they stand
+// in for every other built-in source, which saves the device hundreds of
+// downloads (and Telegram, which is blocked on the direct path anyway).
 func (e *Engine) refreshDue() {
 	e.refreshSources(true)
 	e.refreshSources(false)
 }
 
-// centralOK reports whether the collector's list was downloaded lately.
+// centralOK reports whether the collector's list was downloaded lately and
+// gave servers: a copy sealed with a key this device lacks (signed out, the
+// keys not fetched yet) gives none, and the other lists are needed then.
 // Callers hold e.mu.
 func (e *Engine) centralOK(now time.Time) bool {
 	for i, s := range e.srcs {
-		if s.Central && s.Enabled && s.Tier == sources.TierPriority {
+		if collection(s) && s.Enabled {
 			st := e.srcStats[i]
-			return st.LastError == "" && !st.Fetched.IsZero() && now.Sub(st.Fetched) < 6*time.Hour
+			if st.LastError == "" && !st.Fetched.IsZero() && now.Sub(st.Fetched) < 6*time.Hour && st.Nodes > 0 {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// collection says whether s is one of the collector's lists of what it
+// collected (hot, new and fresh), not of the project's own servers.
+func collection(s sources.Source) bool {
+	return s.Central && s.Tier == sources.TierPriority && !s.Sealed
+}
+
+// opens says whether this device can open a copy of the list s: a keyed
+// one only with its key.
+func opens(s sources.Source, text string) bool {
+	if !s.Keyed {
+		return text != ""
+	}
+	id, ok := sources.KeyedID(text)
+	return ok && haveListKey(id)
 }
 
 func (e *Engine) refreshSources(central bool) {
@@ -236,7 +273,16 @@ func (e *Engine) refreshSources(central bool) {
 			due = append(due, i)
 			continue
 		}
+		if shard(s) {
+			continue
+		}
 		if now.Sub(st.Fetched) >= refreshEvery(s, e.opt.Mobile) {
+			due = append(due, i)
+		}
+	}
+	if central {
+		if i := e.nextShard(now, shut); i >= 0 {
+			e.scan.shardAt = now
 			due = append(due, i)
 		}
 	}
@@ -345,6 +391,11 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 	// still sealed with the build key.
 	if s.Keyed {
 		if text = e.openKeyed(text); text == "" {
+			// No servers came from this copy (centralOK); it is read
+			// again once the key is here (rereadKeyed).
+			e.mu.Lock()
+			e.srcStats[idx].Nodes = 0
+			e.mu.Unlock()
 			return 0
 		}
 	}
@@ -393,7 +444,7 @@ func (e *Engine) ingest(idx int, s sources.Source, text string, states map[uint6
 		if s.Sealed {
 			en.Flags |= pool.FlagOwn
 		}
-		if e.domesticEndpoint(n) {
+		if e.domesticEndpoint(n, s.Sealed) {
 			en.Flags |= pool.FlagDomestic
 		}
 		if isPlain(n) {
@@ -714,6 +765,7 @@ func (e *Engine) scanLoop() {
 		size, chunk, _ := e.scanPace()
 		batch := e.pickBatch(size)
 		if len(batch) == 0 {
+			e.noneLeft()
 			select {
 			case <-e.ctx.Done():
 				return
@@ -722,6 +774,9 @@ func (e *Engine) scanLoop() {
 			}
 			continue
 		}
+		e.mu.Lock()
+		e.scan.exhausted = time.Time{}
+		e.mu.Unlock()
 		e.runBatch(batch, chunk)
 		done := time.Now()
 		// Wake-ups (a new target, a connect request, new candidates) end the
@@ -1035,7 +1090,7 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 		p.LastTest = pool.Minutes(now)
 		own = p.Flags&pool.FlagOwn != 0
 	})
-	domestic := e.domesticEndpoint(n)
+	domestic := e.domesticEndpoint(n, own)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.httpsOK = now
@@ -1149,9 +1204,11 @@ func canGetOut(r regime, p regimeProbe, en *pool.Entry) bool {
 // no longer parses), so it is neither offered nor rechecked again.
 func (e *Engine) forget(key uint64) {
 	e.mu.Lock()
-	defer e.mu.Unlock()
-	if s := e.good[key]; s != nil {
-		delete(e.good, key)
+	s := e.good[key]
+	delete(e.good, key)
+	e.mu.Unlock()
+	// After the lock: logf takes it too.
+	if s != nil {
 		e.logf("info", "Server %s is no longer usable here and was removed.", s.Name)
 	}
 }

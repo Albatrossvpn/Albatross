@@ -25,14 +25,17 @@ const (
 	KindSubscription Kind = "sub"      // a URL serving links, base64 or Clash YAML
 	KindTelegram     Kind = "telegram" // a public channel read via t.me/s/
 	KindVPNGate      Kind = "vpngate"  // the VPN Gate OpenVPN server list
-	KindLEAP         Kind = "leap"     // a LEAP provider (Riseup, Calyx): OpenVPN with an anonymous certificate
+	KindLEAP         Kind = "leap"     // a LEAP provider (Riseup): OpenVPN with an anonymous certificate
+	KindFeed         Kind = "feed"     // an RSS or Atom feed (a channel's videos): the lists its newest entries link to
 )
 
 // leapProviders are the LEAP providers the app knows, by API address: the
-// address of their CA certificate (provider.json's ca_cert_uri).
+// address of their CA certificate (provider.json's ca_cert_uri). Calyx was
+// one: its API name (api.calyx.net, in the provider file of its last
+// release, 2023) no longer has an address, calyx.net:4430 does not answer,
+// and its CA address answers 404.
 var leapProviders = map[string]string{
 	"https://api.black.riseup.net": "https://black.riseup.net/ca.crt",
-	"https://api.calyx.net:4430":   "https://calyx.net/ca.crt",
 }
 
 // LEAPName is the provider's short name ("riseup") for an API address.
@@ -107,6 +110,12 @@ var telegramList string
 
 //go:embed lists/telegram-extra.txt
 var telegramExtraList string
+
+//go:embed lists/extra.txt
+var extraList string
+
+//go:embed lists/feeds.txt
+var feedList string
 
 // snapshotGz is a copy of the collector's fresh.txt taken when the app
 // was built (CI replaces the empty placeholder), so a first start under
@@ -316,11 +325,18 @@ func gcm(key []byte) (cipher.AEAD, error) {
 }
 
 // Collected returns every source the collector reads: the built-in ones
-// and Telegram channels too many for each app to read itself.
+// and the Telegram channels, lists, dated files and feeds too many for each
+// app to read itself.
 func Collected() []Source {
 	out := Builtin()
 	for _, c := range lines(telegramExtraList) {
 		out = append(out, Source{ID: ID(KindTelegram, c), Kind: KindTelegram, URL: c, Tier: TierPriority, Builtin: true, Enabled: true})
+	}
+	for _, u := range lines(extraList) {
+		out = append(out, Source{ID: ID(KindSubscription, u), Kind: KindSubscription, URL: u, Tier: TierDeep, Builtin: true, Enabled: true})
+	}
+	for _, u := range lines(feedList) {
+		out = append(out, Source{ID: ID(KindFeed, u), Kind: KindFeed, URL: u, Tier: TierDeep, Builtin: true, Enabled: true})
 	}
 	return out
 }
@@ -350,7 +366,7 @@ func Builtin() []Source {
 		out = append(out, Source{ID: ID(kind, url), Kind: kind, URL: url, Tier: tier, Builtin: true, Enabled: true})
 	}
 	add(KindVPNGate, vpnGateURL, TierPriority)
-	for _, api := range []string{"https://api.black.riseup.net", "https://api.calyx.net:4430"} {
+	for _, api := range []string{"https://api.black.riseup.net"} {
 		add(KindLEAP, api, TierPriority)
 	}
 	for _, u := range lines(priorityList) {

@@ -135,3 +135,29 @@ func TestEngineEndToEnd(t *testing.T) {
 		t.Fatal("proxy port still open after disconnect")
 	}
 }
+
+// Where the cores ask the system's resolver (Windows), they keep doing so:
+// the network's resolver goes to DNS tunnels only, read as the network is
+// now. A resolver the app is given (Android) serves both.
+func TestNetworkDNSOnlyForTunnels(t *testing.T) {
+	network := "192.0.2.53"
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}, AccountURLs: []string{}, NetworkDNS: func() string { return network }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	tt := e.newTester()
+	if tt.LocalDNS != "" || tt.TunnelDNS != "192.0.2.53" {
+		t.Fatalf("tester resolvers: local %q, tunnel %q", tt.LocalDNS, tt.TunnelDNS)
+	}
+	network = "198.51.100.53"
+	if got := e.tunnelDNS(); got != network {
+		t.Fatalf("tunnel resolver after a network change = %q", got)
+	}
+	e.mu.Lock()
+	e.localDNS = "203.0.113.53" // as SetLocalDNS, without the network check it starts
+	e.mu.Unlock()
+	if got := e.tunnelDNS(); got != "203.0.113.53" {
+		t.Fatalf("tunnel resolver with a local one given = %q", got)
+	}
+}

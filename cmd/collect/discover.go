@@ -201,14 +201,17 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 
 	// What is known already: never reported again, but read for mentions.
 	var knownSubs, knownTG []string
+	known := map[string]bool{}
 	for _, s := range sources.Collected() {
 		switch s.Kind {
 		case sources.KindSubscription:
 			d.seenSub[canonical(s.URL)] = true
 			knownSubs = append(knownSubs, s.URL)
+			known[s.URL], known[canonical(s.URL)] = true, true
 		case sources.KindTelegram:
 			d.seenTG[strings.ToLower(s.URL)] = true
 			knownTG = append(knownTG, strings.ToLower(s.URL))
+			known[strings.ToLower(s.URL)] = true
 		}
 	}
 	log.Printf("discover: %d subscriptions and %d channels known", len(knownSubs), len(knownTG))
@@ -302,17 +305,7 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 		add(ns, nc)
 	}
 
-	// Previously found sources the clock ran out on stay as they were.
-	for _, u := range prevSubs {
-		if !d.tried(u) {
-			d.carry(sources.Source{Kind: sources.KindSubscription, URL: u}, false)
-		}
-	}
-	for _, c := range prevTG {
-		if !d.tried(strings.ToLower(c)) {
-			d.carry(sources.Source{Kind: sources.KindTelegram, URL: strings.ToLower(c)}, false)
-		}
-	}
+	d.carryRest(prevSubs, prevTG, known)
 	d.subs, d.channels = uniq(d.subs), uniq(d.channels)
 	write := func(name string, lines []string, comment string) {
 		b := comment + "\n" + strings.Join(lines, "\n") + "\n"
@@ -333,6 +326,26 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 	b, _ := json.MarshalIndent(meta, "", "  ")
 	os.WriteFile(filepath.Join(dir, "discover.json"), append(b, '\n'), 0o644)
 	log.Printf("discover: kept %d subscriptions and %d channels", len(d.subs), len(d.channels))
+}
+
+// carryRest keeps the previous run's sources that this run did not get to
+// check (the clock ran out) as they were. One now among the shipped lists
+// (known) is not reported again, and one that cannot be a candidate any
+// more (canonicalPage refuses it) counts as a miss each run, so it goes in
+// the end instead of being carried unchecked for ever.
+func (d *discoverer) carryRest(prevSubs, prevTG []string, known map[string]bool) {
+	for _, u := range prevSubs {
+		c := canonicalPage(u)
+		if known[u] || known[c] || d.tried(u) || c != "" && d.tried(c) {
+			continue
+		}
+		d.carry(sources.Source{Kind: sources.KindSubscription, URL: u}, c == "")
+	}
+	for _, c := range prevTG {
+		if c = strings.ToLower(c); !known[c] && !d.tried(c) {
+			d.carry(sources.Source{Kind: sources.KindTelegram, URL: c}, false)
+		}
+	}
 }
 
 // fetchAll fetches sources and channels and returns their texts.

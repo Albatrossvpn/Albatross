@@ -659,7 +659,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		byNode[n] = s
 	}
 	if len(nodes) == 0 {
-		return errors.New("no valid servers")
+		return fmt.Errorf("%w: no valid servers", errServers)
 	}
 	// The old connection must release the proxy port first.
 	if old != nil {
@@ -722,7 +722,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		FragmentFor: func(n *node.Node) bool { return fragFor[n] },
 		OnLine:      c.watchLog,
 		LineMbps:    e.net.lineMbps(),
-		LocalDNS:    e.dns(),
+		LocalDNS:    e.tunnelDNS(),
 	}
 	if set.SpoofSNI != "" && e.opt.IsAdmin() {
 		build.Spoof = set.SpoofSNI
@@ -732,15 +732,24 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	run, err := e.rt.Run(ctx, "connect", nodes, build, func(s *core.Set) map[string]any {
 		return connectConfig(s, opts)
 	}, c.proxyAddr)
-	if err != nil {
-		return err
-	}
-	for _, n := range run.Rejected {
-		if s := byNode[n]; s != nil {
-			e.mu.Lock()
-			s.Fails = 3
-			e.mu.Unlock()
+	if run != nil {
+		// Configs a core refused: those servers are not tried again soon,
+		// whether or not the rest of the group started.
+		for _, n := range run.Rejected {
+			if s := byNode[n]; s != nil {
+				e.mu.Lock()
+				s.Fails = 3
+				e.mu.Unlock()
+			}
 		}
+	}
+	if err != nil {
+		if run != nil {
+			// Every server of the group was refused or could not start: the
+			// servers failed, not the local setup, so the next group is tried.
+			return fmt.Errorf("%w: %v", errServers, err)
+		}
+		return err
 	}
 	c.running = run
 	// The API that switches servers can come up a moment after the proxy

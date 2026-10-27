@@ -55,6 +55,9 @@ type Tester struct {
 	// LocalDNS resolves server names where the core cannot ask the system
 	// (Android); empty means the system's resolver.
 	LocalDNS string
+	// TunnelDNS is the resolver DNS tunnels send their queries through
+	// (core.BuildOptions.LocalDNS); empty means LocalDNS.
+	TunnelDNS string
 	// Mobile builds configs for the Android app: no auto_detect_interface.
 	// sing-box watches the interfaces over netlink for it, which Android
 	// denies to apps, and then refuses to start. The app is left out of its
@@ -148,7 +151,7 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 	}
 	port := ports[0]
 	pass := randomHex(8)
-	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof, LineMbps: t.LineMbps, LocalDNS: t.LocalDNS}
+	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof, LineMbps: t.LineMbps, LocalDNS: t.tunnelDNS()}
 	run, err := t.Runtime.Run(ctx, name, nodes, opts, func(s *core.Set) map[string]any {
 		return testConfig(s, port, pass, t.LocalDNS, t.Mobile)
 	}, "127.0.0.1:"+strconv.Itoa(port))
@@ -196,9 +199,9 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 			proxy := &url.URL{Scheme: "http", User: url.UserPassword(tag, pass), Host: "127.0.0.1:" + strconv.Itoa(port)}
 			limit := timeout
 			switch {
-			case n.Engine() == node.EngineWarpPlus, n.DNSTunnel():
-				// warp-plus negotiates first; a DNS tunnel moves
-				// a few hundred bytes per query.
+			case n.Engine() == node.EngineWarpPlus, n.Engine() == node.EngineSidecar, n.DNSTunnel():
+				// warp-plus and the sidecars negotiate first; a DNS
+				// tunnel moves a few hundred bytes per query.
 				limit = 3 * timeout
 			case n.ICMP():
 				limit = 2 * timeout
@@ -229,7 +232,7 @@ func (t *Tester) Through(ctx context.Context, name string, nodes []*node.Node, t
 	}
 	port := ports[0]
 	pass := randomHex(8)
-	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof, LineMbps: t.LineMbps, LocalDNS: t.LocalDNS}
+	opts := core.BuildOptions{Fragment: t.Fragment, FragmentFor: t.FragmentFor, Spoof: t.Spoof, LineMbps: t.LineMbps, LocalDNS: t.tunnelDNS()}
 	run, err := t.Runtime.Run(ctx, name, nodes, opts, func(s *core.Set) map[string]any {
 		return testConfig(s, port, pass, t.LocalDNS, t.Mobile)
 	}, "127.0.0.1:"+strconv.Itoa(port))
@@ -447,6 +450,14 @@ func randomHex(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// tunnelDNS is TunnelDNS, or LocalDNS without one.
+func (t *Tester) tunnelDNS() string {
+	if t.TunnelDNS != "" {
+		return t.TunnelDNS
+	}
+	return t.LocalDNS
 }
 
 // DNSServer is the sing-box resolver for direct lookups: the system's, or

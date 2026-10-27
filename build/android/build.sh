@@ -12,6 +12,13 @@ SINGBOX_VERSION="${SINGBOX_VERSION:-1.14.4}"
 XRAY_VERSION="${XRAY_VERSION:-26.10.21}"
 WARPPLUS_VERSION="${WARPPLUS_VERSION:-1.2.6}"
 USQUE_VERSION="${USQUE_VERSION:-4.2.1}"
+# The sidecar protocols' helpers (internal/node/sidecar.go).
+NAIVE_VERSION="${NAIVE_VERSION:-v154.0.8037.49-5}"
+JUICITY_VERSION="${JUICITY_VERSION:-0.5.0}"
+MIERU_VERSION="${MIERU_VERSION:-3.39.0}"
+BROOK_VERSION="${BROOK_VERSION:-20270101}"
+WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
+WIREPROXY_AWG_REF="${WIREPROXY_AWG_REF:-v1.0.18}"
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
@@ -87,15 +94,68 @@ if bad:
 PY
 }
 
+sysroot="$(dirname "$ndkbin")/sysroot/usr/lib"
+
+# api_have <abi> prints the path of a file listing what Android $api's libc
+# and system libraries define (the NDK's stubs for that version), made once.
+api_have() {
+  local abi="$1" triple have="$tmp/have-$1"
+  case "$abi" in
+    arm64-v8a) triple=aarch64-linux-android ;;
+    armeabi-v7a) triple=arm-linux-androideabi ;;
+    x86_64) triple=x86_64-linux-android ;;
+    *) echo "unexpected ABI $abi" >&2; return 1 ;;
+  esac
+  if [ ! -s "$have" ]; then
+    "$ndkbin/llvm-nm" -D --defined-only "$sysroot/$triple/$api"/lib{c,dl,log,m,z,android,EGL,GLESv2,jnigraphics}.so |
+      awk 'NF > 1 {sub(/@.*/, "", $NF); print $NF}' | sort -u > "$have"
+  fi
+  echo "$have"
+}
+
+# missing_symbols <abi> <library> prints what the library calls that Android
+# $api does not have.
+missing_symbols() {
+  local have
+  have="$(api_have "$1")"
+  { "$ndkbin/llvm-nm" -D --undefined-only "$2" 2> /dev/null || true; } |
+    awk '$1 == "U" {sub(/@.*/, "", $2); print $2}' | sort -u | comm -23 - "$have"
+}
+
+# ship_prebuilt <file> <name> <abi> keeps a helper we only downloaded when
+# it can run on every phone the app supports, and otherwise leaves it out of
+# the APK, so one helper does not stop the whole build: phones with 16 KB
+# pages refuse a library linked for 4 KB pages, and the oldest phone (Android
+# $api) lacks functions a newer build calls. The protocol then shows as not
+# installed on that ABI and everything else still ships. (Building the helper
+# from source against Android $api would fix it.)
+ship_prebuilt() {
+  local missing
+  if ! check_alignment "$1" 2>/dev/null; then
+    echo "not shipped: $2 for $3 is linked for 4 KB pages, which phones with 16 KB pages refuse to load" >&2
+    rm -f "$1"
+    return 1
+  fi
+  missing="$(missing_symbols "$3" "$1" | tr '\n' ' ')"
+  if [ -n "$missing" ]; then
+    echo "not shipped: $2 for $3 calls what Android $api lacks: $missing" >&2
+    rm -f "$1"
+    return 1
+  fi
+  return 0
+}
+
 # smoke <name> <binary> <args...> runs a core built for this machine from
 # the same source and Go as the phone's, and fails the build if it crashes
 # at start (a dependency that checks Go's internals panics before main).
 smoke() {
-  local name="$1" out
+  local name="$1" out rc=0
   shift
-  out="$("$@" 2>&1 || true)"
-  if [ -z "$out" ] || printf '%s' "$out" | grep -qE 'panic:|fatal error:'; then
-    echo "$name crashes at start:" >&2
+  out="$("$@" 2>&1)" || rc=$?
+  # 126 and 127: the file could not be run at all (not an executable, or
+  # missing), for example a library package built by mistake.
+  if [ "$rc" = 126 ] || [ "$rc" = 127 ] || [ -z "$out" ] || printf '%s' "$out" | grep -qE 'panic:|fatal error:'; then
+    echo "$name crashes at start (exit $rc):" >&2
     printf '%s\n' "$out" | head -20 >&2
     exit 1
   fi
@@ -136,6 +196,60 @@ usqsrc() {
     smoke usque "$tmp/usque-host" --help
   fi
   echo "$src"
+}
+
+# gosrc <name> <repo> <ref> <package> clones a Go program's source once and
+# checks that a build for this machine starts (see smoke).
+gosrc() {
+  local src="$tmp/$1-src"
+  if [ ! -d "$src" ]; then
+    git clone -q --depth 1 --branch "$3" "$gh/$2" "$src"
+    (cd "$src" && CGO_ENABLED=0 GOTOOLCHAIN=auto go build -trimpath -buildvcs=false -o "$tmp/$1-host" "$4")
+    smoke "$1" "$tmp/$1-host" --help
+  fi
+  echo "$src"
+}
+
+# sidecars <abi> builds or unpacks the helpers of the sidecar protocols
+# for one ABI. The Go ones are built from source for every ABI (as Xray,
+# some depend on libraries that link into the standard library's
+# internals, hence -checklinkname=0); NaiveProxy comes out of its own
+# Android plugin package (a Chromium build), and WStunnel (Rust)
+# publishes a 64-bit ARM Android build only.
+sidecars() {
+  local abi="$1" out="$jni/$1" src
+  local lic="$app/src/main/assets/licenses"
+  fetch "$gh/klzgrad/naiveproxy/releases/download/$NAIVE_VERSION/naiveproxy-plugin-$NAIVE_VERSION-$abi.apk" "$dl/naive-$NAIVE_VERSION-$abi.apk"
+  rm -rf "$tmp/naive-$abi" && mkdir -p "$tmp/naive-$abi"
+  unzip -q -o "$dl/naive-$NAIVE_VERSION-$abi.apk" "lib/$abi/libnaive.so" -d "$tmp/naive-$abi"
+  cp "$tmp/naive-$abi/lib/$abi/libnaive.so" "$out/libnaive.so"
+  if ship_prebuilt "$out/libnaive.so" NaiveProxy "$abi"; then
+    printf 'NaiveProxy (https://github.com/klzgrad/naiveproxy) is under the BSD 3-Clause license.\n' > "$lic/naiveproxy-LICENSE.txt"
+  fi
+  src="$(gosrc juicity juicity/juicity "v$JUICITY_VERSION" ./cmd/client)"
+  (cd "$src" && gobuild "$abi" "$out/libjuicityclient.so" -ldflags "-s -w -checklinkname=0" ./cmd/client)
+  cp "$src/LICENSE" "$lic/juicity-LICENSE.txt" 2>/dev/null || printf 'Juicity (https://github.com/juicity/juicity) is under the GNU AGPL v3; its source is at that address.\n' > "$lic/juicity-LICENSE.txt"
+  src="$(gosrc mieru enfein/mieru "v$MIERU_VERSION" ./cmd/mieru)"
+  (cd "$src" && gobuild "$abi" "$out/libmieru.so" -ldflags "-s -w -checklinkname=0" ./cmd/mieru)
+  cp "$src/LICENSE" "$lic/mieru-LICENSE.txt" 2>/dev/null || printf 'Mieru (https://github.com/enfein/mieru) is under the GNU GPL v3; its source is at that address.\n' > "$lic/mieru-LICENSE.txt"
+  src="$(gosrc brook txthinking/brook "v$BROOK_VERSION" ./cli/brook)"
+  (cd "$src" && gobuild "$abi" "$out/libbrook.so" -ldflags "-s -w -checklinkname=0" ./cli/brook)
+  cp "$src/LICENSE" "$lic/brook-LICENSE.txt" 2>/dev/null || printf 'Brook (https://github.com/txthinking/brook) is under the GNU GPL v3; its source is at that address.\n' > "$lic/brook-LICENSE.txt"
+  # The program is in cmd/wireproxy; the repository's root is a library, and
+  # building it writes an archive that is not an executable.
+  src="$(gosrc wireproxy-awg artem-russkikh/wireproxy-awg "$WIREPROXY_AWG_REF" ./cmd/wireproxy)"
+  (cd "$src" && gobuild "$abi" "$out/libwireproxyawg.so" -ldflags "-s -w -checklinkname=0" ./cmd/wireproxy)
+  cp "$src/LICENSE" "$lic/wireproxy-awg-LICENSE.txt"
+  if [ "$abi" = arm64-v8a ]; then
+    fetch "$gh/erebe/wstunnel/releases/download/v$WSTUNNEL_VERSION/wstunnel_${WSTUNNEL_VERSION}_android_arm64.tar.gz" "$dl/wstunnel-$WSTUNNEL_VERSION-android.tgz"
+    rm -rf "$tmp/wst-$abi" && mkdir -p "$tmp/wst-$abi"
+    tar -xzf "$dl/wstunnel-$WSTUNNEL_VERSION-android.tgz" -C "$tmp/wst-$abi"
+    cp "$(find "$tmp/wst-$abi" -type f -name wstunnel | head -1)" "$out/libwstunnel.so"
+    if ship_prebuilt "$out/libwstunnel.so" WStunnel "$abi"; then
+      printf 'WStunnel (https://github.com/erebe/wstunnel) is under the BSD 3-Clause license.\n' > "$lic/wstunnel-LICENSE.txt"
+    fi
+  fi
+  chmod 755 "$out"/*.so
 }
 
 # sing-box's own Android builds are linked for 4 KB memory pages, which
@@ -190,6 +304,7 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
   us="$(usqsrc)"
   (cd "$us" && gobuild "$abi" "$out/libusque.so" -ldflags "-s -w" .)
   cp "$us/LICENSE.md" "$app/src/main/assets/licenses/usque-LICENSE.txt"
+  sidecars "$abi"
   chmod 755 "$out"/*.so
 }
 cores arm64-v8a arm64 Xray-android-arm64-v8a.zip warp-plus_android-arm64.zip
@@ -254,27 +369,32 @@ cp app/build/outputs/apk/release/app-release.apk "$apk"
 
 # Every library in the APK must run on the oldest phone: built for its ABI,
 # needing only the system's libraries, and calling only what Android $api's
-# libc has (the NDK's stubs for that version list it).
+# libc has (the NDK's stubs for that version list it). Every problem is
+# reported before the build fails, not only the first.
 x="$tmp/apk" && rm -rf "$x" && mkdir -p "$x" && unzip -q "$apk" 'lib/*' -d "$x"
-sysroot="$(dirname "$ndkbin")/sysroot/usr/lib"
+# A command that fails here stops the build; say which one, since the checks
+# run in subshells and would otherwise end without a word.
+set -E
+trap 'echo "build.sh line $LINENO failed: $BASH_COMMAND" >&2' ERR
+failed=0
 for dir in "$x"/lib/*; do
   abi="$(basename "$dir")"
   case "$abi" in
-    arm64-v8a) machine=AArch64 triple=aarch64-linux-android ;;
-    armeabi-v7a) machine=ARM triple=arm-linux-androideabi ;;
-    x86_64) machine=X86-64 triple=x86_64-linux-android ;;
+    arm64-v8a) machine=AArch64 ;;
+    armeabi-v7a) machine=ARM ;;
+    x86_64) machine=X86-64 ;;
     *) echo "unexpected ABI $abi in the APK" >&2; exit 1 ;;
   esac
-  have="$tmp/have-$abi"
-  "$ndkbin/llvm-nm" -D --defined-only "$sysroot/$triple/$api"/lib{c,dl,log,m,z,android,EGL,GLESv2,jnigraphics}.so |
-    awk 'NF > 1 {sub(/@.*/, "", $NF); print $NF}' | sort -u > "$have"
   for so in "$dir"/*.so; do
-    "$readelf" -h "$so" | grep -q "Machine:.*$machine" || { echo "$abi/$(basename "$so") is not built for $abi" >&2; exit 1; }
+    name="$abi/$(basename "$so")"
+    "$readelf" -h "$so" | grep -q "Machine:.*$machine" || { echo "$name is not built for $abi" >&2; failed=1; }
     bad="$("$readelf" -d "$so" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | grep -vxE 'lib(c|m|dl|log|z|android|EGL|GLESv2|jnigraphics)\.so' || true)"
-    [ -z "$bad" ] || { echo "$abi/$(basename "$so") needs libraries Android does not have: $bad" >&2; exit 1; }
-    new="$({ "$ndkbin/llvm-nm" -D --undefined-only "$so" 2> /dev/null || true; } | awk '$1 == "U" {sub(/@.*/, "", $2); print $2}' | sort -u | comm -23 - "$have")"
-    [ -z "$new" ] || { echo "$abi/$(basename "$so") calls what Android $api lacks: $new" >&2; exit 1; }
+    [ -z "$bad" ] || { echo "$name needs libraries Android does not have: $bad" >&2; failed=1; }
+    new="$(missing_symbols "$abi" "$so" | tr '\n' ' ')"
+    [ -z "$new" ] || { echo "$name calls what Android $api lacks: $new" >&2; failed=1; }
   done
   echo "$abi: $(ls "$dir" | tr '\n' ' ')"
 done
+trap - ERR
+[ "$failed" = 0 ] || exit 1
 ls -la "$apk"
