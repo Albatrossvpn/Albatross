@@ -56,6 +56,9 @@ jobs:
         run: npm test
       - name: API tests (a local Worker with a local database)
         run: npm run test:api
+      - name: Edge Worker unit tests
+        # The edge has no package of its own; its tests were never run.
+        run: node --test ../edge/test/*.test.mjs
 
   test:
     runs-on: ubuntu-latest
