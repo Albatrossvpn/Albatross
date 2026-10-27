@@ -223,9 +223,7 @@ func (d *discoverer) searchReddit(ctx context.Context, q string) ([]string, erro
 		if c.Data.Permalink != "" {
 			out = append(out, "https://www.reddit.com"+c.Data.Permalink)
 		}
-		for _, m := range textURLRe.FindAllString(html.UnescapeString(c.Data.Selftext), -1) {
-			out = append(out, m)
-		}
+		out = append(out, textURLRe.FindAllString(html.UnescapeString(c.Data.Selftext), -1)...)
 	}
 	return out, nil
 }

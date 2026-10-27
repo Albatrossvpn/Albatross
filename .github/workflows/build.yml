@@ -108,7 +108,8 @@ jobs:
           TOR_BUNDLE: /tmp/cores/torbundle
           E2E_UPSTREAM: direct
         run: |
-          export E2E_HOST_IP="$(hostname -I | awk '{print $1}')"
+          E2E_HOST_IP="$(hostname -I | awk '{print $1}')"
+          export E2E_HOST_IP
           set -o pipefail
           # Nightly: is the bundled Iranian address list still complete?
           if [ "$GITHUB_EVENT_NAME" = schedule ]; then export RIPE_CHECK=1; fi
@@ -124,7 +125,8 @@ jobs:
           XRAY: /tmp/cores/xray
           E2E_UPSTREAM: direct
         run: |
-          export E2E_HOST_IP="$(hostname -I | awk '{print $1}')"
+          E2E_HOST_IP="$(hostname -I | awk '{print $1}')"
+          export E2E_HOST_IP
           go test -c -o /tmp/mobile.test ./mobile
           sudo --preserve-env=SING_BOX,XRAY,E2E_UPSTREAM,E2E_HOST_IP /tmp/mobile.test -test.count=1 -test.v -test.run AndroidPath
 

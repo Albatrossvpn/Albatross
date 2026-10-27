@@ -15,11 +15,6 @@ import (
 	"unicode/utf8"
 )
 
-var schemes = []string{
-	"vmess://", "vless://", "trojan://", "ss://", "ssr://", "hysteria2://", "hy2://", "hysteria://",
-	"tuic://", "wireguard://", "wg://", "anytls://", "socks5://", "socks://", "socks4://",
-}
-
 var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|trojan-go|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|amneziawg|awg|anytls|socks5?|socks4|naive(?:\+https|\+quic)?|juicity|mieru|brook|wstunnel)://`)
 
 // ErrUnsupported marks links that parse but cannot be run by any core.
@@ -791,9 +786,7 @@ func parseWireGuard(link string) (*Node, error) {
 		PreSharedKey:  firstNonEmpty(q["presharedkey"], q["psk"]),
 		MTU:           atoi(q["mtu"]),
 	}
-	for _, a := range splitList(firstNonEmpty(q["address"], q["ip"], q["addresses"])) {
-		n.LocalAddress = append(n.LocalAddress, a)
-	}
+	n.LocalAddress = append(n.LocalAddress, splitList(firstNonEmpty(q["address"], q["ip"], q["addresses"]))...)
 	if r := q["reserved"]; r != "" {
 		n.Reserved = parseReserved(r)
 	}

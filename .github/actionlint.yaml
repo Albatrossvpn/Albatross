@@ -1,0 +1,5 @@
+# actionlint settings: the label of the project's own self-hosted runner
+# (server.yml runs on the relay machine).
+self-hosted-runner:
+  labels:
+    - relay
