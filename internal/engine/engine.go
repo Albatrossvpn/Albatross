@@ -688,15 +688,19 @@ func (e *Engine) Servers(country string, limit int) []ServerInfo {
 }
 
 // domesticEndpoint reports whether a server's address is inside the
-// country: in the country's address ranges, or named as a relay.
-func (e *Engine) domesticEndpoint(n *node.Node) bool {
+// country: in the country's address ranges or, in the project's own sealed
+// lists (own says the server came from one; the relays are there), named
+// as a relay. A name in a public list says nothing: anyone may call a
+// server "x-relay", and a relay jumps the queue when foreign addresses are
+// cut.
+func (e *Engine) domesticEndpoint(n *node.Node, own bool) bool {
 	if n == nil {
 		return false
 	}
 	if a, err := netip.ParseAddr(n.Server); err == nil && ipIn(e.irRanges, a) {
 		return true
 	}
-	return strings.HasSuffix(n.Name, "-relay") || n.Name == "relay"
+	return own && (strings.HasSuffix(n.Name, "-relay") || n.Name == "relay")
 }
 
 // fetchMode is how sources are reached now: as a network where only
