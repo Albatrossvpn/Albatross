@@ -280,8 +280,6 @@ func confirm(passed map[*entry]time.Duration) map[*entry]time.Duration {
 	return out
 }
 
-// checkIran reorders hot by reachability from inside Iran (see iranReach)
-// and returns how many addresses were checked and how many were open.
 // checkIran asks probes inside the country which hot addresses answer
 // there, keeping the answers in iran-tcp.json (read from prevDir, written
 // to outDir) so a run spends its quota on addresses not checked lately.
