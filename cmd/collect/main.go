@@ -278,7 +278,7 @@ func main() {
 	shards := flag.Int("shards", 8, "number of all-N.txt files")
 	probe := flag.Bool("probe", true, "drop servers whose address does not answer")
 	probeConc := flag.Int("probe-concurrency", 1500, "parallel reachability probes")
-	probeMinutes := flag.Int("probe-minutes", 10, "stop probing addresses after this long; the ones not reached in time are left out of this run (the servers seen before and the most shared go first)")
+	probeMinutes := flag.Int("probe-minutes", 10, "stop probing addresses after this long (0: no limit); the ones not reached in time are left out of this run (the servers seen before and the most shared go first)")
 	maxFresh := flag.Int("max-fresh", 60000, "most servers in fresh.txt; the rest go to the other files")
 	limit := flag.Int("limit", 0, "use only the first N sources (for tests)")
 	real := flag.Int("real", 8000, "connect through this many of the fresh servers with the cores in SING_BOX and XRAY; 0 skips")
@@ -643,7 +643,7 @@ func probeAll(list []*entry, conc int, budget time.Duration) (alive map[string]b
 	d := net.Dialer{Timeout: 3 * time.Second}
 	deadline := time.Now().Add(budget)
 	for _, ep := range eps {
-		if time.Now().After(deadline) {
+		if budget > 0 && time.Now().After(deadline) {
 			log.Printf("probe budget spent after %d of %d addresses", probed, len(eps))
 			break
 		}
