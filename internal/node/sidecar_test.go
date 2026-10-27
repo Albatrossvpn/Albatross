@@ -153,7 +153,7 @@ func TestNaiveWithSNI(t *testing.T) {
 func TestSidecarSocksPassword(t *testing.T) {
 	const pass = "0123456789abcdef"
 	for _, c := range []struct{ link, want string }{
-		{"naive+https://u:p@n.example:443#N", `"listen":"socks://albatross:0123456789abcdef@127.0.0.1:1080"`},
+		{"naive+https://u:p@n.example:443#N", `"listen":"socks://albatross:0123456789abcdef@127.0.0.1:1080","log":""`},
 		{"juicity://11111111-1111-1111-1111-111111111111:pw@j.example:443?sni=j.example#J", `"listen":"albatross:0123456789abcdef@127.0.0.1:1080"`},
 		{"mieru://u:p@5.6.7.8:2086?protocol=tcp#M", `"socks5Authentication":[{"password":"0123456789abcdef","user":"albatross"}]`},
 		{"wstunnel://w.example:443?path=secret#W", "socks5://127.0.0.1:1080?login=albatross&password=0123456789abcdef"},
