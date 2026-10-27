@@ -67,7 +67,13 @@ jobs:
             done
             # The keys the lists were sealed with so far (the account
             # service hands them to signed-in users); this run adds one.
-            npx wrangler r2 object get albatross-files/private/listkeys.json --file "$RUNNER_TEMP/listkeys.json" --remote || echo "::notice::no list keys yet; starting the first"
+            # A failed read would start the keys afresh and drop the recent
+            # ones, which copies of the lists still in caches need: retry.
+            for _ in 1 2 3; do
+              npx wrangler r2 object get albatross-files/private/listkeys.json --file "$RUNNER_TEMP/listkeys.json" --remote && break
+              rm -f "$RUNNER_TEMP/listkeys.json"; sleep 10
+            done
+            [ -s "$RUNNER_TEMP/listkeys.json" ] || echo "::notice::no list keys yet; starting the first"
           fi
       - name: Cores
         env:
@@ -103,6 +109,23 @@ jobs:
             -keys "$RUNNER_TEMP/listkeys.json" -keys-out "$RUNNER_TEMP/listkeys.new.json" -plain="${LISTS_PLAIN:-0}"
           # The discovered lists travel with the servers branch too.
           for f in sources.txt channels.txt; do [ -f "$RUNNER_TEMP/$f" ] && cp "$RUNNER_TEMP/$f" "$RUNNER_TEMP/servers/$f"; done; true
+      - name: Store this run's list key
+        # Before any list sealed with it is published (the servers branch
+        # and the project's storage below): the account service hands the
+        # keys to the apps and opens the lists with them for subscriptions,
+        # so a list out before its key reads as empty. The new lists are of
+        # no use to anyone until this is stored, so it must succeed.
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          . deploy/files/lib.sh
+          if have_wrangler; then
+            r2_put private/listkeys.json "$RUNNER_TEMP/listkeys.new.json" "application/json" "no-store"
+            echo "stored this run's list key"
+          else
+            echo "::error::the list keys could not be stored: the Cloudflare credentials are missing"; exit 1
+          fi
       # The collector itself, for a tester inside the country (deploy/tester).
       - name: Build the collector for the tester
         run: |
@@ -146,16 +169,6 @@ jobs:
             for f in hot.txt new.txt fresh.txt all-1.txt all-2.txt all-3.txt all-4.txt all-5.txt all-6.txt all-7.txt all-8.txt own-0.bin own-1.bin own-2.bin own-3.bin own-4.bin; do
               (cd backend && npx wrangler r2 object delete "albatross-files/list/servers/$f" --remote >/dev/null 2>&1) || true
             done
-          fi
-          # The lists' keys, for the account service only: outside list/,
-          # so they are never served as a file. The new lists are of no use
-          # to anyone until this is stored, so it must succeed.
-          . deploy/files/lib.sh
-          if have_wrangler; then
-            r2_put private/listkeys.json "$RUNNER_TEMP/listkeys.new.json" "application/json" "no-store"
-            echo "stored this run's list key"
-          else
-            echo "::error::the list keys could not be stored: the Cloudflare credentials are missing"; exit 1
           fi
       # The next collection, right away: the lists stay as fresh as one
       # collection takes (about twenty minutes). GitHub lets a run start a
