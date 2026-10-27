@@ -25,6 +25,10 @@ import (
 // PATH. Run on the server itself, a Hysteria 2 link that hops ports fails:
 // the hops are redirected only for packets that arrive from outside. Its
 // own port is then checked on its own too.
+//
+// To look into a failure: ALBATROSS_LIVE_ONLY keeps the links whose label
+// holds one of its comma-separated words, and ALBATROSS_LIVE_LOG=1 adds
+// what the cores and helpers print (through hide too).
 func TestLiveLinks(t *testing.T) {
 	path := os.Getenv("ALBATROSS_LIVE_LINKS")
 	if path == "" {
@@ -49,6 +53,18 @@ func TestLiveLinks(t *testing.T) {
 			nodes = append(nodes, &one)
 		}
 	}
+	if only := os.Getenv("ALBATROSS_LIVE_ONLY"); only != "" {
+		var kept []*node.Node
+		for _, n := range nodes {
+			for _, w := range strings.Split(only, ",") {
+				if w = strings.TrimSpace(w); w != "" && strings.Contains(liveLabel(n), w) {
+					kept = append(kept, n)
+					break
+				}
+			}
+		}
+		nodes = kept
+	}
 	if len(nodes) == 0 {
 		t.Fatal("no links")
 	}
@@ -56,7 +72,11 @@ func TestLiveLinks(t *testing.T) {
 	if d := os.Getenv("ALBATROSS_HELPERS"); d != "" {
 		dirs = append(dirs, d)
 	}
-	tt := &Tester{Runtime: &core.Runtime{Bin: core.Locate(dirs...), Dir: t.TempDir()}, Timeout: 15 * time.Second}
+	rt := &core.Runtime{Bin: core.Locate(dirs...), Dir: t.TempDir()}
+	if os.Getenv("ALBATROSS_LIVE_LOG") == "1" {
+		rt.OnLine = func(name, line string) { t.Logf("%s| %s", name, hide(line, nodes)) }
+	}
+	tt := &Tester{Runtime: rt, Timeout: 15 * time.Second}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	var mu sync.Mutex
