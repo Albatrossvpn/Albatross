@@ -2,6 +2,7 @@ package tester
 
 import (
 	"context"
+	"net"
 	"os"
 	"regexp"
 	"strings"
@@ -22,9 +23,9 @@ import (
 //	ALBATROSS_LIVE_LINKS=/root/albatross-links.txt ALBATROSS_HELPERS=/path/helpers go test -run LiveLinks ./internal/tester
 //
 // The cores and helpers are looked for in ALBATROSS_HELPERS, then on the
-// PATH. Run on the server itself, a Hysteria 2 link that hops ports fails:
-// the hops are redirected only for packets that arrive from outside. Its
-// own port is then checked on its own too.
+// PATH. Run on the server itself, the hops of a Hysteria 2 link cannot be
+// checked: they are redirected only for packets that arrive from outside.
+// Its own port is checked then, and elsewhere as well.
 //
 // To look into a failure: ALBATROSS_LIVE_ONLY keeps the links whose label
 // holds one of its comma-separated words, and ALBATROSS_LIVE_LOG=1 adds
@@ -50,7 +51,12 @@ func TestLiveLinks(t *testing.T) {
 		if n.PortHop != "" {
 			one := *n
 			one.PortHop = ""
-			nodes = append(nodes, &one)
+			if localAddress(n.Server) {
+				t.Logf("%s: the hops can be checked only from elsewhere", liveLabel(n))
+				nodes[len(nodes)-1] = &one
+			} else {
+				nodes = append(nodes, &one)
+			}
 		}
 	}
 	if only := os.Getenv("ALBATROSS_LIVE_ONLY"); only != "" {
@@ -100,6 +106,25 @@ func TestLiveLinks(t *testing.T) {
 			t.Errorf("%s: %s", what, hide(r.Err, nodes))
 		}
 	}
+}
+
+// localAddress reports whether host names this machine.
+func localAddress(host string) bool {
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return false
+	}
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		if ipn, ok := a.(*net.IPNet); ok {
+			for _, ip := range ips {
+				if ipn.IP.Equal(ip) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // liveLabel tells a link apart from the server's others without its
@@ -156,5 +181,11 @@ func TestHideTakesOutAddresses(t *testing.T) {
 	}
 	if !strings.Contains(got, "13:45:17") || !strings.Contains(got, "refused") {
 		t.Errorf("too much taken out: %q", got)
+	}
+}
+
+func TestLocalAddress(t *testing.T) {
+	if !localAddress("127.0.0.1") || localAddress("192.0.2.1") {
+		t.Error("the machine's own address is not told from another")
 	}
 }
