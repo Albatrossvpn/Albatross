@@ -448,3 +448,32 @@ func TestSSWithTypeStaysShadowsocks(t *testing.T) {
 		t.Fatalf("mislabelled trojan: %v %+v", err, n)
 	}
 }
+
+// The lists carry the app's own form of a node (Node.Link) for servers
+// with no share link: VPN Gate's, the own server's OpenVPN. A list's
+// copy is read like any link and checked like one; the app's methods
+// (warp-plus, the serverless one) are its own and come from no list.
+func TestInternalLinksInLists(t *testing.T) {
+	ovpn := &Node{Proto: "openvpn", Name: "Albatross-OpenVPN\x07", Server: "203.0.113.9", Port: 1194,
+		OVPN: &OpenVPN{Network: "tcp", CA: []string{"-----BEGIN CERTIFICATE-----", "MIIB", "-----END CERTIFICATE-----"}}}
+	noUUID := &Node{Proto: "vmess", Server: "203.0.113.9", Port: 443}
+	method := &Node{Proto: "direct"}
+	nodes, seen := ParseText("# a list\n" + ovpn.Link() + "\n" + noUUID.Link() + "\n" + method.Link() + "\n")
+	if seen != 3 {
+		t.Errorf("saw %d links, want 3", seen)
+	}
+	if len(nodes) != 1 || nodes[0].Proto != "openvpn" || nodes[0].Server != ovpn.Server || nodes[0].OVPN == nil {
+		t.Fatalf("read %+v, want the OpenVPN server alone", nodes)
+	}
+	if nodes[0].Name != "Albatross-OpenVPN" {
+		t.Errorf("name %q kept its control character", nodes[0].Name)
+	}
+	if _, err := ParseLink(noUUID.Link()); err == nil {
+		t.Error("an internal link skips the checks share links get")
+	}
+	// Changed after parsing, a node is written as it now is.
+	nodes[0].Name = "renamed"
+	if back, err := ParseLink(nodes[0].Link()); err != nil || back.Name != "renamed" {
+		t.Errorf("Link after a change: %v %+v", err, back)
+	}
+}
