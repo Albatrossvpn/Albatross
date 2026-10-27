@@ -156,12 +156,26 @@ func plainHost(s string) bool {
 	return true
 }
 
+// SocksUser is the user name of a helper's local SOCKS5 port when it asks
+// for a password (SidecarArgs, UsqueArgs).
+const SocksUser = "albatross"
+
+// SidecarAuth reports whether the node's helper can ask for a password on
+// its local SOCKS5 port. Brook's client cannot.
+func (n *Node) SidecarAuth() bool { return n.Proto != "brook" }
+
 // SidecarArgs are the command line and environment that run the node's
 // helper as a SOCKS5 proxy on 127.0.0.1:port. files are written into dir
 // (the helper's own directory) first: the configuration files that some
-// helpers only read from disk.
-func (n *Node) SidecarArgs(port int, dir string) (args, env []string, files map[string]string) {
+// helpers only read from disk. With pass set (and SidecarAuth) the port
+// takes only SocksUser with that password, so other programs on the
+// device can neither use the tunnel nor learn the server through it.
+func (n *Node) SidecarArgs(port int, dir, pass string) (args, env []string, files map[string]string) {
 	bind := "127.0.0.1:" + strconv.Itoa(port)
+	auth := ""
+	if pass != "" {
+		auth = SocksUser + ":" + pass + "@"
+	}
 	sep := "/"
 	if strings.Contains(dir, "\\") {
 		sep = "\\"
@@ -173,7 +187,7 @@ func (n *Node) SidecarArgs(port int, dir string) (args, env []string, files map[
 		// name of its own (sni=, as a relay's links carry) the address
 		// names it and the resolver rules send it to the server.
 		host := n.Server
-		cfg := map[string]any{"listen": "socks://" + bind}
+		cfg := map[string]any{"listen": "socks://" + auth + bind}
 		if n.SNI != "" && n.SNI != n.Server && !strings.Contains(n.Server, ":") {
 			host = n.SNI
 			cfg["host-resolver-rules"] = "MAP " + n.SNI + " " + n.Server
@@ -183,8 +197,10 @@ func (n *Node) SidecarArgs(port int, dir string) (args, env []string, files map[
 		files["config.json"] = string(c)
 		args = []string{dir + sep + "config.json"}
 	case "juicity":
+		// The listener is a URL to Juicity ("mixed://" + listen), whose
+		// user part is the SOCKS5 and HTTP login.
 		c, _ := json.Marshal(map[string]any{
-			"listen": bind, "server": n.hostPort(), "uuid": n.UUID, "password": n.Password,
+			"listen": auth + bind, "server": n.hostPort(), "uuid": n.UUID, "password": n.Password,
 			"sni": firstNonEmpty(n.SNI, n.Server), "allow_insecure": n.Insecure,
 			"congestion_control": firstNonEmpty(n.CongestionControl, "bbr"), "log_level": "warn",
 			"pinned_certchain_sha256": n.PinnedCert,
@@ -205,10 +221,14 @@ func (n *Node) SidecarArgs(port int, dir string) (args, env []string, files map[
 		if n.MTU > 0 {
 			profile["mtu"] = n.MTU
 		}
-		c, _ := json.Marshal(map[string]any{
+		cfg := map[string]any{
 			"profiles": []map[string]any{profile}, "activeProfile": "albatross",
 			"socks5Port": port, "socks5ListenLAN": false, "rpcPort": 0, "loggingLevel": "WARN",
-		})
+		}
+		if pass != "" {
+			cfg["socks5Authentication"] = []map[string]string{{"user": SocksUser, "password": pass}}
+		}
+		c, _ := json.Marshal(cfg)
 		files["config.json"] = string(c)
 		env = []string{"MIERU_CONFIG_JSON_FILE=" + dir + sep + "config.json"}
 		args = []string{"run"}
@@ -230,7 +250,11 @@ func (n *Node) SidecarArgs(port int, dir string) (args, env []string, files map[
 		}
 	case "wstunnel":
 		host := firstNonEmpty(n.SNI, n.Server)
-		args = []string{"client", "-L", "socks5://" + bind, "--http-upgrade-path-prefix", strings.TrimPrefix(n.Path, "/"),
+		listen := "socks5://" + bind
+		if pass != "" {
+			listen += "?login=" + SocksUser + "&password=" + pass
+		}
+		args = []string{"client", "-L", listen, "--http-upgrade-path-prefix", strings.TrimPrefix(n.Path, "/"),
 			"--connection-min-idle", "2"}
 		if host != n.Server {
 			// The server by its address, the name only for the handshake.
@@ -269,6 +293,9 @@ func (n *Node) SidecarArgs(port int, dir string) (args, env []string, files map[
 		b.WriteString("AllowedIPs = 0.0.0.0/0, ::/0\n")
 		b.WriteString("PersistentKeepalive = 25\n")
 		b.WriteString("\n[Socks5]\nBindAddress = " + bind + "\n")
+		if pass != "" {
+			b.WriteString("Username = " + SocksUser + "\nPassword = " + pass + "\n")
+		}
 		files["wireproxy.conf"] = b.String()
 		args = []string{"-c", dir + sep + "wireproxy.conf"}
 	}

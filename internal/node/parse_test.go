@@ -370,12 +370,12 @@ func TestUsqueMethods(t *testing.T) {
 	if m.Key() == m2.Key() || m.Name == m2.Name {
 		t.Fatal("the two MASQUE methods must differ")
 	}
-	a := m2.UsqueArgs("127.0.0.1", "1080", "/tmp/x")
+	a := m2.UsqueArgs("127.0.0.1", "1080", "/tmp/x", "")
 	got := strings.Join(a, " ")
 	if !strings.Contains(got, "-c /tmp/x/config.json socks -b 127.0.0.1 -p 1080") || !strings.Contains(got, "--http2") {
 		t.Fatalf("masque2 args: %v", a)
 	}
-	if strings.Contains(strings.Join(m.UsqueArgs("127.0.0.1", "1080", "/tmp/x"), " "), "--http2") {
+	if strings.Contains(strings.Join(m.UsqueArgs("127.0.0.1", "1080", "/tmp/x", ""), " "), "--http2") {
 		t.Fatal("masque (HTTP/3) must not ask for HTTP/2")
 	}
 	r := strings.Join(UsqueRegisterArgs("/tmp/x"), " ")

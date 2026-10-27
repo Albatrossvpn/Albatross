@@ -32,7 +32,7 @@ func TestSidecarLinks(t *testing.T) {
 		if n.Proto != c.proto || n.Sidecar() != c.helper || n.Engine() != EngineSidecar || n.UDPBased() != c.udp {
 			t.Fatalf("%s: proto %s helper %s engine %v udp %v", c.link, n.Proto, n.Sidecar(), n.Engine(), n.UDPBased())
 		}
-		args, env, files := n.SidecarArgs(1080, "/tmp/x")
+		args, env, files := n.SidecarArgs(1080, "/tmp/x", "")
 		all := strings.Join(args, " ") + "\n" + strings.Join(env, " ")
 		for _, f := range files {
 			all += "\n" + f
@@ -109,7 +109,7 @@ func TestAmneziaKeyDiffersFromWireGuard(t *testing.T) {
 // standard form.
 func TestAmneziaWGKeyForms(t *testing.T) {
 	n := mustParse(t, "amneziawg://cPr-XL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E@1.2.3.4:8447?publickey=HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw&address=10.8.0.2%2F32,fd00::2%2F128&jc=4&jmin=40&jmax=70&h1=5-9")
-	_, _, files := n.SidecarArgs(1080, "/tmp/x")
+	_, _, files := n.SidecarArgs(1080, "/tmp/x", "")
 	conf := files["wireproxy.conf"]
 	for _, want := range []string{"PrivateKey = cPr+XL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E=\n", "PublicKey = HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw=\n", "Address = 10.8.0.2/32, fd00::2/128\n", "H1 = 5-9\n"} {
 		if !strings.Contains(conf, want) {
@@ -129,7 +129,7 @@ func TestNaiveWithSNI(t *testing.T) {
 	if err != nil || n.Validate() != nil {
 		t.Fatalf("parse %v, validate %v", err, n.Validate())
 	}
-	_, _, files := n.SidecarArgs(1080, "/tmp/x")
+	_, _, files := n.SidecarArgs(1080, "/tmp/x", "")
 	var cfg map[string]string
 	if err := json.Unmarshal([]byte(files["config.json"]), &cfg); err != nil {
 		t.Fatal(err)
@@ -139,11 +139,52 @@ func TestNaiveWithSNI(t *testing.T) {
 	}
 	// Without one, as before: the address is the name.
 	n, _ = ParseLink("naive+https://albatross:pw@srv.example.com:2052#Naive")
-	_, _, files = n.SidecarArgs(1080, "/tmp/x")
+	_, _, files = n.SidecarArgs(1080, "/tmp/x", "")
 	if strings.Contains(files["config.json"], "host-resolver-rules") || !strings.Contains(files["config.json"], "srv.example.com:2052") {
 		t.Fatalf("config %s", files["config.json"])
 	}
 	if n, err := ParseLink("naive+https://albatross:pw@203.0.113.9:2052?sni=a.example%2CMAP%20*%206.6.6.6#x"); err == nil && n.Validate() == nil {
 		t.Fatal("a name that adds resolver rules is refused")
+	}
+}
+
+// With a password, each helper's SOCKS5 port asks for it in the helper's
+// own way; Brook's client cannot, and is left as it was.
+func TestSidecarSocksPassword(t *testing.T) {
+	const pass = "0123456789abcdef"
+	for _, c := range []struct{ link, want string }{
+		{"naive+https://u:p@n.example:443#N", `"listen":"socks://albatross:0123456789abcdef@127.0.0.1:1080"`},
+		{"juicity://11111111-1111-1111-1111-111111111111:pw@j.example:443?sni=j.example#J", `"listen":"albatross:0123456789abcdef@127.0.0.1:1080"`},
+		{"mieru://u:p@5.6.7.8:2086?protocol=tcp#M", `"socks5Authentication":[{"password":"0123456789abcdef","user":"albatross"}]`},
+		{"wstunnel://w.example:443?path=secret#W", "socks5://127.0.0.1:1080?login=albatross&password=0123456789abcdef"},
+	} {
+		n, err := ParseLink(c.link)
+		if err != nil || !n.SidecarAuth() {
+			t.Fatalf("%s: %v, auth %v", c.link, err, n.SidecarAuth())
+		}
+		args, _, files := n.SidecarArgs(1080, "/tmp/x", pass)
+		all := strings.Join(args, " ")
+		for _, f := range files {
+			all += "\n" + f
+		}
+		if !strings.Contains(all, c.want) {
+			t.Fatalf("%s: helper gets\n%s\nwithout %q", c.link, all, c.want)
+		}
+	}
+	awg := "amneziawg://cPr%2BXL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E%3D@1.2.3.4:8447?publickey=HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw%3D&address=10.8.0.2%2F32&jc=4&jmin=40&jmax=70#A"
+	n, err := ParseLink(awg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, files := n.SidecarArgs(1080, "/tmp/x", pass); !strings.Contains(files["wireproxy.conf"], "[Socks5]\nBindAddress = 127.0.0.1:1080\nUsername = albatross\nPassword = "+pass+"\n") {
+		t.Fatalf("wireproxy config:\n%s", files["wireproxy.conf"])
+	}
+	b, _ := ParseLink("brook://server?server=5.6.7.8%3A9999&password=pw#B")
+	if b == nil || b.SidecarAuth() {
+		t.Fatal("brook's client has no login for its SOCKS5 port")
+	}
+	m2 := &Node{Proto: "warpplus", WPMode: "masque"}
+	if got := strings.Join(m2.UsqueArgs("127.0.0.1", "1080", "/tmp/x", pass), " "); !strings.Contains(got, "-u albatross -w "+pass) {
+		t.Fatalf("usque args: %s", got)
 	}
 }
