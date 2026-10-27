@@ -34,13 +34,18 @@ jobs:
     timeout-minutes: 10
     env:
       CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      ORIGIN_IP: ${{ inputs.origin_ip }}
       CDN_HOST: ${{ inputs.cdn_host }}
       DNS_TUNNEL: ${{ inputs.dns_tunnel }}
     steps:
       - name: Records
         run: |
           set -euo pipefail
+          # The address is read from the run's event, not put in the
+          # environment, which the log prints before a step: a CDN name is
+          # there to keep it from view, and it is masked before anything runs.
+          ORIGIN_IP="$(python3 -c 'import json,os; print((json.load(open(os.environ["GITHUB_EVENT_PATH"])).get("inputs") or {}).get("origin_ip", "").strip())')"
+          [ -n "$ORIGIN_IP" ] || { echo "::error::Give origin_ip."; exit 1; }
+          echo "::add-mask::$ORIGIN_IP"
           [ -n "$CF_TOKEN" ] || { echo "::error::The repository secret CLOUDFLARE_API_TOKEN is not set."; exit 1; }
           api() { # method path [json]
             curl -sS --max-time 30 -X "$1" "https://api.cloudflare.com/client/v4$2" \
