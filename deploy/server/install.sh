@@ -304,7 +304,10 @@ PY
 # dns_tunnel_inbound prints the DNS tunnel inbound (with its leading comma)
 # when DNS_TUNNEL is set: VMess over mKCP inside DNS queries for the
 # tunnel name, on UDP 53. The small mKCP MTU is Xray's recommendation for
-# TXT answers.
+# TXT answers. An answer holds 512 bytes unless both sides say more (the
+# link sets edns0 too): at 512 the server drops every packet over a few
+# hundred bytes, and the tunnel stalls. 1232, what resolvers have sent
+# since DNS Flag Day 2020, holds the 900.
 # dns_names prints the tunnel names as a JSON array.
 dns_names() { python3 -c 'import json,sys; print(json.dumps([n.strip() for n in sys.argv[1].split(",") if n.strip()]))' "$DNS_TUNNEL"; }
 
@@ -317,7 +320,7 @@ dns_tunnel_inbound() {
     "streamSettings": {
       "network": "kcp",
       "kcpSettings": {"seed": "$KCP_SEED", "mtu": 900, "tti": 200, "header": {"type": "none"}},
-      "finalmask": {"udp": [{"type": "xdns", "settings": {"domains": [{"names": $(dns_names)}]}}]}
+      "finalmask": {"udp": [{"type": "xdns", "settings": {"domains": [{"names": $(dns_names), "edns0": 1232}]}}]}
     }
   }
 EOF
@@ -632,15 +635,15 @@ v6_links() {
 }
 
 # cdn_links prints, when CDN_HOST is set, the links that go through
-# Cloudflare's edge: the same WebSocket, gRPC and HTTPUpgrade servers,
-# reached at the CDN's addresses (the app picks edge addresses that
-# answer from inside the country), so this machine's own address is
-# never in the connection and blocking it changes nothing for them.
+# Cloudflare's edge: the same WebSocket and HTTPUpgrade servers, reached
+# at the CDN's addresses (the app picks edge addresses that answer from
+# inside the country), so this machine's own address is never in the
+# connection and blocking it changes nothing for them. Not gRPC: the edge
+# carries it on port 443 alone, which REALITY holds here.
 cdn_links() {
   [ -n "$CDN_HOST" ] || return 0
   local c="$CDN_HOST" n="Albatross-CDN"
   echo "vless://$UUID@$c:$P_WS?security=tls&sni=$c&fp=chrome&type=ws&host=$c&path=$(urlenc "$WS_PATH")#$n-WS"
-  echo "vless://$UUID@$c:$P_GRPC?security=tls&sni=$c&fp=chrome&type=grpc&serviceName=$GRPC_NAME#$n-gRPC"
   vmess_link "$c" "$P_UPGRADE" tls "$n-HTTPUpgrade"
   echo "trojan://$PASS@$c:$P_TGO?security=tls&sni=$c&fp=chrome&type=ws&host=$c&path=$(urlenc "$WS_PATH")#$n-TrojanWS"
 }
@@ -923,7 +926,7 @@ if carrier == "icmp":
     v.update(net="kcp", type="none", path=seed, host="", fm={"udp": [{"type": "xicmp"}]})
 elif carrier.startswith("dns:"):
     v.update(net="kcp", type="none", path=seed, host="",
-             fm={"udp": [{"type": "xdns", "settings": {"domains": [{"names": [carrier[4:]]}]}}]})
+             fm={"udp": [{"type": "xdns", "settings": {"domains": [{"names": [carrier[4:]], "edns0": 1232}]}}]})
 if tls:
     v.update(sni=host, fp="chrome")
 print("vmess://" + base64.b64encode(json.dumps(v, separators=(",", ":")).encode()).decode())
