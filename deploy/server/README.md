@@ -151,3 +151,23 @@ addresses are cut, and pass it on in share codes. Plain http is enough:
 the lists are sealed and the installers are checked against the signed
 manifest's SHA-256. `MIRROR=1` combines with `RELAY_TO` on one machine;
 8081 is not among the forwarded ports.
+
+## Looking after the server from the repository
+
+A self-hosted GitHub Actions runner on the server (labelled `relay`,
+installed in `/opt/runner` as the service
+`actions.runner.Albatrossvpn-Albatross.relay-in`) runs the shell script
+given to `.github/workflows/server.yml` when it is run by hand, as root;
+its output is the job's log, which anyone who can read the repository's
+Actions can read, so a script never carries a secret.
+
+A runner attached to a public repository takes the jobs of any workflow
+whose `runs-on` matches it, a pull request's from a fork included. It is
+locked to the maintenance workflow by a job started hook
+(`/usr/local/sbin/albatross-runner-hook.sh`, written by
+[`runner-guard.sh`](runner-guard.sh)): every job but `server.yml` run by
+hand from `main` fails before any of its steps runs. To put the hook on a
+new runner, run `runner-guard.sh` as the script of `server.yml`, or on the
+server with `RUNNER_ROOT` set to the runner's directory; it checks that
+the job running it would pass before it turns the hook on, and restarts
+the runner once the job is over.
