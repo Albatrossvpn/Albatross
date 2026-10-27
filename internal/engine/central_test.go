@@ -214,3 +214,78 @@ func TestWarmStartSealedCentralCopy(t *testing.T) {
 		t.Fatalf("with the key: central in pool %v, list in pool %v", inPool(e, "central.example"), inPool(e, "list.example"))
 	}
 }
+
+// The service hands out only the newest keys; the ones the device got
+// before stay while a copy it keeps may need them, and an account at a
+// limit, which gets none, keeps none.
+func TestListKeysKeptAcrossRefreshes(t *testing.T) {
+	now := time.Now()
+	key := func(age time.Duration, b byte) sources.ListKey {
+		return sources.ListKey{ID: uint64(now.Add(-age).Unix()), Key: bytes.Repeat([]byte{b}, 32)}
+	}
+	newest, recent, old := key(time.Minute, 1), key(10*time.Hour, 2), key(72*time.Hour, 3)
+	var mu sync.Mutex
+	given := []sources.ListKey{newest}
+	svc := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/login":
+			json.NewEncoder(w).Encode(map[string]any{"token": "t", "account": map[string]any{"username": "ada", "allowed": true}})
+		case "/api/v1/listkeys":
+			mu.Lock()
+			defer mu.Unlock()
+			keys := []map[string]any{}
+			for _, k := range given {
+				keys = append(keys, map[string]any{"id": k.ID, "key": hex.EncodeToString(k.Key)})
+			}
+			json.NewEncoder(w).Encode(map[string]any{"keys": keys})
+		}
+	}))
+	defer svc.Close()
+	t.Cleanup(forgetListKeys)
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}, AccountURLs: []string{svc.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.pool.Close()
+	if err := e.Login("ada", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	e.ctx, e.cancel = context.WithCancel(context.Background())
+	defer e.cancel()
+	ids := func() []uint64 {
+		listKeysMu.Lock()
+		defer listKeysMu.Unlock()
+		var out []uint64
+		for _, k := range listKeys {
+			out = append(out, k.ID)
+		}
+		return out
+	}
+	listKeysMu.Lock()
+	listKeys, listKeysFetched = []sources.ListKey{recent, old}, time.Time{}
+	listKeysMu.Unlock()
+	e.refreshListKeys()
+	if got := ids(); len(got) != 2 || got[0] != newest.ID || got[1] != recent.ID {
+		t.Fatalf("keys after a refresh: %v, want %v %v", got, newest.ID, recent.ID)
+	}
+	// Kept on disk the same way.
+	listKeysMu.Lock()
+	listKeys = nil
+	listKeysMu.Unlock()
+	e.loadListKeys()
+	if got := ids(); len(got) != 2 {
+		t.Fatalf("keys read back: %v", got)
+	}
+
+	mu.Lock()
+	given = nil
+	mu.Unlock()
+	listKeysMu.Lock()
+	listKeysFetched = time.Time{}
+	listKeysMu.Unlock()
+	e.refreshListKeys()
+	if got := ids(); len(got) != 0 {
+		t.Fatalf("an account at a limit kept keys: %v", got)
+	}
+}
