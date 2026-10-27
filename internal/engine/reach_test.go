@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -137,3 +139,69 @@ func TestBogusAddresses(t *testing.T) {
 		t.Fatal()
 	}
 }
+
+// The first segment of a fragmented hello never holds the server name: the
+// first cut falls inside the headers before it, in every try.
+func TestHelloCutsHideTheName(t *testing.T) {
+	cap := &captureConn{first: make(chan []byte, 1)}
+	c := tls.Client(cap, &tls.Config{ServerName: "accounts.example.com", NextProtos: []string{"http/1.1"}})
+	go c.Handshake()
+	hello := <-cap.first
+	at := bytes.Index(hello, []byte("accounts.example.com"))
+	if at < 0 {
+		t.Fatal("no name in the hello")
+	}
+	split := 0
+	for i := 0; i < 2000; i++ {
+		cuts := helloCuts(hello)
+		if cuts[len(cuts)-1] != len(hello) || len(cuts) < 3 || len(cuts) > 6 {
+			t.Fatalf("cuts %v for %d bytes", cuts, len(hello))
+		}
+		for k := 1; k < len(cuts); k++ {
+			if cuts[k] < cuts[k-1] {
+				t.Fatalf("cuts out of order: %v", cuts)
+			}
+		}
+		if cuts[0] >= at {
+			t.Fatalf("the first piece (%d bytes) holds the name, which starts at %d", cuts[0], at)
+		}
+		for _, k := range cuts[1:] {
+			if k > at && k < at+len("accounts.example.com") {
+				split++
+				break
+			}
+		}
+	}
+	if split != 2000 {
+		t.Fatalf("the name itself was cut in only %d of 2000 hellos", split)
+	}
+	if from, to, ok := sniSpan(hello); !ok || from != at || to != at+len("accounts.example.com") {
+		t.Fatalf("name found at %d-%d (%v), it is at %d", from, to, ok, at)
+	}
+	// Not a hello, or cut short: no name, and the cuts still cover it all.
+	for _, b := range [][]byte{bytes.Repeat([]byte{1}, 300), hello[:60]} {
+		if _, _, ok := sniSpan(b); ok {
+			t.Fatalf("a name found in %d bytes that hold none", len(b))
+		}
+		if cuts := helloCuts(b); cuts[len(cuts)-1] != len(b) {
+			t.Fatalf("cuts %v", cuts)
+		}
+	}
+}
+
+// captureConn hands over the first write and fails the handshake there.
+type captureConn struct {
+	net.Conn
+	once  sync.Once
+	first chan []byte
+}
+
+func (c *captureConn) Write(b []byte) (int, error) {
+	c.once.Do(func() { c.first <- bytes.Clone(b) })
+	return 0, io.ErrClosedPipe
+}
+func (c *captureConn) Read([]byte) (int, error)         { return 0, io.EOF }
+func (c *captureConn) Close() error                     { return nil }
+func (c *captureConn) SetDeadline(time.Time) error      { return nil }
+func (c *captureConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *captureConn) SetWriteDeadline(time.Time) error { return nil }
