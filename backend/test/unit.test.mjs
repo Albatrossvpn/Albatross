@@ -233,3 +233,14 @@ test("a sealed list opens with the collector's key of its id", async () => {
   assert.equal(await openKeyed([], bytes), "");
   assert.equal(keyedID(new TextEncoder().encode("vless://plain")), null);
 });
+
+test("a subscription of a full hot list of long links builds (no argument-limit error)", async () => {
+  const { build } = await import("../src/sub.js");
+  const long = "vless://11111111-1111-1111-1111-111111111111@192.0.2.1:443?security=reality&type=xhttp&extra=" + "x".repeat(1200);
+  const entries = Array.from({ length: 450 }, (_, i) => ({ link: long + i + "#s" + i, country: "DE" }));
+  const sub = build(entries, "", "Albatross", []);
+  assert.equal(sub.count, 450);
+  const text = Buffer.from(sub.body, "base64").toString("utf8");
+  assert.equal(text.split("\n").filter(Boolean).length, 450);
+  assert.ok(text.includes("Germany"), "the names survive the encoding (and the flag, which is not ASCII)");
+});
