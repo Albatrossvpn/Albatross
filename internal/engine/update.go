@@ -202,7 +202,10 @@ func (e *Engine) applyUpdate(m UpdateManifest) {
 		if strings.HasPrefix(m.DownloadURL, "https://") {
 			info.URL = m.DownloadURL
 		}
-		if f, ok := m.Files[updateKey(e.opt.Mobile)]; ok && len(f.URLs) > 0 && len(f.SHA256) == 64 && e.opt.InstallUpdate != nil {
+		// Only a plain release version is downloaded (downloadUpdate);
+		// otherwise the download page is offered.
+		_, release := releaseName(m.LatestVersion)
+		if f, ok := m.Files[updateKey(e.opt.Mobile)]; ok && release && len(f.URLs) > 0 && len(f.SHA256) == 64 && e.opt.InstallUpdate != nil {
 			info.InApp, info.file = true, &f
 		}
 	}
@@ -351,14 +354,30 @@ func withHeaderTimeout(c *http.Client) *http.Client {
 	return &cc
 }
 
+// releaseName is version rebuilt from its numbers when it is a plain
+// release version (1.2.3), and false for anything else (v1.2.3, 1.2.3-rc,
+// or text with a path in it).
+func releaseName(version string) (string, bool) {
+	v, ok := parseVersion(version)
+	name := fmt.Sprintf("%d.%d.%d", v[0], v[1], v[2])
+	return name, ok && name == version
+}
+
 func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
+	// The installer is named by its version, so the name is built from the
+	// version's numbers: whatever a manifest says, it cannot lead the file
+	// out of the update folder.
+	name, ok := releaseName(version)
+	if !ok {
+		return "", fmt.Errorf("%q is not a release version", version)
+	}
 	ext := ".exe"
 	if e.opt.Mobile {
 		ext = ".apk"
 	}
 	dir := filepath.Join(e.dir, "update")
 	os.MkdirAll(dir, 0o755)
-	path := filepath.Join(dir, "Albatross-"+version+ext)
+	path := filepath.Join(dir, "Albatross-"+name+ext)
 	want := strings.ToLower(f.SHA256)
 	if sha256File(path) == want {
 		return path, nil
