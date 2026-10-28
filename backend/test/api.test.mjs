@@ -182,10 +182,10 @@ test("each plan has its features: the own servers' keys, the edge and a country'
   assert.equal(me.plans.locations, "silver");
   assert.deepEqual(me.plan_devices, { bronze: 1, silver: 2, gold: 4, vip: 0 });
   me = (await call("GET", "me", { token: gold })).body.account;
-  assert.deepEqual(me.features, ["locations", "adblock", "bypass_apps", "protocols", "tun", "gps", "edge"]);
+  assert.deepEqual(me.features, ["locations", "adblock", "bypass_apps", "protocols", "tun", "gps", "edge", "own"]);
   // The lists' keys: the own servers' only on a plan that has them.
   assert.deepEqual((await call("GET", "listkeys", { token: bronze })).body.keys.map((k) => k.id), [2001, 1001]);
-  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys.map((k) => k.id), [2001, 1001]);
+  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys.map((k) => k.id), [2001, 2000, 1001, 1000]);
   // The edge: Gold has it (none is deployed here), Bronze is told why not.
   assert.deepEqual((await call("GET", "edge", { token: bronze })).body, { links: [], reason: "plan" });
   assert.equal((await call("GET", "edge", { token: gold })).body.reason, "");
@@ -202,13 +202,13 @@ test("each plan has its features: the own servers' keys, the edge and a country'
   assert.equal((await call("PUT", "admin/settings", { token: admin, body: { plan_features: { lan: "diamond" } } })).status, 400);
   assert.equal((await call("PUT", "admin/settings", { token: admin, body: { plan_features: { teleport: "vip" } } })).status, 400);
   assert.equal((await call("PUT", "admin/settings", { token: admin, body: { plan_features: "not json" } })).status, 400);
-  const saved = await call("PUT", "admin/settings", { token: admin, body: { plan_features: { locations: "bronze", own: "gold" } } });
+  const saved = await call("PUT", "admin/settings", { token: admin, body: { plan_features: { locations: "bronze", own: "vip" } } });
   assert.equal(saved.status, 200);
-  assert.equal(JSON.parse(saved.body.plan_features).own, "gold");
+  assert.equal(JSON.parse(saved.body.plan_features).own, "vip");
   assert.deepEqual((await call("GET", "me", { token: bronze })).body.account.features, ["locations"]);
-  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys.map((k) => k.id), [2001, 2000, 1001, 1000]);
+  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys.map((k) => k.id), [2001, 1001], "the own servers moved to VIP");
   assert.equal((await fetch(bs + "?c=de")).status, 200);
-  assert.equal((await call("GET", "public")).body.plans.own, "gold");
+  assert.equal((await call("GET", "public")).body.plans.own, "vip");
   assert.equal((await call("PUT", "admin/settings", { token: admin, body: { plan_features: {} } })).status, 200);
   assert.deepEqual((await call("GET", "me", { token: bronze })).body.account.features, [], "back to the plans' own features");
 });
