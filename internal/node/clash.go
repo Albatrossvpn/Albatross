@@ -7,7 +7,16 @@ import (
 )
 
 // ParseClash reads the "proxies" list of a Clash / Mihomo profile.
-func ParseClash(text string) []*Node {
+func ParseClash(text string) (out []*Node) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = nil // a parser's bug on one list leaves that list out
+		}
+	}()
+	return parseClash(text)
+}
+
+func parseClash(text string) []*Node {
 	var doc struct {
 		Proxies []map[string]any `yaml:"proxies"`
 	}

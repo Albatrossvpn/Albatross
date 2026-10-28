@@ -14,8 +14,17 @@ import (
 // profiles. ParseConfigs reads the servers out of any of them.
 
 // ParseConfigs returns the servers of a list written as client configs,
-// or nil when text is none of them.
-func ParseConfigs(text string) []*Node {
+// or nil when text is none of them (or a parser's bug stops on it).
+func ParseConfigs(text string) (out []*Node) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = nil
+		}
+	}()
+	return parseConfigs(text)
+}
+
+func parseConfigs(text string) []*Node {
 	t := strings.TrimSpace(strings.TrimPrefix(text, "\ufeff"))
 	var out []*Node
 	add := func(n *Node) {

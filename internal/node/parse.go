@@ -180,8 +180,18 @@ func decodeB64(s string) ([]byte, error) {
 	return base64.RawStdEncoding.DecodeString(s)
 }
 
-// ParseLink parses one share link.
-func ParseLink(link string) (*Node, error) {
+// ParseLink parses one share link. A parser's bug on a link from a public
+// list refuses that link instead of ending the app.
+func ParseLink(link string) (n *Node, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			n, err = nil, fmt.Errorf("link parser failed: %v", r)
+		}
+	}()
+	return parseLink(link)
+}
+
+func parseLink(link string) (*Node, error) {
 	link = strings.TrimSpace(link)
 	i := strings.Index(link, "://")
 	if i <= 0 {
