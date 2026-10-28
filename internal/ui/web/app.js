@@ -431,8 +431,7 @@ function renderSheet() {
     if (!html) html = '<div class="empty">No locations found</div>';
   } else if (sheetKind === "protocol") {
     html = state.protocols.map(function (p) {
-      return optionItem(p.value, p.label, p.value === state.settings.protocol,
-        p.value === "" ? "Picks the best one for you" : "");
+      return optionItem(p.value, p.label, p.value === state.settings.protocol, protocolNote(p));
     }).join("");
   } else if (sheetKind === "plans") {
     html = plansHTML();
@@ -465,6 +464,14 @@ function countryItem(c, locked) {
 }
 
 $("country-btn").addEventListener("click", function () { openSheet("country"); });
+// What the protocol sheet says under a protocol: how many servers it has.
+function protocolNote(p) {
+  if (p.value === "") return "Picks the best one for you";
+  if (p.value === "warp" || p.value === "tor") return "Built in";
+  if (!p.servers) return "No servers yet";
+  return num(p.servers) + (p.servers === 1 ? " server" : " servers") + (p.working ? " \u00b7 " + num(p.working) + " worked" : "");
+}
+
 $("row-protocol").addEventListener("click", function () {
   if (hasFeature("protocols")) openSheet("protocol");
   else showPlanModal("protocols");

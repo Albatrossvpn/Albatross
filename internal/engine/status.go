@@ -3,6 +3,7 @@ package engine
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"maps"
 	"net"
 	"strings"
 	"time"
@@ -19,18 +20,21 @@ type Snapshot struct {
 	TargetFlag string        `json:"target_flag"`
 	Conn       *ConnInfo     `json:"conn"`
 	Countries  []CountryInfo `json:"countries"`
-	Scan       ScanInfo      `json:"scan"`
-	Settings   Settings      `json:"settings"`
-	Admin      bool          `json:"admin"`
-	Version    string        `json:"version"`
-	Cores      CoreInfo      `json:"cores"`
-	WorkingNow int           `json:"working_now"`
-	Mobile     bool          `json:"mobile"` // the Android app: one VPN mode, no admin
-	Update     *UpdateInfo   `json:"update,omitempty"`
-	TotalGood  int           `json:"total_good"`
-	Account    AccountState  `json:"account"`
-	Notice     string        `json:"notice,omitempty"`
-	Network    string        `json:"network,omitempty"` // the filtering regime found here
+	// ProtocolServers counts the servers of each protocol (ProtocolChoice
+	// values): those not known dead, and those that worked.
+	ProtocolServers map[string][2]int `json:"protocol_servers,omitempty"`
+	Scan            ScanInfo          `json:"scan"`
+	Settings        Settings          `json:"settings"`
+	Admin           bool              `json:"admin"`
+	Version         string            `json:"version"`
+	Cores           CoreInfo          `json:"cores"`
+	WorkingNow      int               `json:"working_now"`
+	Mobile          bool              `json:"mobile"` // the Android app: one VPN mode, no admin
+	Update          *UpdateInfo       `json:"update,omitempty"`
+	TotalGood       int               `json:"total_good"`
+	Account         AccountState      `json:"account"`
+	Notice          string            `json:"notice,omitempty"`
+	Network         string            `json:"network,omitempty"` // the filtering regime found here
 	// HelpAvailable says "Help others" can run on this network; Helping
 	// that it does.
 	HelpAvailable bool `json:"help_available"`
@@ -88,26 +92,27 @@ func (e *Engine) Snapshot() Snapshot {
 		}
 	}
 	snap := Snapshot{
-		Status:         e.status,
-		Message:        e.message,
-		Notice:         e.notice,
-		Network:        string(e.reg.Regime),
-		HelpAvailable:  e.helpEligible(),
-		Helping:        e.helper != nil && !e.helper.Exited(),
-		CrowdAvailable: len(e.crowdURLs) > 0,
-		Share:          e.shareAddrs(),
-		SharePAC:       e.sharePAC(),
-		Target:         e.target,
-		TargetName:     countryName(e.target),
-		TargetFlag:     geo.Flag(e.target),
-		Countries:      countries,
-		Settings:       e.settings,
-		Version:        e.opt.Version,
-		Mobile:         e.opt.Mobile,
-		Update:         e.updateCopy(),
-		Cores:          CoreInfo{SingBox: e.bin.SingBox != "", Xray: e.bin.Xray != "", WarpPlus: e.bin.WarpPlus != ""},
-		WorkingNow:     working,
-		TotalGood:      len(e.good),
+		Status:          e.status,
+		Message:         e.message,
+		Notice:          e.notice,
+		Network:         string(e.reg.Regime),
+		HelpAvailable:   e.helpEligible(),
+		Helping:         e.helper != nil && !e.helper.Exited(),
+		CrowdAvailable:  len(e.crowdURLs) > 0,
+		Share:           e.shareAddrs(),
+		SharePAC:        e.sharePAC(),
+		Target:          e.target,
+		TargetName:      countryName(e.target),
+		TargetFlag:      geo.Flag(e.target),
+		Countries:       countries,
+		Settings:        e.settings,
+		Version:         e.opt.Version,
+		Mobile:          e.opt.Mobile,
+		Update:          e.updateCopy(),
+		Cores:           CoreInfo{SingBox: e.bin.SingBox != "", Xray: e.bin.Xray != "", WarpPlus: e.bin.WarpPlus != ""},
+		WorkingNow:      working,
+		TotalGood:       len(e.good),
+		ProtocolServers: maps.Clone(e.protoStats),
 		Scan: ScanInfo{
 			Phase: e.scan.Phase, Candidates: total, Untested: untested, Dead: dead, Testing: e.scan.Testing,
 			PerMinute: len(e.scan.recent), SourcesTotal: e.scan.SourcesTotal, SourcesDone: e.scan.SourcesDone,

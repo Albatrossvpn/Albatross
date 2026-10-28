@@ -216,6 +216,28 @@ func (p *Pool) Each(fn func(*Entry)) {
 	}
 }
 
+// StatsByProto is Stats with, for each protocol code, how many entries
+// are not known dead (live) and how many worked, in the same pass.
+func (p *Pool) StatsByProto() (total, untested, dead, ok int, live, worked [256]int) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for i := range p.entries {
+		en := &p.entries[i]
+		switch en.State {
+		case StateNew:
+			untested++
+			live[en.Proto]++
+		case StateOK:
+			ok++
+			live[en.Proto]++
+			worked[en.Proto]++
+		default:
+			dead++
+		}
+	}
+	return len(p.entries), untested, dead, ok, live, worked
+}
+
 // Stats counts entries by state.
 func (p *Pool) Stats() (total, untested, dead, ok int) {
 	p.mu.RLock()
