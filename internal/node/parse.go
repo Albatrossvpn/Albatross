@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -31,28 +32,29 @@ func ExtractLinks(text string) []string {
 			text = dec
 		}
 	}
+	if t := strings.TrimSpace(head(text, 64)); strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[") || strings.Contains(text, `\n`) || strings.Contains(text, `\u00`) {
+		// JSON, or text taken out of JSON strings: its quotes end strings
+		// (a quote inside a link is escaped there) and its escapes hide the
+		// line breaks between links ("\nvless://...", "\u003evless://").
+		text = jsonCleaner.Replace(text)
+	}
 	var out []string
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(strings.TrimPrefix(line, "\ufeff"))
 		if line == "" {
 			continue
 		}
+		// Every scheme starts a link, even stuck to the one before it (its
+		// base64, its name: "...fQ==vless://", "#🇩🇪 Germanyvmess://"); a
+		// link runs to the next one or the end of the line.
 		locs := schemeRe.FindAllStringIndex(line, -1)
 		for i, loc := range locs {
-			// A scheme inside another link's fragment (e.g. "#vless://...")
-			// still starts a new link only when separated by whitespace.
-			if loc[0] > 0 && !isSpace(line[loc[0]-1]) && i > 0 {
-				continue
-			}
 			end := len(line)
-			for _, next := range locs[i+1:] {
-				if next[0] > 0 && isSpace(line[next[0]-1]) {
-					end = next[0]
-					break
-				}
+			if i+1 < len(locs) {
+				end = locs[i+1][0]
 			}
 			link := strings.TrimSpace(line[loc[0]:end])
-			link = strings.TrimRight(link, ",;")
+			link = strings.TrimRight(link, ",;|\"'")
 			if len(link) > 12 {
 				out = append(out, link)
 			}
@@ -61,7 +63,11 @@ func ExtractLinks(text string) []string {
 	return out
 }
 
-func isSpace(b byte) bool { return b == ' ' || b == '\t' || b == '\r' }
+// jsonCleaner undoes JSON's escapes in links and breaks lines where its
+// strings end, so the links of a JSON array, or of a list kept in a JSON
+// string ("vless://...\nvmess://..."), come apart.
+var jsonCleaner = strings.NewReplacer(`\"`, `"`, `\n`, "\n", `\r`, "\n", `\t`, " ", `\u0026`, "&", `\u003d`, "=", `\u003c`, "\n", `\u003e`, "\n",
+	`\/`, "/", `"`, "\n")
 
 func head(s string, n int) string {
 	if len(s) > n {
@@ -130,6 +136,28 @@ func trimB64(s string) string {
 		end++
 	}
 	return s[:end]
+}
+
+// decodeB64Prefix decodes as much of s as is base64, in whole groups of
+// four characters.
+func decodeB64Prefix(s string) []byte {
+	end := 0
+	for end < len(s) {
+		c := s[end]
+		if c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '+' || c == '/' || c == '-' || c == '_' {
+			end++
+			continue
+		}
+		break
+	}
+	s = s[:end-end%4]
+	enc := base64.StdEncoding
+	if strings.ContainsAny(s, "-_") {
+		enc = base64.URLEncoding
+	}
+	out := make([]byte, enc.DecodedLen(len(s)))
+	n, _ := enc.Decode(out, []byte(s))
+	return out[:n]
 }
 
 // decodeB64 accepts standard or URL alphabets, padded or not.
@@ -238,6 +266,15 @@ func splitURI(link string) (*uri, error) {
 		rest = rest[:i]
 	}
 	if i := strings.LastIndex(rest, "@"); i >= 0 {
+		// The last "@" can be in the path (pw@host:443/@channel): then the
+		// host follows the last one before the path.
+		if j := strings.Index(rest, "@"); j < i {
+			if slash := strings.Index(rest[j+1:], "/"); slash >= 0 && j+1+slash < i {
+				if k := strings.LastIndex(rest[:j+1+slash], "@"); k >= 0 {
+					i = k
+				}
+			}
+		}
 		u.user = rest[:i]
 		rest = rest[i+1:]
 	}
@@ -381,8 +418,17 @@ func (n *Node) applyStreamParams(q map[string]string) {
 	n.PinnedCert = q["pcs"]
 	n.VerifyName = q["vcn"]
 	n.Flow = q["flow"]
-	n.FinalMask = q["fm"]
-	if strings.Contains(n.FinalMask, "fragment") || q["fragment"] != "" {
+	if fm := q["fm"]; fm != "" {
+		// Xray's finalmask is JSON (Validate refuses one of the wrong
+		// shape); other apps' notations (fm=tlshello-0-len) are left out.
+		if strings.HasPrefix(strings.TrimSpace(fm), "{") {
+			n.FinalMask = fm
+		}
+		if strings.Contains(fm, "fragment") || strings.Contains(fm, "tlshello") {
+			n.Fragment = true
+		}
+	}
+	if q["fragment"] != "" {
 		n.Fragment = true
 	}
 }
@@ -467,6 +513,10 @@ func parseVMess(link string) (*Node, error) {
 		name = unescape(body[i+1:])
 		body = body[:i]
 	}
+	if loc := schemeRe.FindStringIndex(body); loc != nil {
+		// The next link stuck to this one's base64.
+		body = body[:loc[0]]
+	}
 	if strings.Contains(body, "@") {
 		// Xray's URL form: vmess://uuid@host:port?type=ws&security=tls...
 		n, err := parseStandard("vless://"+body, "vless")
@@ -487,10 +537,15 @@ func parseVMess(link string) (*Node, error) {
 	}
 	raw, err := decodeB64(trimB64(body))
 	if err != nil {
-		return nil, fmt.Errorf("vmess base64: %w", err)
+		// Something stuck to the base64 (a flag, the next link): what
+		// decodes before it.
+		if raw = decodeB64Prefix(trimB64(body)); len(raw) == 0 {
+			return nil, fmt.Errorf("vmess base64: %w", err)
+		}
 	}
 	var j vmessJSON
-	if err := json.Unmarshal(raw, &j); err != nil {
+	// The first JSON object; bytes decoded past its end are not part of it.
+	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&j); err != nil {
 		return nil, fmt.Errorf("vmess json: %w", err)
 	}
 	n := &Node{
@@ -849,6 +904,11 @@ var fingerprints = map[string]bool{
 // normalize fixes common inconsistencies so the two cores agree on a node.
 func (n *Node) normalize() {
 	n.Server = strings.Trim(strings.TrimSpace(n.Server), "[]")
+	// Base64 keys whose pluses a form or a URL decoder turned into spaces
+	// (publickey=bmXOC%20F1Fx...): no key has a space of its own.
+	for _, k := range []*string{&n.PrivateKey, &n.PeerPublicKey, &n.PreSharedKey, &n.PublicKey} {
+		*k = strings.ReplaceAll(strings.TrimSpace(*k), " ", "+")
+	}
 	if n.Sidecar() != "" {
 		// The helpers read the fields as their links name them; the
 		// cores' transports and TLS settings do not apply.
@@ -1023,6 +1083,20 @@ func EachText(text string, fn func(*Node)) (seen int) {
 		fn(n)
 		return 1
 	}
+	// Whole client configs (sing-box and Xray JSON, WireGuard INI, OpenVPN
+	// profiles); a channel's page can hold WireGuard configs and links both.
+	html := looksHTML(text)
+	cfg := text
+	if html {
+		cfg = stripHTML(text)
+	}
+	configs := ParseConfigs(cfg)
+	for _, n := range configs {
+		fn(n)
+	}
+	if len(configs) > 0 && !html {
+		return len(configs)
+	}
 	links := ExtractLinks(text)
 	for _, l := range links {
 		// The methods (warp-plus, the serverless one) are the app's own:
@@ -1031,7 +1105,7 @@ func EachText(text string, fn func(*Node)) (seen int) {
 			fn(n)
 		}
 	}
-	return len(links)
+	return len(configs) + len(links)
 }
 
 // Link returns a string that ParseLink turns back into this node: the

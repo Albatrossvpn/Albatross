@@ -213,6 +213,32 @@ func clashProxy(raw map[string]any) *Node {
 		} else if rs := p.s("reserved"); rs != "" {
 			n.Reserved = parseReserved(rs)
 		}
+		// mihomo's AmneziaWG: WireGuard with its junk packets and headers.
+		if a := p.m("amnezia-wg-option"); len(a) > 0 {
+			n.Proto = "amneziawg"
+			n.AWG = &AmneziaWG{Jc: atoi(a.s("jc")), Jmin: atoi(a.s("jmin")), Jmax: atoi(a.s("jmax")), S1: atoi(a.s("s1")), S2: atoi(a.s("s2")),
+				H1: a.s("h1"), H2: a.s("h2"), H3: a.s("h3"), H4: a.s("h4")}
+		}
+	case "ssh":
+		n.Proto = "ssh"
+		n.Username = p.s("username")
+		n.Password = p.s("password")
+		if n.Port == 0 {
+			n.Port = 22
+		}
+		if keys := p.list("host-key"); len(keys) > 0 {
+			n.HostKey = keys[0]
+		}
+	case "mieru":
+		n.Proto = "mieru"
+		n.Username = p.s("username")
+		n.Password = p.s("password")
+		n.Transport = strings.ToLower(firstNonEmpty(p.s("transport"), "tcp"))
+		if n.Port == 0 {
+			// A range of ports instead: its first.
+			first, _, _ := strings.Cut(p.s("port-range"), "-")
+			n.Port = atoi(strings.TrimSpace(first))
+		}
 	default:
 		return nil
 	}
