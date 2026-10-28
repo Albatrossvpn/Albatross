@@ -366,6 +366,50 @@ func parseMieru(link string) (*Node, error) {
 	return n, nil
 }
 
+// parseMieruSimple reads Mieru's own simple links (mieru export config
+// simple): mierus://user:password@host?profile=default&mtu=1400&port=6666&port=9998-9999&protocol=TCP&protocol=UDP,
+// the nth port (or range) bound to the nth protocol. The first TCP binding
+// is used, else the first; a range gives its first port.
+func parseMieruSimple(link string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	_, qs, _ := strings.Cut(strings.SplitN(link, "#", 2)[0], "?")
+	ports, protos := queryAll(qs, "port"), queryAll(qs, "protocol")
+	if len(ports) == 0 {
+		return nil, fmt.Errorf("mieru link without a port")
+	}
+	pick := 0
+	for i := range ports {
+		if i < len(protos) && strings.EqualFold(protos[i], "tcp") {
+			pick = i
+			break
+		}
+	}
+	proto := "tcp"
+	if pick < len(protos) {
+		proto = strings.ToLower(protos[pick])
+	}
+	first, _, _ := strings.Cut(ports[pick], "-")
+	n := &Node{Proto: "mieru", Name: cleanName(u.fragment), Server: u.host, Port: atoi(first), Transport: proto, MTU: atoi(u.query["mtu"])}
+	n.Username, n.Password, _ = strings.Cut(unescape(u.user), ":")
+	return n, nil
+}
+
+// queryAll returns every value of a query key, in order (parseQuery keeps
+// the first only).
+func queryAll(qs, key string) []string {
+	var out []string
+	for _, kv := range strings.Split(qs, "&") {
+		k, v, _ := strings.Cut(kv, "=")
+		if strings.EqualFold(strings.TrimSpace(unescape(k)), key) {
+			out = append(out, strings.TrimSpace(unescape(v)))
+		}
+	}
+	return out
+}
+
 // parseBrook reads Brook's own links: brook://server?server=host:port&password=...,
 // brook://wsserver?wsserver=ws://host:port/path&password=... and
 // brook://wssserver?wssserver=wss://host:port/path&password=...&address=host:port&insecure=true.

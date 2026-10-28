@@ -19,6 +19,9 @@ func TestSidecarLinks(t *testing.T) {
 		{"juicity://b831381d-6324-4d53-ad4f-8cda48b30811:pw@1.2.3.4:8446?congestion_control=bbr&sni=a.example.com&allow_insecure=0#J", "juicity", "juicity-client", true, `"sni":"a.example.com"`},
 		{"mieru://carol:pw@5.6.7.8:2086?protocol=tcp&mtu=1400#M", "mieru", "mieru", false, `"portBindings":[{"port":2086,"protocol":"TCP"}]`},
 		{"mieru://carol:pw@example.org:2086?protocol=udp", "mieru", "mieru", true, `"domainName":"example.org"`},
+		// Mieru's own simple link: the first TCP binding, a range's first port.
+		{"mierus://baozi:manlianpenfen@1.2.3.4?handshake-mode=HANDSHAKE_NO_WAIT&mtu=1400&multiplexing=MULTIPLEXING_HIGH&port=6666&port=9998-9999&port=6489&port=4896&profile=default&protocol=TCP&protocol=TCP&protocol=UDP&protocol=UDP", "mieru", "mieru", false, `"portBindings":[{"port":6666,"protocol":"TCP"}]`},
+		{"mierus://u:p@example.org?port=7000-7010&profile=default&protocol=UDP#S", "mieru", "mieru", true, `"portBindings":[{"port":7000,"protocol":"UDP"}]`},
 		{"brook://server?server=1.2.3.4%3A9999&password=hello&name=B", "brook", "brook", false, "client --server 1.2.3.4:9999 --password hello --socks5 127.0.0.1:"},
 		{"brook://wssserver?wssserver=wss%3A%2F%2Fa.example.com%3A2095%2Fws&password=hello&address=1.2.3.4%3A2095", "brook", "brook", false, "wssclient --wssserver wss://a.example.com:2095/ws --password hello --socks5 127.0.0.1:"},
 		{"wstunnel://1.2.3.4:2097?path=s3cret&sni=a.example.com#W", "wstunnel", "wstunnel", false, "--http-upgrade-path-prefix s3cret"},
@@ -57,6 +60,7 @@ func TestSidecarLinksRejected(t *testing.T) {
 		"naive+https://alice@proxy.example.com:443",        // no password
 		"juicity://pw@1.2.3.4:8446",                        // no uuid
 		"mieru://carol:pw@5.6.7.8:2086?protocol=sctp",      // unknown carrier
+		"mierus://carol:pw@5.6.7.8?profile=default",        // no port
 		"brook://quicserver?quicserver=quic%3A%2F%2Fa%3A1", // unsupported kind
 		"wstunnel://1.2.3.4:2097",                          // no path secret
 		"amneziawg://k@1.2.3.4:1?publickey=p&address=10.0.0.2&jc=200&jmin=50&jmax=40",

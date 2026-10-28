@@ -167,6 +167,8 @@ func ParseLink(link string) (*Node, error) {
 		n, err = parseJuicity(link)
 	case "mieru":
 		n, err = parseMieru(link)
+	case "mierus":
+		n, err = parseMieruSimple(link)
 	case "brook":
 		n, err = parseBrook(link)
 	case "wstunnel":
