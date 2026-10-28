@@ -41,9 +41,17 @@ func (e *Engine) ShareCode() (string, error) {
 	now := time.Now()
 	e.mu.Lock()
 	reg, p := e.reg.Regime, e.reg.Probe
+	// The project's own servers stay with the plans that have them; the
+	// relays inside the country go, in a shutdown they are what matters.
+	own := map[string]bool{}
+	for _, s := range e.srcs {
+		if ownSource(s) {
+			own[s.Label()] = true
+		}
+	}
 	var list []*Server
 	for _, s := range e.good {
-		if s.usable(now) && s.Source != "warp-plus" && s.Source != "usque" && s.Source != "tor" && s.Source != "direct" && s.Source != "edge" {
+		if s.usable(now) && s.Source != "warp-plus" && s.Source != "usque" && s.Source != "tor" && s.Source != "direct" && s.Source != "edge" && !(s.Own && own[s.Source]) {
 			list = append(list, s)
 		}
 	}

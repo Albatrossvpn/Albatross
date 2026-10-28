@@ -70,7 +70,13 @@ type AccountState struct {
 	Tier       string `json:"tier,omitempty"`
 	MaxDevices int    `json:"max_devices"`
 	Devices    int    `json:"devices"`
-	SiteURL    string `json:"site_url,omitempty"`
+	// Features are what the plan has (null: everything, the service named
+	// none), Plans which plan brings each feature and PlanDevices how many
+	// devices each plan has, for the UI to show what is locked.
+	Features    []string          `json:"features"`
+	Plans       map[string]string `json:"plans,omitempty"`
+	PlanDevices map[string]int    `json:"plan_devices,omitempty"`
+	SiteURL     string            `json:"site_url,omitempty"`
 	// Progress says what signing in is doing right now, while it is:
 	// finding a server to go through can take a while.
 	Progress string `json:"progress,omitempty"`
@@ -132,6 +138,7 @@ func (e *Engine) Account() AccountState {
 	st.QuotaBytes, st.UsedBytes, st.MaxSeconds, st.UsedSeconds = i.QuotaBytes, i.UsedBytes, i.MaxSeconds, i.UsedSeconds
 	st.ExpiresAt, st.ResetsAt = i.ExpiresAt, i.ResetsAt
 	st.Tier, st.MaxDevices, st.Devices = i.Tier, i.MaxDevices, i.Devices
+	st.Features, st.Plans, st.PlanDevices = i.Features, i.Plans, i.PlanDevices
 	if why := i.Why(time.Now()); why != "" {
 		st.Message = limitMessage(why, i)
 	}
@@ -162,7 +169,7 @@ func (e *Engine) Login(username, password string) error {
 		return err
 	}
 	e.logf("info", "Signed in.")
-	e.updateBadge()
+	e.accountChanged()
 	// The lists downloaded so far open with the keys (rereadKeyed). Before
 	// Start there are none, and reading them will fetch the keys.
 	if e.ctx != nil {
@@ -308,7 +315,7 @@ func (e *Engine) Logout() {
 	e.Disconnect()
 	e.acct.Logout()
 	forgetListKeys()
-	e.updateBadge()
+	e.accountChanged()
 }
 
 // updateBadge tells the app which plan the signed-in account is on when
@@ -354,7 +361,7 @@ func (e *Engine) AllowConnect() error {
 			return err
 		})
 		cancel()
-		e.updateBadge()
+		e.accountChanged()
 		if errors.Is(err, account.ErrSignedOut) {
 			return ErrLoginRequired
 		}
@@ -445,7 +452,7 @@ func (e *Engine) meterStep(ctx context.Context, c *connection, m *meterState, ch
 		switch {
 		case err == nil:
 			info, why, m.synced = got, got.Why(now), now
-			e.updateBadge()
+			e.accountChanged()
 		case errors.Is(err, account.ErrSignedOut):
 			e.stopForAccount("Sign in to connect.")
 			return true

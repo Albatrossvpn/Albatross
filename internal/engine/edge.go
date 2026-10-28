@@ -53,7 +53,7 @@ func (e *Engine) loadEdge() {
 // only when no links are kept yet, through servers before going direct
 // (tunnelFirst), as signing in does.
 func (e *Engine) refreshEdge() {
-	if e.acct == nil || !e.acct.View().SignedIn || e.bin.SingBox == "" {
+	if e.acct == nil || !e.acct.View().SignedIn || e.bin.SingBox == "" || !e.Can(FeatureEdge) {
 		return
 	}
 	e.mu.Lock()
