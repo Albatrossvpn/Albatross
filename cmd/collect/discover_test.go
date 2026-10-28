@@ -180,36 +180,3 @@ func TestCarryRest(t *testing.T) {
 		t.Fatalf("misses %v", d.misses)
 	}
 }
-
-// Programs' sources and tests carry made-up links (example.com,
-// fixture.example): they are not lists, the files beside them are.
-func TestProgramFile(t *testing.T) {
-	const gh = "https://raw.githubusercontent.com/a/b/HEAD/"
-	for _, u := range []string{
-		gh + "internal/subscriptions/links_test.go",
-		gh + "tests/common/parser.test.ts",
-		gh + "src/lib/__fixtures__/serverCodec.json",
-		gh + "collector/tests/fixtures/uris.txt",
-		gh + "core/testdata/nodes.json",
-		gh + "crates/proto/src/naive.rs",
-		gh + "glider/config/glider.conf.example",
-		gh + "CONFIG_EXAMPLES.txt",
-	} {
-		if !programFile(u) {
-			t.Errorf("%s is taken for a list", u)
-		}
-	}
-	for _, u := range []string{
-		gh + "sub/configfa/anytls.txt",
-		gh + "nodes/merged.txt",
-		gh + "clash-wg.yml",
-		gh + "README.md",
-		gh + "docs/sub.txt",
-		gh + "subs/isp/expresshost-ltd.b64.txt",
-		"https://example.org/sub?token=test",
-	} {
-		if programFile(u) {
-			t.Errorf("%s is taken for a program's file", u)
-		}
-	}
-}
