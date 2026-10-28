@@ -15,6 +15,7 @@ MIERU_VERSION="${MIERU_VERSION:-3.39.0}"
 BROOK_VERSION="${BROOK_VERSION:-20270101}"
 WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
 WIREPROXY_AWG_REF="${WIREPROXY_AWG_REF:-v1.0.18}"
+MIHOMO_VERSION="${MIHOMO_VERSION:-1.19.33}"
 # The TUN driver sing-box loads on Windows for the whole-device mode; it
 # must sit next to sing-box.exe. Prebuilt by WireGuard, checked by hash.
 WINTUN_VERSION="${WINTUN_VERSION:-0.14.1}"
@@ -102,6 +103,11 @@ git clone -q --depth 1 --branch "$WIREPROXY_AWG_REF" https://github.com/artem-ru
 # A Windows executable starts with "MZ"; building the repository's root (a library) writes an archive instead.
 [ "$(head -c2 "$out/core/wireproxy-awg.exe")" = MZ ] || { echo "wireproxy-awg.exe is not a Windows executable" >&2; exit 1; }
 cp "$tmp/wpawg/LICENSE" "$out/licenses/wireproxy-awg-LICENSE.txt"
+# ShadowsocksR and Snell run on mihomo, built from its source.
+git clone -q --depth 1 --branch "v$MIHOMO_VERSION" https://github.com/MetaCubeX/mihomo "$tmp/mihomo"
+(cd "$tmp/mihomo" && GOTOOLCHAIN=auto GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags "-s -w -checklinkname=0" -o "$out/core/mihomo.exe" .)
+[ "$(head -c2 "$out/core/mihomo.exe")" = MZ ] || { echo "mihomo.exe is not a Windows executable" >&2; exit 1; }
+cp "$tmp/mihomo/LICENSE" "$out/licenses/mihomo-LICENSE.txt"
 # The Snowflake proxy for "Help others" is its own module: its library
 # needs a newer Go than the app.
 (cd "$root/tools/snowflake" && GOTOOLCHAIN="${SNOWFLAKE_GO:-go1.26.10}" GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
@@ -127,6 +133,7 @@ Bundled components (see the licenses folder):
   Brook $BROOK_VERSION          https://github.com/txthinking/brook (GPL-3.0; source at that address)
   WStunnel $WSTUNNEL_VERSION         https://github.com/erebe/wstunnel (BSD-3-Clause)
   wireproxy-awg             https://github.com/artem-russkikh/wireproxy-awg (ISC; AmneziaWG as a SOCKS proxy)
+  mihomo $MIHOMO_VERSION         https://github.com/MetaCubeX/mihomo (GPL-3.0; source at that address; ShadowsocksR and Snell)
   Tor Expert Bundle         https://www.torproject.org (BSD-3-Clause; transports under their own licenses)
   Snowflake proxy           https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/snowflake (BSD-3-Clause)
   Twemoji country flags     https://github.com/talkjs/country-flag-emoji-polyfill (CC-BY 4.0 graphics by Twitter)

@@ -229,6 +229,20 @@ func clashProxy(raw map[string]any) *Node {
 		if keys := p.list("host-key"); len(keys) > 0 {
 			n.HostKey = keys[0]
 		}
+	case "ssr":
+		n.Proto = "ssr"
+		n.Method = p.s("cipher")
+		n.Password = p.s("password")
+		n.Obfs = p.s("obfs")
+		n.SSRProtocol = p.s("protocol")
+		n.SSRObfsParam = p.s("obfs-param")
+		n.SSRProtocolParam = p.s("protocol-param")
+	case "snell":
+		n.Proto = "snell"
+		n.Password = p.s("psk")
+		n.SnellVersion = atoi(p.s("version"))
+		o := p.m("obfs-opts")
+		n.Obfs, n.Host = o.s("mode"), o.s("host")
 	case "mieru":
 		n.Proto = "mieru"
 		n.Username = p.s("username")

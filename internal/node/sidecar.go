@@ -22,6 +22,8 @@ var sidecars = map[string]string{
 	"brook":     "brook",          // Brook: its own protocol, plain or over WebSocket+TLS
 	"wstunnel":  "wstunnel",       // WStunnel: WebSocket over TLS carrying a SOCKS5 tunnel
 	"amneziawg": "wireproxy-awg",  // AmneziaWG: WireGuard with junk packets and masked headers
+	"ssr":       "mihomo",         // ShadowsocksR: Shadowsocks with a protocol and an obfs of its own
+	"snell":     "mihomo",         // Snell: Surge's protocol, plain or with HTTP or TLS obfs
 }
 
 // Sidecar names the helper program a node runs on, or "" for cores.
@@ -62,6 +64,14 @@ func (n *Node) validateSidecar() error {
 		}
 		if n.Transport != "tcp" && n.Transport != "udp" {
 			return fmt.Errorf("mieru runs over tcp or udp")
+		}
+	case "ssr":
+		if n.Password == "" || !ssrCiphers[n.Method] || !ssrObfs[n.Obfs] || !ssrProtocols[n.SSRProtocol] {
+			return fmt.Errorf("ssr needs a password, and a cipher, obfs and protocol mihomo runs")
+		}
+	case "snell":
+		if n.Password == "" || n.SnellVersion < 0 || n.SnellVersion > 5 || n.Obfs != "" && n.Obfs != "http" && n.Obfs != "tls" {
+			return fmt.Errorf("snell needs its key, a version up to 5, and http or tls obfs if any")
 		}
 	case "brook":
 		if n.Password == "" {
@@ -269,6 +279,32 @@ func (n *Node) SidecarArgs(port int, dir, pass string) (args, env []string, file
 			args = append(args, "--tls-verify-certificate")
 		}
 		args = append(args, "wss://"+n.hostPort())
+	case "ssr", "snell":
+		p := map[string]any{"name": "p", "type": n.Proto, "server": n.Server, "port": n.Port}
+		if n.Proto == "ssr" {
+			p["cipher"], p["password"], p["obfs"], p["protocol"] = n.Method, n.Password, n.Obfs, n.SSRProtocol
+			p["obfs-param"], p["protocol-param"], p["udp"] = n.SSRObfsParam, n.SSRProtocolParam, true
+		} else {
+			p["psk"] = n.Password
+			if n.SnellVersion > 0 {
+				p["version"] = n.SnellVersion
+			}
+			if n.Obfs != "" {
+				p["obfs-opts"] = map[string]any{"mode": n.Obfs, "host": firstNonEmpty(n.Host, "www.bing.com")}
+			}
+		}
+		cfg := map[string]any{
+			"socks-port": port, "bind-address": "127.0.0.1", "allow-lan": false, "mode": "rule", "log-level": "warning",
+			"ipv6": true, "find-process-mode": "off", "geo-auto-update": false, "dns": map[string]any{"enable": false},
+			"profile": map[string]any{"store-selected": false, "store-fake-ip": false},
+			"proxies": []any{p}, "rules": []string{"MATCH,p"},
+		}
+		if pass != "" {
+			cfg["authentication"] = []string{SocksUser + ":" + pass}
+		}
+		c, _ := json.Marshal(cfg)
+		files["config.yaml"] = string(c)
+		args = []string{"-d", dir, "-f", dir + sep + "config.yaml"}
 	case "amneziawg":
 		// The keys in their standard form, rebuilt from their bytes
 		// (validateSidecar has checked every value written here).
@@ -408,6 +444,60 @@ func queryAll(qs, key string) []string {
 		}
 	}
 	return out
+}
+
+// The ciphers, obfs and protocols of ShadowsocksR that mihomo runs.
+var (
+	ssrCiphers = map[string]bool{"none": true, "table": true, "rc4": true, "rc4-md5": true, "aes-128-cfb": true, "aes-192-cfb": true, "aes-256-cfb": true,
+		"aes-128-ctr": true, "aes-192-ctr": true, "aes-256-ctr": true, "aes-128-gcm": true, "aes-192-gcm": true, "aes-256-gcm": true,
+		"chacha20": true, "chacha20-ietf": true, "chacha20-ietf-poly1305": true, "xchacha20": true, "xchacha20-ietf-poly1305": true,
+		"bf-cfb": true, "camellia-128-cfb": true, "camellia-192-cfb": true, "camellia-256-cfb": true, "salsa20": true, "dummy": true}
+	ssrObfs      = map[string]bool{"plain": true, "http_simple": true, "http_post": true, "random_head": true, "tls1.2_ticket_auth": true, "tls1.2_ticket_fastauth": true}
+	ssrProtocols = map[string]bool{"origin": true, "auth_sha1_v4": true, "auth_aes128_md5": true, "auth_aes128_sha1": true, "auth_chain_a": true, "auth_chain_b": true}
+)
+
+// parseSSR reads ShadowsocksR's links: ssr://base64(host:port:protocol:cipher:obfs:base64(password)/?obfsparam=&protoparam=&remarks=),
+// the parameters in base64 too. The host can be an IPv6 address, so the
+// fields are taken from the right.
+func parseSSR(link string) (*Node, error) {
+	dec, err := decodeB64(trimB64(strings.TrimSpace(link[len("ssr://"):])))
+	if err != nil {
+		if dec = decodeB64Prefix(link[len("ssr://"):]); len(dec) == 0 {
+			return nil, fmt.Errorf("ssr base64: %w", err)
+		}
+	}
+	main, qs, _ := strings.Cut(string(dec), "?")
+	main = strings.TrimSuffix(main, "/")
+	f := strings.Split(main, ":")
+	if len(f) < 6 {
+		return nil, fmt.Errorf("ssr link of %d fields", len(f))
+	}
+	k := len(f) - 5
+	pw, err := decodeB64(f[k+4])
+	if err != nil {
+		return nil, fmt.Errorf("ssr password: %w", err)
+	}
+	q := parseQuery(qs)
+	b64 := func(key string) string {
+		if v, err := decodeB64(q[key]); err == nil {
+			return string(v)
+		}
+		return ""
+	}
+	return &Node{Proto: "ssr", Name: cleanName(b64("remarks")), Server: strings.Trim(strings.Join(f[:k], ":"), "[]"), Port: atoi(f[k]),
+		SSRProtocol: f[k+1], Method: f[k+2], Obfs: f[k+3], Password: string(pw),
+		SSRObfsParam: b64("obfsparam"), SSRProtocolParam: b64("protoparam")}, nil
+}
+
+// parseSnell reads snell://psk@host:port?version=4&obfs=http&obfs-host=example.com#name.
+func parseSnell(link string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	q := u.query
+	return &Node{Proto: "snell", Name: cleanName(u.fragment), Server: u.host, Port: atoi(u.port), Password: unescape(u.user),
+		SnellVersion: atoi(firstNonEmpty(q["version"], q["v"])), Obfs: q["obfs"], Host: firstNonEmpty(q["obfs-host"], q["host"])}, nil
 }
 
 // parseBrook reads Brook's own links: brook://server?server=host:port&password=...,

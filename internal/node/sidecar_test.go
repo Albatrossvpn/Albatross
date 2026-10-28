@@ -23,6 +23,10 @@ func TestSidecarLinks(t *testing.T) {
 		{"mierus://baozi:manlianpenfen@1.2.3.4?handshake-mode=HANDSHAKE_NO_WAIT&mtu=1400&multiplexing=MULTIPLEXING_HIGH&port=6666&port=9998-9999&port=6489&port=4896&profile=default&protocol=TCP&protocol=TCP&protocol=UDP&protocol=UDP", "mieru", "mieru", false, `"portBindings":[{"port":6666,"protocol":"TCP"}]`},
 		{"mierus://u:p@example.org?port=7000-7010&profile=default&protocol=UDP#S", "mieru", "mieru", true, `"portBindings":[{"port":7000,"protocol":"UDP"}]`},
 		{"brook://server?server=1.2.3.4%3A9999&password=hello&name=B", "brook", "brook", false, "client --server 1.2.3.4:9999 --password hello --socks5 127.0.0.1:"},
+		// ShadowsocksR and Snell run on mihomo, from a JSON (so YAML) config.
+		{"ssr://MS4yLjMuNDo4Mzg4OmF1dGhfYWVzMTI4X21kNTphZXMtMjU2LWNmYjp0bHMxLjJfdGlja2V0X2F1dGg6Y0hjLz9vYmZzcGFyYW09WW1sdVp5NWpiMjAmcmVtYXJrcz1Vdw", "ssr", "mihomo", false, `"obfs-param":"bing.com","password":"pw","port":8388,"protocol":"auth_aes128_md5"`},
+		{"ssr://MjAwMTpkYjg6OjE6NDQzOm9yaWdpbjpjaGFjaGEyMC1pZXRmOnBsYWluOmNIYw", "ssr", "mihomo", false, `"server":"2001:db8::1"`},
+		{"snell://psk123@5.6.7.8:443?version=4&obfs=tls&obfs-host=www.example.com#N", "snell", "mihomo", false, `"obfs-opts":{"host":"www.example.com","mode":"tls"},"port":443,"psk":"psk123"`},
 		{"brook://wssserver?wssserver=wss%3A%2F%2Fa.example.com%3A2095%2Fws&password=hello&address=1.2.3.4%3A2095", "brook", "brook", false, "wssclient --wssserver wss://a.example.com:2095/ws --password hello --socks5 127.0.0.1:"},
 		{"wstunnel://1.2.3.4:2097?path=s3cret&sni=a.example.com#W", "wstunnel", "wstunnel", false, "--http-upgrade-path-prefix s3cret"},
 		{"amneziawg://cPr%2BXL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E%3D@1.2.3.4:8447?publickey=HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw%3D&address=10.8.0.2%2F32&jc=4&jmin=40&jmax=70&s1=15&s2=18&h1=1234&h2=2345&h3=3456&h4=4567#A", "amneziawg", "wireproxy-awg", true, "Jc = 4\n"},
@@ -57,12 +61,14 @@ func TestSidecarLinks(t *testing.T) {
 
 func TestSidecarLinksRejected(t *testing.T) {
 	for _, link := range []string{
-		"naive+https://alice@proxy.example.com:443",        // no password
-		"juicity://pw@1.2.3.4:8446",                        // no uuid
-		"mieru://carol:pw@5.6.7.8:2086?protocol=sctp",      // unknown carrier
-		"mierus://carol:pw@5.6.7.8?profile=default",        // no port
-		"brook://quicserver?quicserver=quic%3A%2F%2Fa%3A1", // unsupported kind
-		"wstunnel://1.2.3.4:2097",                          // no path secret
+		"naive+https://alice@proxy.example.com:443",                                // no password
+		"juicity://pw@1.2.3.4:8446",                                                // no uuid
+		"mieru://carol:pw@5.6.7.8:2086?protocol=sctp",                              // unknown carrier
+		"mierus://carol:pw@5.6.7.8?profile=default",                                // no port
+		"ssr://MS4yLjMuNDo4Mzg4OnVua25vd25fcHJvdG86YWVzLTI1Ni1jZmI6cGxhaW46Y0hjLw", // a protocol mihomo lacks
+		"snell://psk@5.6.7.8:443?obfs=quic",                                        // an obfs Snell lacks
+		"brook://quicserver?quicserver=quic%3A%2F%2Fa%3A1",                         // unsupported kind
+		"wstunnel://1.2.3.4:2097",                                                  // no path secret
 		"amneziawg://k@1.2.3.4:1?publickey=p&address=10.0.0.2&jc=200&jmin=50&jmax=40",
 	} {
 		if _, err := ParseLink(link); err == nil {

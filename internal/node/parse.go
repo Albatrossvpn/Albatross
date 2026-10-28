@@ -16,7 +16,7 @@ import (
 	"unicode/utf8"
 )
 
-var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|trojan-go|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|amneziawg|awg|anytls|socks5?|socks4|naive(?:\+https|\+quic)?|juicity|mieru|brook|wstunnel|albatross)://`)
+var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|trojan-go|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|amneziawg|awg|anytls|socks5?|socks4a?|naive(?:\+https|\+quic)?|juicity|mieru|brook|wstunnel|snell|albatross|https?)://`)
 
 // ErrUnsupported marks links that parse but cannot be run by any core.
 var ErrUnsupported = errors.New("unsupported")
@@ -48,10 +48,19 @@ func ExtractLinks(text string) []string {
 		// base64, its name: "...fQ==vless://", "#🇩🇪 Germanyvmess://"); a
 		// link runs to the next one or the end of the line.
 		locs := schemeRe.FindAllStringIndex(line, -1)
-		for i, loc := range locs {
+		starts := locs[:0:0]
+		for _, loc := range locs {
+			// A site's address inside a link (its query, its name) is no
+			// link of its own; a proxy's starts its line or follows a space.
+			if loc[0] > 0 && line[loc[0]-1] != ' ' && line[loc[0]-1] != '\t' && strings.HasPrefix(strings.ToLower(line[loc[0]:loc[1]]), "http") {
+				continue
+			}
+			starts = append(starts, loc)
+		}
+		for i, loc := range starts {
 			end := len(line)
-			if i+1 < len(locs) {
-				end = locs[i+1][0]
+			if i+1 < len(starts) {
+				end = starts[i+1][0]
 			}
 			link := strings.TrimSpace(line[loc[0]:end])
 			link = strings.TrimRight(link, ",;|\"'")
@@ -219,14 +228,23 @@ func ParseLink(link string) (*Node, error) {
 		n, err = parseSSH(link)
 	case "socks", "socks5":
 		n, err = parseSocks(link)
+	case "socks4", "socks4a":
+		// SOCKS 4 has no password; sing-box speaks it, Xray does not.
+		if n, err = parseSocks(link); err == nil {
+			n.SocksVersion, n.Password = scheme[len("socks"):], ""
+		}
+	case "http", "https":
+		n, err = parseHTTPProxy(link, scheme)
 	case "albatross":
 		// The app's own form of a node (Node.Link), which lists carry
 		// too: checked like the share links it stands in for.
 		if n, err = parseInternal(link); err == nil {
 			n.Name = cleanName(n.Name)
 		}
-	case "ssr", "socks4":
-		return nil, ErrUnsupported
+	case "ssr":
+		n, err = parseSSR(link)
+	case "snell":
+		n, err = parseSnell(link)
 	default:
 		return nil, ErrUnsupported
 	}
@@ -876,6 +894,31 @@ func parseReserved(s string) []int {
 		return []int{int(b[0]), int(b[1]), int(b[2])}
 	}
 	return nil
+}
+
+// parseHTTPProxy reads an HTTP proxy, http(s)://[user:password@]host:port
+// as proxy lists write them: a port, no path, no query. Without a user, the
+// host must be an address: a site's own address (https://example.com:8443)
+// is not taken for a proxy.
+func parseHTTPProxy(link, scheme string) (*Node, error) {
+	u, err := splitURI(link)
+	if err != nil {
+		return nil, err
+	}
+	if u.port == "" || u.path != "" && u.path != "/" || len(u.query) > 0 || u.user == "" && net.ParseIP(strings.Trim(u.host, "[]")) == nil {
+		return nil, ErrUnsupported
+	}
+	n := &Node{Proto: "http", Name: cleanName(u.fragment), Server: u.host, Port: atoi(u.port)}
+	if u.user != "" {
+		n.Username, n.Password, _ = strings.Cut(unescape(u.user), ":")
+	}
+	if scheme == "https" {
+		n.Security = "tls"
+		if net.ParseIP(strings.Trim(u.host, "[]")) == nil {
+			n.SNI = u.host
+		}
+	}
+	return n, nil
 }
 
 func parseSocks(link string) (*Node, error) {

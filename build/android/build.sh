@@ -19,6 +19,7 @@ MIERU_VERSION="${MIERU_VERSION:-3.39.0}"
 BROOK_VERSION="${BROOK_VERSION:-20270101}"
 WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
 WIREPROXY_AWG_REF="${WIREPROXY_AWG_REF:-v1.0.18}"
+MIHOMO_VERSION="${MIHOMO_VERSION:-1.19.33}"
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
@@ -241,6 +242,10 @@ sidecars() {
   (cd "$src" && gobuild "$abi" "$out/libwireproxyawg.so" -ldflags "-s -w -checklinkname=0" ./cmd/wireproxy)
   cp "$src/LICENSE" "$lic/wireproxy-awg-LICENSE.txt"
   if [ "$abi" = arm64-v8a ]; then
+    # mihomo (ShadowsocksR, Snell) is large: the 64-bit ARM phones only.
+    src="$(gosrc mihomo MetaCubeX/mihomo "v$MIHOMO_VERSION" .)"
+    (cd "$src" && gobuild "$abi" "$out/libmihomo.so" -ldflags "-s -w -checklinkname=0" .)
+    cp "$src/LICENSE" "$lic/mihomo-LICENSE.txt"
     fetch "$gh/erebe/wstunnel/releases/download/v$WSTUNNEL_VERSION/wstunnel_${WSTUNNEL_VERSION}_android_arm64.tar.gz" "$dl/wstunnel-$WSTUNNEL_VERSION-android.tgz"
     rm -rf "$tmp/wst-$abi" && mkdir -p "$tmp/wst-$abi"
     tar -xzf "$dl/wstunnel-$WSTUNNEL_VERSION-android.tgz" -C "$tmp/wst-$abi"

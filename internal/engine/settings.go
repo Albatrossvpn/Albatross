@@ -107,6 +107,7 @@ func ProtocolChoices() []ProtocolChoice {
 		{"shadowsocks", "Shadowsocks"}, {"hysteria2", "Hysteria 2"}, {"hysteria", "Hysteria"}, {"tuic", "TUIC"},
 		{"anytls", "AnyTLS"}, {"wireguard", "WireGuard"}, {"amneziawg", "AmneziaWG"}, {"openvpn", "OpenVPN"}, {"ssh", "SSH"},
 		{"naive", "NaiveProxy"}, {"juicity", "Juicity"}, {"mieru", "Mieru"}, {"brook", "Brook"}, {"wstunnel", "WStunnel"},
+		{"ssr", "ShadowsocksR"}, {"snell", "Snell"},
 		{"socks", "SOCKS5"}, {"http", "HTTP proxy"}, {"warp", "Cloudflare WARP"}, {"tor", "Tor"},
 	}
 }
