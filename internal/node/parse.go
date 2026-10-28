@@ -32,7 +32,8 @@ func ExtractLinks(text string) []string {
 			text = dec
 		}
 	}
-	if t := strings.TrimSpace(head(text, 64)); strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[") || strings.Contains(text, `\n`) || strings.Contains(text, `\u00`) {
+	if t := strings.TrimSpace(head(text, 64)); strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[") || strings.HasPrefix(t, `"`) ||
+		strings.Count(text, `\n`) > strings.Count(text, "\n") {
 		// JSON, or text taken out of JSON strings: its quotes end strings
 		// (a quote inside a link is escaped there) and its escapes hide the
 		// line breaks between links ("\nvless://...", "\u003evless://").
@@ -531,9 +532,13 @@ func parseVMess(link string) (*Node, error) {
 		name = unescape(body[i+1:])
 		body = body[:i]
 	}
-	if loc := schemeRe.FindStringIndex(body); loc != nil {
-		// The next link stuck to this one's base64.
-		body = body[:loc[0]]
+	for _, loc := range schemeRe.FindAllStringIndex(body, -1) {
+		// The next link stuck to this one's base64 (a site's address can
+		// be in the query of the URL form).
+		if !strings.HasPrefix(strings.ToLower(body[loc[0]:]), "http") {
+			body = body[:loc[0]]
+			break
+		}
 	}
 	if strings.Contains(body, "@") {
 		// Xray's URL form: vmess://uuid@host:port?type=ws&security=tls...
