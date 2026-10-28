@@ -16,7 +16,7 @@ import (
 	"unicode/utf8"
 )
 
-var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|trojan-go|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|amneziawg|awg|anytls|socks5?|socks4a?|naive(?:\+https|\+quic)?|juicity|mieru|brook|wstunnel|snell|albatross|https?)://`)
+var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|trojan-go|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|amneziawg|awg|anytls|socks5?|socks4a?|naive(?:\+https|\+quic)?|juicity|mieru|brook|wstunnel|snell|sn|exclave|albatross|https?)://`)
 
 // ErrUnsupported marks links that parse but cannot be run by any core.
 var ErrUnsupported = errors.New("unsupported")
@@ -246,6 +246,8 @@ func ParseLink(link string) (*Node, error) {
 		n, err = parseSSR(link)
 	case "snell":
 		n, err = parseSnell(link)
+	case "sn", "exclave":
+		n, err = parseNekoBox(link, scheme)
 	default:
 		return nil, ErrUnsupported
 	}

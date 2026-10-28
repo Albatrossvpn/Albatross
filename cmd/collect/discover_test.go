@@ -180,3 +180,23 @@ func TestCarryRest(t *testing.T) {
 		t.Fatalf("misses %v", d.misses)
 	}
 }
+
+// The subscriptions inside apps' import links are sources too, their
+// tokens kept.
+func TestImportLinksMentioned(t *testing.T) {
+	text := "happ://add/https://sub.example.com/s/abc123 " +
+		"v2rayng://install-sub?url=https%3A%2F%2Fpanel.example.org%2Fapi%2Fsub%3Ftoken%3Dxyz&name=free " +
+		"sing-box://import-remote-profile?url=https%3A%2F%2Fa.example.net%2Fc.json#n " +
+		"happ://add/https://example.com/ happ://crypt5/abcdef"
+	subs, _ := mentions(text)
+	want := map[string]bool{"https://sub.example.com/s/abc123": true, "https://panel.example.org/api/sub?token=xyz": true, "https://a.example.net/c.json": true}
+	for _, s := range subs {
+		if !want[s] {
+			t.Errorf("unexpected %s", s)
+		}
+		delete(want, s)
+	}
+	if len(want) > 0 {
+		t.Errorf("missing %v from %v", want, subs)
+	}
+}
