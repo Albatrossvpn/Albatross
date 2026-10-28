@@ -69,6 +69,9 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .plan-badge.silver { background: linear-gradient(160deg, #d6dde6 0%, #98a3b4 50%, #67727f 100%); }
 .plan-badge.gold { background: linear-gradient(160deg, #ffd96b 0%, #e0a51d 50%, #a87507 100%); }
 .plan-badge.vip { background: linear-gradient(160deg, #a78bff 0%, #6d3bf5 50%, #3d1db0 100%); }
+.plan-badge.mini { font-size: 10px; padding: 1px 7px 1px 5px; gap: 3px; box-shadow: none; text-shadow: none; letter-spacing: .02em; }
+.plan-badge.mini svg { width: 10px; height: 10px; filter: none; }
+#plan-chip { cursor: pointer; }
 .top-actions .plan-badge { margin-right: 8px; }
 .chip { font-size: 11px; padding: 2px 9px; border-radius: 999px; background: rgba(19, 144, 106, 0.1); color: #0f7d5c; font-weight: 600; }
 
@@ -196,6 +199,7 @@ main { flex: 1; overflow-y: auto; padding: 4px 16px 18px; scrollbar-width: thin;
 }
 button.item:hover { border-color: rgba(190, 147, 66, 0.55); }
 .item.selected { background: #f3f6ff; border-color: #2f5fe0; box-shadow: 0 0 0 1px #2f5fe0 inset; }
+.item.dim { opacity: .62; }
 .item .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .item .title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item .sub { font-size: 12px; color: #5b6684; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -311,6 +315,25 @@ textarea:focus, .search:focus { border-color: #2f5fe0; box-shadow: 0 0 0 3px rgb
 .step.done .step-num, .step.done .btn { display: none; }
 .step.done .check { display: block; width: 16px; height: 16px; color: #13906a; }
 
+/* A feature of a higher plan: its medal by the name, its switch off. */
+.locked .t-body b { color: #5b6684; }
+.locked .switch { opacity: .45; }
+.lock-tag { margin-left: 8px; vertical-align: 1px; }
+.sheet-note { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 12px; background: #fffaf0; border: 1px solid rgba(190, 147, 66, 0.4); color: #6f4a10; font-size: 13px; line-height: 1.4; }
+.sheet-note .plan-badge { flex: none; }
+
+/* Plans: what each adds to the one below it, the account's in gold. */
+.tier-card { background: #fff; border: 1px solid rgba(24, 42, 96, 0.09); border-radius: 16px; padding: 12px 14px 10px; }
+.tier-card.current { border-color: #c49a48; box-shadow: 0 0 0 1px #c49a48 inset, 0 12px 26px -18px rgba(138, 100, 36, 0.55); }
+.tier-head { display: flex; align-items: center; justify-content: space-between; }
+.tier-yours { font-size: 10.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #8a6424; }
+.tier-also { display: block; margin: 8px 0 0; color: #5b6684; font-size: 12px; }
+.tier-card ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.tier-card li { position: relative; padding: 3px 0 3px 22px; font-size: 13.5px; line-height: 1.45; }
+/* A gold tick. */
+.tier-card li::before { content: ""; position: absolute; left: 3px; top: 8px; width: 10px; height: 5px; border-left: 2px solid #c49a48; border-bottom: 2px solid #c49a48; -webkit-transform: rotate(-45deg); transform: rotate(-45deg); }
+.account .plans-row { margin-top: 6px; border-top: 1px solid rgba(24, 42, 96, 0.08); }
+
 /* Account */
 .account .acc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
 .account .acc-head b { display: block; font-size: 15px; }
@@ -370,6 +393,7 @@ textarea:focus, .search:focus { border-color: #2f5fe0; box-shadow: 0 0 0 3px rgb
   .log > * + * { margin-left: 10px; }
   .row-end > * + * { margin-left: 8px; }
   .update-banner > * + * { margin-left: 10px; }
+  .sheet-note > * + * { margin-left: 8px; }
   .update-banner > .update-error { margin: 6px 0 0; }
   .logs > * + * { margin-top: 4px; }
   .list > * + * { margin-top: 6px; }
