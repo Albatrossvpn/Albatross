@@ -133,6 +133,13 @@ func (d *discoverer) loadPrev(dir string) (subs, tgs []string) {
 		return out
 	}
 	subs, tgs = read("sources.txt"), read("channels.txt")
+	kept := subs[:0]
+	for _, u := range subs {
+		if !programFile(u) {
+			kept = append(kept, u)
+		}
+	}
+	subs = kept
 	for _, u := range subs {
 		d.prev[u] = true
 	}
@@ -556,7 +563,11 @@ func (d *discoverer) githubCode(ctx context.Context, hour int) []string {
 				break
 			}
 			for _, it := range res.Items {
-				out = append(out, "https://raw.githubusercontent.com/"+it.Repository.FullName+"/HEAD/"+it.Path)
+				u := "https://raw.githubusercontent.com/" + it.Repository.FullName + "/HEAD/" + it.Path
+				if programFile(u) {
+					continue
+				}
+				out = append(out, u)
 				n++
 			}
 			if len(res.Items) < 100 {
@@ -664,6 +675,28 @@ func (d *discoverer) github(ctx context.Context, u string, out any) error {
 
 // extraSources reads addresses or channel names, one per line, from a
 // discovered list (sources.txt, channels.txt); a missing file is empty.
+// programFile reports whether an address is a program's source or test
+// rather than a list: the share links in those are examples (example.com,
+// fixture.example, made-up keys) that only take up the tests, and for most
+// protocols they were all the public "servers" there were.
+func programFile(u string) bool {
+	p := strings.ToLower(u)
+	if i := strings.IndexAny(p, "?#"); i >= 0 {
+		p = p[:i]
+	}
+	if testPath.MatchString(p) {
+		return true
+	}
+	switch filepath.Ext(p) {
+	case ".go", ".rs", ".ts", ".tsx", ".js", ".mjs", ".jsx", ".py", ".kt", ".java", ".dart", ".swift", ".c", ".cc", ".cpp", ".h",
+		".cs", ".rb", ".php", ".sh", ".lua", ".vue", ".zig", ".m", ".ets", ".patch", ".snap", ".example":
+		return true
+	}
+	return false
+}
+
+var testPath = regexp.MustCompile(`/(tests?|testdata|__tests__|__fixtures__|fixtures?|spec|src/test|commontest)/|[._-](test|tests|spec|fixtures?)\.[a-z0-9]+$|/[^/]*example[^/]*$`)
+
 func extraSources(path string, kind sources.Kind) []sources.Source {
 	if path == "" {
 		return nil
@@ -676,7 +709,7 @@ func extraSources(path string, kind sources.Kind) []sources.Source {
 	var out []sources.Source
 	for _, l := range strings.Split(string(b), "\n") {
 		l = strings.TrimSpace(l)
-		if l == "" || strings.HasPrefix(l, "#") {
+		if l == "" || strings.HasPrefix(l, "#") || kind == sources.KindSubscription && programFile(l) {
 			continue
 		}
 		out = append(out, sources.Source{ID: sources.ID(kind, l), Kind: kind, URL: l, Tier: sources.TierDeep, Enabled: true})
