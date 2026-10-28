@@ -104,7 +104,16 @@ type VPNGateServer struct {
 }
 
 // ParseVPNGate reads https://www.vpngate.net/api/iphone/.
-func ParseVPNGate(text string) []VPNGateServer {
+func ParseVPNGate(text string) (out []VPNGateServer) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = nil // a parser's bug on the list leaves it out, not the app
+		}
+	}()
+	return parseVPNGate(text)
+}
+
+func parseVPNGate(text string) []VPNGateServer {
 	var rows []string
 	for _, l := range strings.Split(text, "\n") {
 		if l == "" || l[0] == '*' || l[0] == '#' {

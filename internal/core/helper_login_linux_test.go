@@ -87,6 +87,7 @@ func loginNodes() ([]*node.Node, error) {
 		"juicity://11111111-1111-1111-1111-111111111111:pw@192.0.2.1:443?sni=a.example#J",
 		"mieru://u:p@192.0.2.1:2086?protocol=tcp#M",
 		"wstunnel://192.0.2.1:443?path=secret#W",
+		"ssr://MTkyLjAuMi4xOjgzODg6b3JpZ2luOmFlcy0yNTYtY2ZiOnBsYWluOmNIYw#R",
 		"amneziawg://cPr%2BXL8mZ2rA2lD8Q1D8Q1D8Q1D8Q1D8Q1D8Q1D8Q1E%3D@192.0.2.1:8447?publickey=HIgo9xNzJMWLKASShiTqIybxZ0U3wGLiUeJ1PKf8ykw%3D&address=10.8.0.2%2F32&jc=4&jmin=40&jmax=70#A",
 	} {
 		n, err := node.ParseLink(link)

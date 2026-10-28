@@ -27,7 +27,17 @@ const (
 	KindVPNGate      Kind = "vpngate"  // the VPN Gate OpenVPN server list
 	KindLEAP         Kind = "leap"     // a LEAP provider (Riseup): OpenVPN with an anonymous certificate
 	KindFeed         Kind = "feed"     // an RSS or Atom feed (a channel's videos): the lists its newest entries link to
+	KindWarp         Kind = "warp"     // the device's own WARP account: servers made on the device (Fetcher.Warp)
 )
+
+// Warp is the source of the servers made from the device's own free WARP
+// account: AmneziaWG and WireGuard to WARP's addresses, which give the
+// protocols that have next to no public servers some of their own. Only
+// the apps have it (the collector has no device), and it is not one of the
+// built-in lists, which the collector's lists stand in for.
+func Warp() Source {
+	return Source{ID: ID(KindWarp, "device"), Kind: KindWarp, URL: "device", Tier: TierPriority, Enabled: true}
+}
 
 // leapProviders are the LEAP providers the app knows, by API address: the
 // address of their CA certificate (provider.json's ca_cert_uri). Calyx was
@@ -90,6 +100,8 @@ func (s Source) Label() string {
 		return "@" + s.URL
 	case KindVPNGate:
 		return "VPN Gate"
+	case KindWarp:
+		return "Cloudflare WARP (this device)"
 	case KindLEAP:
 		n := LEAPName(s.URL)
 		return strings.ToUpper(n[:1]) + n[1:] + " VPN"

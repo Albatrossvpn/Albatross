@@ -146,6 +146,7 @@ type Engine struct {
 	startMu     sync.Mutex
 	attempt     context.CancelFunc // cancels the attempt in progress; under mu
 	poolStats   [4]int             // total, untested, dead, ok; refreshed by statsLoop
+	protoStats  map[string][2]int  // by protocol: servers not known dead, and those that worked
 	scan        scanState
 	logs        []LogLine
 	localDNS    string
@@ -252,6 +253,7 @@ func New(opt Options) (*Engine, error) {
 	}
 	e.irRanges, _ = readIPRuleSet(filepath.Join(e.dir, "rules", "geoip-ir.srs"))
 	e.fetcher.Mode = e.fetchMode
+	e.fetcher.Warp = e.warpLinks
 	sources.ExtraMirrors = e.domesticMirrors
 	e.loadServers()
 	e.net.load(e.dir)
@@ -573,7 +575,7 @@ func (e *Engine) buildSources() {
 	var list []sources.Source
 	builtin := e.opt.Sources
 	if builtin == nil {
-		builtin = append(sources.Central(e.install), sources.Builtin()...)
+		builtin = append(append(sources.Central(e.install), sources.Builtin()...), sources.Warp())
 	}
 	for _, s := range builtin {
 		if s.Tier == sources.TierDeep && !s.Central && !e.settings.DeepSources {

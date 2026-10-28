@@ -47,13 +47,15 @@ type Node struct {
 	Port    int    `json:"port"`
 	PortHop string `json:"port_hop,omitempty"` // "20000-30000,443" for hysteria port hopping
 
-	UUID       string `json:"uuid,omitempty"`
-	Password   string `json:"password,omitempty"`
-	Username   string `json:"username,omitempty"`
-	Method     string `json:"method,omitempty"` // shadowsocks cipher or vmess security
-	AlterID    int    `json:"alter_id,omitempty"`
-	Flow       string `json:"flow,omitempty"`
-	Encryption string `json:"encryption,omitempty"` // vless encryption ("none" or post-quantum)
+	UUID     string `json:"uuid,omitempty"`
+	Password string `json:"password,omitempty"`
+	Username string `json:"username,omitempty"`
+	// SocksVersion is "4" or "4a" for SOCKS 4; empty is SOCKS 5.
+	SocksVersion string `json:"socks_version,omitempty"`
+	Method       string `json:"method,omitempty"` // shadowsocks cipher or vmess security
+	AlterID      int    `json:"alter_id,omitempty"`
+	Flow         string `json:"flow,omitempty"`
+	Encryption   string `json:"encryption,omitempty"` // vless encryption ("none" or post-quantum)
 
 	Transport   string `json:"transport,omitempty"` // tcp ws grpc http httpupgrade xhttp kcp quic
 	HeaderType  string `json:"header_type,omitempty"`
@@ -95,8 +97,14 @@ type Node struct {
 
 	Obfs         string `json:"obfs,omitempty"`
 	ObfsPassword string `json:"obfs_password,omitempty"`
-	UpMbps       int    `json:"up_mbps,omitempty"`
-	DownMbps     int    `json:"down_mbps,omitempty"`
+	// ShadowsocksR's protocol and the parameters of it and of its obfs.
+	SSRProtocol      string `json:"ssr_protocol,omitempty"`
+	SSRProtocolParam string `json:"ssr_protocol_param,omitempty"`
+	SSRObfsParam     string `json:"ssr_obfs_param,omitempty"`
+	// SnellVersion is Snell's protocol version (1 to 5).
+	SnellVersion int `json:"snell_version,omitempty"`
+	UpMbps       int `json:"up_mbps,omitempty"`
+	DownMbps     int `json:"down_mbps,omitempty"`
 
 	CongestionControl string `json:"cc,omitempty"`
 	UDPRelayMode      string `json:"udp_relay_mode,omitempty"`
@@ -150,6 +158,9 @@ func (n *Node) Key() string {
 	w(n.UUID)
 	w(n.Password)
 	w(n.Username)
+	if n.SocksVersion != "" {
+		w(n.SocksVersion)
+	}
 	w(n.Method)
 	w(n.Flow)
 	w(n.Encryption)
@@ -168,6 +179,15 @@ func (n *Node) Key() string {
 	w(n.PluginOpts)
 	w(n.Obfs)
 	w(n.ObfsPassword)
+	// The newer fields only when set: every other node keeps its key.
+	if n.SSRProtocol != "" || n.SSRProtocolParam != "" || n.SSRObfsParam != "" {
+		w(n.SSRProtocol)
+		w(n.SSRProtocolParam)
+		w(n.SSRObfsParam)
+	}
+	if n.SnellVersion != 0 {
+		w(strconv.Itoa(n.SnellVersion))
+	}
 	w(n.PrivateKey)
 	w(n.PeerPublicKey)
 	w(n.ECH)

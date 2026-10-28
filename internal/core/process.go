@@ -35,7 +35,7 @@ type Binaries struct {
 func (b Binaries) Sidecar(name string) string { return b.Sidecars[name] }
 
 // sidecarNames are the helper programs Locate looks for.
-var sidecarNames = []string{"naive", "juicity-client", "mieru", "brook", "wstunnel", "wireproxy-awg"}
+var sidecarNames = []string{"naive", "juicity-client", "mieru", "brook", "wstunnel", "wireproxy-awg", "mihomo"}
 
 // Locate finds the cores next to the app or in its data directory.
 func Locate(dirs ...string) Binaries {

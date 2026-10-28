@@ -6,22 +6,22 @@ import "github.com/Albatrossvpn/vp/internal/engine"
 // they are and how fast; where servers come from, their names and how they
 // are tested stay inside the engine.
 type state struct {
-	Status     string                  `json:"status"`
-	Message    string                  `json:"message"`
-	Target     string                  `json:"target"`
-	TargetName string                  `json:"target_name"`
-	TargetFlag string                  `json:"target_flag"`
-	Conn       *conn                   `json:"conn"`
-	Countries  []engine.CountryInfo    `json:"countries"`
-	Servers    int                     `json:"servers"`
-	Settings   publicSettings          `json:"settings"`
-	Protocols  []engine.ProtocolChoice `json:"protocols"`
-	Regions    []region                `json:"regions"`
-	Admin      bool                    `json:"admin"`
-	Mobile     bool                    `json:"mobile"`
-	Version    string                  `json:"version"`
-	Update     *engine.UpdateInfo      `json:"update,omitempty"`
-	Account    engine.AccountState     `json:"account"`
+	Status     string               `json:"status"`
+	Message    string               `json:"message"`
+	Target     string               `json:"target"`
+	TargetName string               `json:"target_name"`
+	TargetFlag string               `json:"target_flag"`
+	Conn       *conn                `json:"conn"`
+	Countries  []engine.CountryInfo `json:"countries"`
+	Servers    int                  `json:"servers"`
+	Settings   publicSettings       `json:"settings"`
+	Protocols  []protocol           `json:"protocols"`
+	Regions    []region             `json:"regions"`
+	Admin      bool                 `json:"admin"`
+	Mobile     bool                 `json:"mobile"`
+	Version    string               `json:"version"`
+	Update     *engine.UpdateInfo   `json:"update,omitempty"`
+	Account    engine.AccountState  `json:"account"`
 	// Share is where other devices reach the proxy (Settings.AllowLAN).
 	Share    []string `json:"share,omitempty"`
 	SharePAC []string `json:"share_pac,omitempty"`
@@ -63,6 +63,14 @@ type publicSettings struct {
 	OverrideGPS     bool   `json:"override_gps"`
 }
 
+// protocol is a protocol to choose, with how many of its servers are not
+// known dead and how many worked (the methods, WARP and Tor, have none).
+type protocol struct {
+	engine.ProtocolChoice
+	Servers int `json:"servers,omitempty"`
+	Working int `json:"working,omitempty"`
+}
+
 func publicSettingsOf(s engine.Settings) publicSettings {
 	return publicSettings{
 		Mode: s.Mode, Bypass: s.Bypass, BypassApps: s.BypassApps, Protocol: s.Protocol, BlockAds: s.BlockAds,
@@ -74,10 +82,14 @@ func publicSettingsOf(s engine.Settings) publicSettings {
 func publicState(s engine.Snapshot) state {
 	out := state{
 		Status: s.Status, Message: s.Message, Target: s.Target, TargetName: s.TargetName, TargetFlag: s.TargetFlag,
-		Countries: s.Countries, Settings: publicSettingsOf(s.Settings), Protocols: engine.ProtocolChoices(),
+		Countries: s.Countries, Settings: publicSettingsOf(s.Settings),
 		Admin: s.Admin, Mobile: s.Mobile, Version: s.Version, Update: s.Update, Account: s.Account,
 		Share: s.Share, SharePAC: s.SharePAC,
 		Notice: s.Notice, HelpAvailable: s.HelpAvailable, Helping: s.Helping, CrowdAvailable: s.CrowdAvailable,
+	}
+	for _, p := range engine.ProtocolChoices() {
+		c := s.ProtocolServers[p.Value]
+		out.Protocols = append(out.Protocols, protocol{p, c[0], c[1]})
 	}
 	for _, c := range s.Countries {
 		out.Servers += c.Servers

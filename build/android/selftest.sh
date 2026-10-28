@@ -62,7 +62,7 @@ done
 # error or a program that cannot run fails. The listing is read as text:
 # adb on Android 6 does not pass the exit status on.
 libs="$(adb shell run-as app.albatross.vpn ls "$libdir" 2>&1 | tr -d '\r')"
-for lib in libnaive.so libjuicityclient.so libmieru.so libbrook.so libwstunnel.so libwireproxyawg.so; do
+for lib in libnaive.so libjuicityclient.so libmieru.so libbrook.so libwstunnel.so libwireproxyawg.so libmihomo.so; do
   printf '%s\n' "$libs" | grep -qx "$lib" || continue
   out="$(adb shell run-as app.albatross.vpn "$libdir/$lib" --help 2>&1 | tr -d '\r' | head -c 4000)"
   echo "== $lib --help: $(printf '%s' "$out" | head -3)"

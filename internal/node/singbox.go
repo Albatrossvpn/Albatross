@@ -141,7 +141,7 @@ func (n *Node) SingBox(tag string, o SingBoxOptions) (obj map[string]any, endpoi
 	case "socks":
 		out["type"] = "socks"
 		n.sbServer(out)
-		out["version"] = "5"
+		out["version"] = firstNonEmpty(n.SocksVersion, "5")
 		if n.Username != "" || n.Password != "" {
 			out["username"] = n.Username
 			out["password"] = n.Password

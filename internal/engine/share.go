@@ -43,6 +43,9 @@ func (e *Engine) ShareCode() (string, error) {
 	reg, p := e.reg.Regime, e.reg.Probe
 	// The project's own servers stay with the plans that have them; the
 	// relays inside the country go, in a shutdown they are what matters.
+	// The ones made from this device's WARP account carry its key: one
+	// account on two devices breaks both.
+	warp := sources.Warp().Label()
 	own := map[string]bool{}
 	for _, s := range e.srcs {
 		if ownSource(s) {
@@ -51,7 +54,7 @@ func (e *Engine) ShareCode() (string, error) {
 	}
 	var list []*Server
 	for _, s := range e.good {
-		if s.usable(now) && s.Source != "warp-plus" && s.Source != "usque" && s.Source != "tor" && s.Source != "direct" && s.Source != "edge" && !(s.Own && own[s.Source]) {
+		if s.usable(now) && s.Source != "warp-plus" && s.Source != "usque" && s.Source != "tor" && s.Source != "direct" && s.Source != "edge" && s.Source != warp && !(s.Own && own[s.Source]) {
 			list = append(list, s)
 		}
 	}

@@ -146,7 +146,10 @@ export const FEATURES = {
   tun: { name: "Protect the whole device", tier: "gold" },
   gps: { name: "Override GPS location", tier: "gold" },
   edge: { name: "Albatross Edge servers", tier: "gold" },
-  own: { name: "Albatross's own servers", tier: "vip" },
+  // Most protocols have no public servers at all (their links in public
+  // lists are examples from programs' tests): the own servers carry them,
+  // so they come with choosing the protocol.
+  own: { name: "Albatross's own servers", tier: "gold" },
   lan: { name: "Share with other devices", tier: "vip" },
 };
 

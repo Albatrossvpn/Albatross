@@ -46,7 +46,16 @@ type leapService struct {
 
 // ParseLEAP turns a joined LEAP document into one OpenVPN node per gateway,
 // transport protocol and port.
-func ParseLEAP(text string) []LEAPServer {
+func ParseLEAP(text string) (out []LEAPServer) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = nil
+		}
+	}()
+	return parseLEAP(text)
+}
+
+func parseLEAP(text string) []LEAPServer {
 	var doc LEAPDoc
 	if err := json.Unmarshal([]byte(text), &doc); err != nil {
 		return nil

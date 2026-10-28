@@ -108,7 +108,7 @@ jobs:
         # The sidecar helpers at the versions the apps ship, so a test can
         # check that each one's SOCKS5 port takes only the run's login.
         run: |
-          eval "$(grep -E '^(NAIVE|JUICITY|MIERU|WSTUNNEL)_VERSION=|^WIREPROXY_AWG_REF=' build/package.sh)"
+          eval "$(grep -E '^(NAIVE|JUICITY|MIERU|WSTUNNEL|MIHOMO)_VERSION=|^WIREPROXY_AWG_REF=' build/package.sh)"
           gh=https://github.com
           h=/tmp/helpers && mkdir -p "$h" /tmp/helpers-dl && cd /tmp/helpers-dl
           curl -fsSL --retry 4 -o naive.txz "$gh/klzgrad/naiveproxy/releases/download/$NAIVE_VERSION/naiveproxy-$NAIVE_VERSION-linux-x64.tar.xz"
@@ -121,6 +121,8 @@ jobs:
           tar -xzf wst.tgz wstunnel && cp wstunnel "$h/wstunnel"
           git clone -q --depth 1 --branch "$WIREPROXY_AWG_REF" "$gh/artem-russkikh/wireproxy-awg" wpawg
           (cd wpawg && CGO_ENABLED=0 GOTOOLCHAIN=auto go build -trimpath -buildvcs=false -ldflags "-s -w -checklinkname=0" -o "$h/wireproxy-awg" ./cmd/wireproxy)
+          git clone -q --depth 1 --branch "v$MIHOMO_VERSION" "$gh/MetaCubeX/mihomo" mihomo
+          (cd mihomo && CGO_ENABLED=0 GOTOOLCHAIN=auto go build -trimpath -buildvcs=false -ldflags "-s -w -checklinkname=0" -o "$h/mihomo" .)
           chmod 755 "$h"/*
           ls -l "$h"
       - name: Test

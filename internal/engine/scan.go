@@ -40,6 +40,7 @@ var protoCodes = map[string]uint8{
 	"vmess": 1, "vless": 2, "trojan": 3, "shadowsocks": 4, "hysteria2": 5, "hysteria": 6,
 	"tuic": 7, "anytls": 8, "wireguard": 9, "socks": 10, "http": 11, "openvpn": 12, "ssh": 13, "direct": 14,
 	"naive": 15, "juicity": 16, "mieru": 17, "brook": 18, "wstunnel": 19, "amneziawg": 20,
+	"ssr": 21, "snell": 22,
 }
 
 // refreshEvery says how often each kind of source is downloaded again.
@@ -66,6 +67,9 @@ func refreshEvery(s sources.Source, mobile bool) time.Duration {
 		return 20 * time.Minute
 	case s.Kind == sources.KindVPNGate, s.Kind == sources.KindLEAP:
 		return time.Hour
+	case s.Kind == sources.KindWarp:
+		// Made on the device from its WARP account, which stays.
+		return 6 * time.Hour
 	case s.Tier == sources.TierDeep:
 		// The deep lists are large; their new servers mostly reach the
 		// priority lists and Telegram first anyway.
@@ -1243,9 +1247,15 @@ func (e *Engine) statsLoop() {
 		if !watched && n%12 != 0 {
 			continue
 		}
-		total, untested, dead, okN := e.pool.Stats()
+		total, untested, dead, okN, live, worked := e.pool.StatsByProto()
 		e.mu.Lock()
 		e.poolStats = [4]int{total, untested, dead, okN}
+		e.protoStats = map[string][2]int{}
+		for name, code := range protoCodes {
+			if live[code] > 0 {
+				e.protoStats[name] = [2]int{live[code], worked[code]}
+			}
+		}
 		cut := time.Now().Add(-time.Minute)
 		i := 0
 		for i < len(e.scan.recent) && e.scan.recent[i].Before(cut) {

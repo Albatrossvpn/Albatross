@@ -472,10 +472,35 @@ func (d *discoverer) keep(ctx context.Context, subs, tgs []string) []string {
 	return texts
 }
 
+// importRe finds the subscriptions inside apps' import links: happ://add/,
+// hiddify:// and streisand://import/ followed by the address, and the url=
+// of v2rayNG's, V2Box's, Clash's, sing-box's and Karing's.
+var importRe = regexp.MustCompile(`(?i)\b(?:happ://add/|hiddify://import/|streisand://import/)(https?://[^\s"'<>#]+)|\b(?:v2rayng|v2box|clash|clashmeta|sing-box|karing)://(?:install-sub|install-config|import-remote-profile)\?(?:[^\s"'<>]*&)?url=([^\s"'<>&#]+)`)
+
+// importURL is the subscription an import link points at, as it is: its
+// query is the subscription's token, which its poster meant to be used.
+func importURL(u string) string {
+	p, err := url.Parse(strings.TrimSpace(u))
+	if err != nil || p.Scheme != "https" && p.Scheme != "http" || p.Host == "" || (p.Path == "" || p.Path == "/") && p.RawQuery == "" {
+		return ""
+	}
+	p.Fragment = ""
+	return p.String()
+}
+
 // mentions finds list addresses and channel names in a text.
 func mentions(text string) (subs, channels []string) {
 	for _, m := range listURLRe.FindAllString(text, -1) {
 		if u := canonical(m); u != "" {
+			subs = append(subs, u)
+		}
+	}
+	for _, m := range importRe.FindAllStringSubmatch(text, -1) {
+		raw := m[1]
+		if raw == "" {
+			raw, _ = url.QueryUnescape(m[2])
+		}
+		if u := importURL(raw); u != "" {
 			subs = append(subs, u)
 		}
 	}
