@@ -80,6 +80,7 @@ const statusPill = (u) =>
     : `<span class="pill ${u.status === "disabled" ? "bad" : "warn"}">${esc({ disabled: "Off", expired: "Expired", quota: "Data used", time: "Time used", devices: "Devices full" }[u.status] || u.status)}</span>`;
 
 let tiers = {};
+let features = {}; // what the plans may include (the service's FEATURES)
 const planName = (tier) => (tiers[tier] ? tiers[tier].name : tier);
 const planCell = (u) => `${planBadge(u.tier, planName(u.tier))}<div class="muted small">${u.max_devices ? `${u.devices} of ${u.max_devices}` : u.devices} ${u.devices === 1 && !u.max_devices ? "device" : "devices"}</div>`;
 
@@ -265,6 +266,11 @@ $("#settings").addEventListener("click", async () => {
   $("#t-tier").value = s.default_tier || "auto";
   $("#t-win").value = s.download_windows;
   $("#t-and").value = s.download_android;
+  // Which plan brings each feature: the saved choice over the features' own.
+  let chosen = {};
+  try { chosen = JSON.parse(s.plan_features || "{}"); } catch {}
+  $("#t-features").innerHTML = Object.entries(features).map(([id, f]) => `<label class="field"><span>${esc(f.name)}</span><select data-feature="${esc(id)}">${
+    Object.entries(tiers).map(([k, t]) => `<option value="${esc(k)}"${(chosen[id] || f.tier) === k ? " selected" : ""}>${esc(t.name)} and above</option>`).join("")}</select></label>`).join("");
   $("#t-error").textContent = "";
   $("#settings-dialog").showModal();
 });
@@ -280,6 +286,7 @@ $("#settings-form").addEventListener("submit", async (e) => {
     default_tier: $("#t-tier").value,
     download_windows: $("#t-win").value.trim(),
     download_android: $("#t-and").value.trim(),
+    plan_features: Object.fromEntries([...document.querySelectorAll("#t-features select")].map((el) => [el.dataset.feature, el.value])),
   }), $("#t-error"));
   if (r) { $("#settings-dialog").close(); toast("Saved."); }
 });
@@ -291,6 +298,8 @@ $("#q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeou
 $("#prev").addEventListener("click", () => { offset = Math.max(0, offset - LIMIT); loadUsers(); });
 $("#next").addEventListener("click", () => { offset += LIMIT; loadUsers(); });
 
-tiers = (await frame()).tiers || {};
+const shown = await frame();
+tiers = shown.tiers || {};
+features = shown.features || {};
 fillPlans();
 if (token) enter(token);

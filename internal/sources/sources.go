@@ -225,6 +225,10 @@ const keyedMagic = "ALBK1"
 type ListKey struct {
 	ID  uint64 `json:"id"`
 	Key []byte `json:"key"`
+	// Premium keys seal the project's own servers' lists (the collector's
+	// keys file says which); the account service gives them only to the
+	// plans that have those servers.
+	Premium bool `json:"premium,omitempty"`
 }
 
 // SealKeyed seals a list with a list key; the key's id travels in front so

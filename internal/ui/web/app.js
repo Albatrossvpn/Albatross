@@ -46,6 +46,7 @@ function api(method, path, body) {
       if (!res.ok) {
         var err = new Error(data.error || res.statusText);
         err.code = data.code;
+        err.feature = data.feature;
         throw err;
       }
       return data;
@@ -173,6 +174,8 @@ function render(s) {
   }
 
   renderAccount(s.account);
+  renderLocks();
+  if (sheetKind === "plans") renderSheet();
   $("admin-chip").classList.toggle("hidden", !s.admin);
   if (!settingsBusy) fillSettings(s.settings);
   renderGps(s);
@@ -213,6 +216,104 @@ function planBadge(el, tier) {
   var name = PLAN_NAMES[tier];
   el.className = "plan-badge" + (name ? " " + tier : " hidden");
   el.innerHTML = name ? (tier === "vip" ? PLAN_CROWN : PLAN_STAR) + name : "";
+}
+
+/** A plan's medal as HTML; mini for the one beside a locked feature. */
+function medal(tier, mini) {
+  if (!PLAN_NAMES[tier]) return "";
+  return '<span class="plan-badge ' + (mini ? "mini " : "") + tier + '">' + (tier === "vip" ? PLAN_CROWN : PLAN_STAR) + PLAN_NAMES[tier] + "</span>";
+}
+
+// ---------- Plans ----------
+
+// What each plan has beyond connecting; the service says which plan
+// brings each (account.plans) and which the account's has
+// (account.features). Every plan has PLAN_BASICS.
+var TIER_ORDER = ["bronze", "silver", "gold", "vip"];
+var FEATURE_NAMES = {
+  locations: "Choose a location",
+  adblock: "Ad & tracker blocker",
+  bypass_apps: "Local apps outside the VPN",
+  protocols: "Choose the protocol",
+  tun: "Protect the whole device",
+  gps: "Override GPS location",
+  edge: "Albatross Edge servers, through Cloudflare",
+  own: "Albatross's own servers, the fastest",
+  lan: "Share with other devices on your Wi-Fi or hotspot"
+};
+// Features only phones or only computers have.
+var FEATURE_ON = { tun: "desktop", gps: "mobile", bypass_apps: "mobile" };
+var PLAN_BASICS = ["The fastest location, found for you", "Every protocol, picked for your network", "Relays inside the country in a shutdown",
+  "Block unencrypted connections", "Local sites opened directly", "Servers shared with friends"];
+
+function hasFeature(f) {
+  var a = state && state.account;
+  // A service that names no features (null) is one from before plans had them.
+  return !(a && a.signed_in && a.features) || a.features.indexOf(f) >= 0;
+}
+function featureHere(f) {
+  var on = FEATURE_ON[f];
+  return !on || (on === "mobile") === !!state.mobile;
+}
+function planFor(f) { return ((state.account && state.account.plans) || {})[f] || ""; }
+
+// Marks each feature the plan lacks with the medal of the plan that has
+// it; its switch stays off and a tap tells which plan to get.
+function renderLocks() {
+  each(document.querySelectorAll("[data-feature]"), function (el) {
+    var f = el.dataset.feature, lock = !hasFeature(f), tier = planFor(f);
+    el.classList.toggle("locked", lock);
+    var input = el.querySelector("input");
+    if (input) input.disabled = lock;
+    var title = el.querySelector(".t-body b"), tag = el.querySelector(".lock-tag");
+    if (lock && tier && !tag) {
+      tag = document.createElement("span");
+      tag.className = "lock-tag";
+      title.appendChild(tag);
+    }
+    if (tag && (!lock || !tier)) {
+      tag.parentNode.removeChild(tag);
+    } else if (tag && tag.dataset.tier !== tier) {
+      tag.dataset.tier = tier;
+      tag.innerHTML = medal(tier, true);
+    }
+  });
+}
+
+function showPlanModal(f) {
+  var tier = planFor(f), name = FEATURE_NAMES[f] || "This";
+  $("plan-modal-title").innerHTML = tier ? medal(tier) + " plan" : "Not in your plan";
+  $("plan-modal-text").textContent = name + (tier ? " comes with the " + PLAN_NAMES[tier] + " plan" + (tier === "vip" ? "." : " and above.") : " is not in your plan.") +
+    " To get it, ask for that plan where you got your account.";
+  $("plan-modal").classList.remove("hidden");
+}
+$("plan-close").addEventListener("click", function () { $("plan-modal").classList.add("hidden"); });
+$("plan-see").addEventListener("click", function () { $("plan-modal").classList.add("hidden"); openSheet("plans"); });
+$("plans-btn").addEventListener("click", function () { openSheet("plans"); });
+$("plan-chip").addEventListener("click", function () { openSheet("plans"); });
+// A locked switch tells which plan has it instead of turning on.
+each(document.querySelectorAll("label[data-feature]"), function (el) {
+  el.addEventListener("click", function (e) {
+    if (!hasFeature(el.dataset.feature)) {
+      e.preventDefault();
+      showPlanModal(el.dataset.feature);
+    }
+  });
+});
+
+/** The plans, each with what it adds to the one below it, the account's marked. */
+function plansHTML() {
+  var a = state.account, plans = a.plans || {}, devices = a.plan_devices || {};
+  return TIER_ORDER.map(function (tier, i) {
+    var lines = Object.keys(FEATURE_NAMES).filter(function (f) { return plans[f] === tier && featureHere(f); }).map(function (f) { return FEATURE_NAMES[f]; });
+    if (i === 0) lines = PLAN_BASICS.concat(lines);
+    var n = devices[tier];
+    if (n !== undefined) lines.push(n === 0 ? "As many devices as you like" : n === 1 ? "1 device at a time" : n + " devices at a time");
+    return '<div class="tier-card' + (a.tier === tier ? " current" : "") + '"><div class="tier-head">' + medal(tier) +
+      (a.tier === tier ? '<span class="tier-yours">Your plan</span>' : "") + "</div>" +
+      (i > 0 ? '<small class="tier-also">Everything in ' + PLAN_NAMES[TIER_ORDER[i - 1]] + ", and:</small>" : "") +
+      "<ul>" + lines.map(function (l) { return "<li>" + esc(l) + "</li>"; }).join("") + "</ul></div>";
+  }).join("");
 }
 
 function renderAccount(a) {
@@ -289,7 +390,7 @@ var sheetKind = null;
 
 function openSheet(kind) {
   sheetKind = kind;
-  var titles = { country: "Choose a location", protocol: "Protocol", bypass: "Bypass local sites", privacy: "Privacy" };
+  var titles = { country: "Choose a location", protocol: "Protocol", bypass: "Bypass local sites", privacy: "Privacy", plans: "Plans" };
   $("sheet-title").textContent = titles[kind];
   $("country-search").classList.toggle("hidden", kind !== "country");
   $("country-search").value = "";
@@ -317,11 +418,15 @@ function renderSheet() {
   if (sheetKind === "country") {
     var q = $("country-search").value.trim().toLowerCase();
     var match = function (c) { return !q || c.name.toLowerCase().includes(q) || c.code.toLowerCase() === q; };
+    var lock = !hasFeature("locations");
+    if (lock && planFor("locations")) {
+      html += '<div class="sheet-note">' + medal(planFor("locations"), true) + "<span>Choosing a location comes with the " + PLAN_NAMES[planFor("locations")] + " plan and above.</span></div>";
+    }
     if (!q || "fastest".includes(q)) {
       html += countryItem({ code: "", name: "Fastest location", meta: "Lowest ping", badge: "" });
     }
     state.countries.filter(match).forEach(function (c) {
-      html += countryItem({ code: c.code, flag: c.flag, name: c.name, meta: num(c.servers) + " servers", badge: '<span class="badge ' + pingClass(c.best_delay) + '">' + num(c.best_delay) + " ms</span>" });
+      html += countryItem({ code: c.code, flag: c.flag, name: c.name, meta: num(c.servers) + " servers", badge: '<span class="badge ' + pingClass(c.best_delay) + '">' + num(c.best_delay) + " ms</span>" }, lock);
     });
     if (!html) html = '<div class="empty">No locations found</div>';
   } else if (sheetKind === "protocol") {
@@ -329,6 +434,8 @@ function renderSheet() {
       return optionItem(p.value, p.label, p.value === state.settings.protocol,
         p.value === "" ? "Picks the best one for you" : "");
     }).join("");
+  } else if (sheetKind === "plans") {
+    html = plansHTML();
   } else if (sheetKind === "privacy") {
     html = privacyNotes.map(function (n) { return '<div class="note"><b>' + esc(n[0]) + "</b>" + esc(n[1]) + "</div>"; }).join("");
   } else if (sheetKind === "bypass") {
@@ -349,8 +456,8 @@ var privacyNotes = [
   ["Your account", "Your account records only your username, how much data you have used and how long you have been connected. The app does not send the sites you visit."]
 ];
 
-function countryItem(c) {
-  var sel = (state.target || "") === c.code ? " selected" : "";
+function countryItem(c, locked) {
+  var sel = ((state.target || "") === c.code ? " selected" : "") + (locked ? " dim" : "");
   return '<button class="item' + sel + '" data-value="' + esc(c.code) + '" data-country="1">\n' +
     '    <span class="flag big">' + (c.code ? esc(c.flag) : BOLT) + "</span>\n" +
     '    <span class="main"><span class="title">' + esc(c.name) + '</span><span class="sub">' + esc(c.meta) + "</span></span>\n" +
@@ -358,7 +465,10 @@ function countryItem(c) {
 }
 
 $("country-btn").addEventListener("click", function () { openSheet("country"); });
-$("row-protocol").addEventListener("click", function () { openSheet("protocol"); });
+$("row-protocol").addEventListener("click", function () {
+  if (hasFeature("protocols")) openSheet("protocol");
+  else showPlanModal("protocols");
+});
 $("row-bypass").addEventListener("click", function () { openSheet("bypass"); });
 $("row-privacy").addEventListener("click", function () { openSheet("privacy"); });
 $("row-killswitch").addEventListener("click", function () { api("POST", "/api/vpn-settings").catch(function (e) { toast(e.message); }); });
@@ -403,7 +513,10 @@ $("row-save-installer").addEventListener("click", function () {
 $("country-search").addEventListener("input", renderSheet);
 document.addEventListener("keydown", function (e) {
   // KeyboardEvent.key needs Chrome 51; keyCode covers older WebViews.
-  if (e.key === "Escape" || e.keyCode === 27) { closeSheet(); $("admin-modal").classList.add("hidden"); $("share-modal").classList.add("hidden"); $("gps-modal").classList.add("hidden"); }
+  if (e.key === "Escape" || e.keyCode === 27) {
+    closeSheet();
+    each(["admin-modal", "share-modal", "gps-modal", "plan-modal"], function (id) { $(id).classList.add("hidden"); });
+  }
 });
 
 $("sheet-list").addEventListener("click", function (e) {
@@ -411,13 +524,15 @@ $("sheet-list").addEventListener("click", function (e) {
   if (!item) return;
   var value = item.dataset.value;
   var kind = sheetKind;
-  if (kind === "privacy") return;
+  if (kind === "privacy" || kind === "plans") return;
   closeSheet();
+  if (kind === "country" && value && !hasFeature("locations")) return showPlanModal("locations");
   if (kind === "protocol") return saveSettings({ protocol: value });
   if (kind === "bypass") return saveSettings({ bypass: value });
   // Picking a location connects to it right away.
   api("POST", "/api/connect", { country: value }).then(function () { poll(); }).catch(function (err) {
-    if (err.code === "need_admin") {
+    if (err.code === "plan") showPlanModal(err.feature);
+    else if (err.code === "need_admin") {
       return api("POST", "/api/target", { country: value }).catch(function () {}).then(function () {
         $("admin-modal").classList.remove("hidden");
       });
@@ -463,6 +578,7 @@ function saveSettings(patch) {
   }).catch(function (err) {
     fillSettings(state.settings);
     if (err.code === "need_admin") $("admin-modal").classList.remove("hidden");
+    else if (err.code === "plan") showPlanModal(err.feature);
     else toast(err.message);
   });
   return always(saved, function () {
@@ -572,6 +688,7 @@ window.albatrossBack = function () {
   if (!$("sheet").classList.contains("hidden")) { closeSheet(); return true; }
   if (!$("admin-modal").classList.contains("hidden")) { $("admin-modal").classList.add("hidden"); return true; }
   if (!$("gps-modal").classList.contains("hidden")) { $("gps-modal").classList.add("hidden"); return true; }
+  if (!$("plan-modal").classList.contains("hidden")) { $("plan-modal").classList.add("hidden"); return true; }
   if (view === "logs") { show("settings"); return true; }
   if (view !== "home") { show("home"); return true; }
   return false;

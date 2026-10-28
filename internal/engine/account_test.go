@@ -22,6 +22,8 @@ type accountService struct {
 	used  int64
 	off   bool
 	reset int64
+	// features, when not nil, are the plan's (an empty list: none).
+	features []string
 }
 
 func (a *accountService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -36,6 +38,10 @@ func (a *accountService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			m["reason"] = "disabled"
 		case a.quota > 0 && a.used >= a.quota:
 			m["reason"] = "quota"
+		}
+		if a.features != nil {
+			m["features"] = a.features
+			m["plans"] = map[string]string{"locations": "silver", "adblock": "silver", "protocols": "gold", "edge": "gold", "own": "vip", "lan": "vip"}
 		}
 		return m
 	}

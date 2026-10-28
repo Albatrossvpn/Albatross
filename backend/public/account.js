@@ -2,6 +2,7 @@ import { $, ago, api, esc, fmtBytes, fmtDate, fmtTime, frame, meter, planBadge, 
 
 let token = "";
 let info;
+let acct; // the account as last shown
 
 const reasons = {
   disabled: "This account is turned off.",
@@ -66,7 +67,10 @@ function renderSub() {
   const row = (label, count, choice) => {
     const u = sub.url + (choice ? "?c=" + choice : "");
     const name = `${brand} ${label.replace(/^\S+\s/, "")}`;
-    rows.push(`<div class="row between wrap-row"><span>${esc(label)} <span class="muted small">· ${count} ${count === 1 ? "server" : "servers"}</span></span><a class="btn small primary" href="${esc(app.link(u, name))}">Add to ${esc(app.name)}</a></div>`);
+    // A country's servers come with choosing a location, the edge's with the edge.
+    const need = choice === "edge" ? "edge" : choice ? "locations" : "";
+    const add = need && !has(need) ? planPill(acct.plans[need], "small") : `<a class="btn small primary" href="${esc(app.link(u, name))}">Add to ${esc(app.name)}</a>`;
+    rows.push(`<div class="row between wrap-row"><span>${esc(label)} <span class="muted small">· ${count} ${count === 1 ? "server" : "servers"}</span></span>${add}</div>`);
   };
   row("All servers", sub.servers + sub.edge, "");
   if (sub.edge) row(`${brand} Edge`, sub.edge, "edge");
@@ -84,7 +88,19 @@ async function loadSub() {
   }
 }
 
+/** Whether the account's plan has a feature; a service naming none has every one. */
+const has = (f) => !acct || !acct.features || acct.features.includes(f);
+
+/** What the plan has (ticked) and what a higher plan brings (with its medal). */
+function renderFeatures(a) {
+  const names = info.features || {};
+  $("#plan-card").classList.toggle("hidden", !a.features || !Object.keys(names).length);
+  $("#d-features").innerHTML = Object.entries(names).map(([id, f]) =>
+    has(id) ? `<li class="yes">${esc(f.name)}</li>` : `<li class="no">${esc(f.name)} ${planPill(a.plans[id], "small")}</li>`).join("");
+}
+
 function render(a) {
+  acct = a;
   $("#auth").classList.add("hidden");
   $("#dash").classList.remove("hidden");
   $("#logout").classList.remove("hidden");
@@ -107,6 +123,8 @@ function render(a) {
   if (a.resets_at) rows.push(["Allowance renews", esc(fmtDate(a.resets_at))]);
   rows.push(["Account ends", esc(a.expires_at ? fmtDate(a.expires_at) : "Never")]);
   $("#d-kv").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
+  renderFeatures(a);
+  renderSub();
   loadDevices();
 }
 

@@ -3,7 +3,7 @@
 //   npm run test:api
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
@@ -27,9 +27,20 @@ async function call(method, path, { token, body, ip, headers } = {}) {
   return { status: res.status, body: await res.json().catch(() => null), headers: res.headers };
 }
 
+// The collector's keys (cmd/collect -keys-out): two collections, each with
+// a key for its lists and a premium one for the own servers' lists.
+const KEYS = [
+  { id: 2001, key: "a".repeat(64) }, { id: 2000, key: "b".repeat(64), premium: true },
+  { id: 1001, key: "c".repeat(64) }, { id: 1000, key: "d".repeat(64), premium: true },
+];
+
 before(async () => {
   const m = spawnSync("npx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", dir], { encoding: "utf8" });
   assert.equal(m.status, 0, m.stdout + m.stderr);
+  writeFileSync(join(dir, "listkeys.json"), JSON.stringify(KEYS));
+  const k = spawnSync("npx", ["wrangler", "r2", "object", "put", "albatross-files/private/listkeys.json", "--local", "--persist-to", dir,
+    "--file", join(dir, "listkeys.json")], { encoding: "utf8" });
+  assert.equal(k.status, 0, k.stdout + k.stderr);
   // A server left over from an earlier run would answer with its old data.
   assert.equal(await fetch(BASE + "/api/v1/public").then(() => true, () => false), false, `something already listens on port ${PORT}`);
   proc = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--persist-to", dir,
@@ -144,15 +155,62 @@ test("the lists' keys go to signed-in users who may connect, newest first", asyn
   const r = await call("GET", "listkeys", { token });
   assert.equal(r.status, 200);
   assert.equal(r.headers.get("cache-control"), "no-store");
-  assert.ok(Array.isArray(r.body.keys), "a list of keys, empty before the first collection");
-  for (let i = 1; i < r.body.keys.length; i++) assert.ok(r.body.keys[i - 1].id > r.body.keys[i].id, "newest first");
-  // The administrator gets them too (deploy/tester); a user's session is not the administrator's.
+  // No limit is VIP, whose plan has the own servers: their keys come too.
+  assert.deepEqual(r.body.keys.map((k) => k.id), [2001, 2000, 1001, 1000], "newest first, the premium keys among them");
+  // The administrator gets them too (deploy/tester), the premium ones apart:
+  // the tester seals hot.txt with the newest of `keys`. A user's session is
+  // not the administrator's.
   assert.equal((await call("GET", "admin/listkeys")).status, 401);
   assert.equal((await call("GET", "admin/listkeys", { token })).status, 401);
   const a = await call("GET", "admin/listkeys", { token: admin });
   assert.equal(a.status, 200);
   assert.equal(a.headers.get("cache-control"), "no-store");
-  assert.deepEqual(a.body.keys, r.body.keys);
+  assert.deepEqual(a.body.keys, [{ id: 2001, key: "a".repeat(64) }, { id: 1001, key: "c".repeat(64) }]);
+  assert.deepEqual(a.body.premium_keys.map((k) => k.id), [2000, 1000]);
+});
+
+test("each plan has its features: the own servers' keys, the edge and a country's subscription come with the higher ones", async () => {
+  const admin = (await call("POST", "admin/login", { body: { username: ADMIN.username, password: ADMIN.password } })).body.token;
+  const signIn = async (username, tier) => {
+    assert.equal((await call("POST", "admin/users", { token: admin, body: { username, password: "plan-pass-123", quota_bytes: GB, tier } })).status, 201);
+    return (await call("POST", "login", { body: { username, password: "plan-pass-123" } })).body.token;
+  };
+  const bronze = await signIn("plan-bronze", "bronze");
+  const gold = await signIn("plan-gold", "gold");
+  let me = (await call("GET", "me", { token: bronze })).body.account;
+  assert.deepEqual(me.features, [], "Bronze: connecting, and what every plan has");
+  assert.equal(me.plans.locations, "silver");
+  assert.deepEqual(me.plan_devices, { bronze: 1, silver: 2, gold: 4, vip: 0 });
+  me = (await call("GET", "me", { token: gold })).body.account;
+  assert.deepEqual(me.features, ["locations", "adblock", "bypass_apps", "protocols", "tun", "gps", "edge"]);
+  // The lists' keys: the own servers' only on a plan that has them.
+  assert.deepEqual((await call("GET", "listkeys", { token: bronze })).body.keys.map((k) => k.id), [2001, 1001]);
+  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys.map((k) => k.id), [2001, 1001]);
+  // The edge: Gold has it (none is deployed here), Bronze is told why not.
+  assert.deepEqual((await call("GET", "edge", { token: bronze })).body, { links: [], reason: "plan" });
+  assert.equal((await call("GET", "edge", { token: gold })).body.reason, "");
+  // A country's subscription comes with choosing a location; all servers on every plan.
+  const sub = async (token) => BASE + new URL((await call("GET", "sub", { token })).body.url).pathname;
+  const bs = await sub(bronze);
+  assert.equal((await fetch(bs)).status, 200);
+  const de = await fetch(bs + "?c=de");
+  assert.equal(de.status, 403);
+  assert.match(await de.text(), /Choose a location comes with the Silver plan/);
+  assert.equal((await fetch(bs + "?c=edge")).status, 403);
+  assert.equal((await fetch((await sub(gold)) + "?c=de")).status, 200);
+  // The administrator moves features between plans.
+  assert.equal((await call("PUT", "admin/settings", { token: admin, body: { plan_features: { lan: "diamond" } } })).status, 400);
+  assert.equal((await call("PUT", "admin/settings", { token: admin, body: { plan_features: { teleport: "vip" } } })).status, 400);
+  assert.equal((await call("PUT", "admin/settings", { token: admin, body: { plan_features: "not json" } })).status, 400);
+  const saved = await call("PUT", "admin/settings", { token: admin, body: { plan_features: { locations: "bronze", own: "gold" } } });
+  assert.equal(saved.status, 200);
+  assert.equal(JSON.parse(saved.body.plan_features).own, "gold");
+  assert.deepEqual((await call("GET", "me", { token: bronze })).body.account.features, ["locations"]);
+  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys.map((k) => k.id), [2001, 2000, 1001, 1000]);
+  assert.equal((await fetch(bs + "?c=de")).status, 200);
+  assert.equal((await call("GET", "public")).body.plans.own, "gold");
+  assert.equal((await call("PUT", "admin/settings", { token: admin, body: { plan_features: {} } })).status, 200);
+  assert.deepEqual((await call("GET", "me", { token: bronze })).body.account.features, [], "back to the plans' own features");
 });
 
 test("a usage report sent again with the same id is counted once", async () => {

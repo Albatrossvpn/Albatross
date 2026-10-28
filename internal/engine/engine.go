@@ -97,6 +97,9 @@ type Engine struct {
 	// badge is the plan last given to opt.Badge, badged whether any was.
 	badge  string
 	badged bool
+	// planned says applyPlan has run; planOwn and planEdge whether the plan
+	// had the own servers and the edge then.
+	planned, planOwn, planEdge bool
 	// loginStep is what signing in is doing now, for the UI ("" when not).
 	loginStep string
 	// httpsOK is when a server last passed a test with a genuine
@@ -262,7 +265,7 @@ func New(opt Options) (*Engine, error) {
 // Start begins scanning (and connects if the user asked for that).
 func (e *Engine) Start() {
 	e.ctx, e.cancel = context.WithCancel(context.Background())
-	e.updateBadge()
+	e.accountChanged()
 	go e.refreshReach(e.ctx)
 	// A crash left the system pointing at our dead proxy: at today's port,
 	// or at the one in use then, which an automatic port change (another
@@ -461,7 +464,11 @@ func (e *Engine) Settings() Settings {
 }
 
 // UpdateSettings applies new settings and reconnects when routing changed.
+// Turning on what the plan does not have is refused (PlanError).
 func (e *Engine) UpdateSettings(s Settings) error {
+	if f := e.planLocked(e.Settings(), s); f != "" {
+		return e.planError(f)
+	}
 	e.mu.Lock()
 	old := e.settings
 	if s.ProxyPort <= 0 || s.ProxyPort > 65535 {
@@ -570,6 +577,10 @@ func (e *Engine) buildSources() {
 	}
 	for _, s := range builtin {
 		if s.Tier == sources.TierDeep && !s.Central && !e.settings.DeepSources {
+			s.Enabled = false
+		}
+		if ownSource(s) && !e.Can(FeatureOwn) {
+			// No key would open them (the service gives it with the plan).
 			s.Enabled = false
 		}
 		if disabled[s.ID] {

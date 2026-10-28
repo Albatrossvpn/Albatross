@@ -189,10 +189,15 @@ func writeHot(out string, links []string, keys []sources.ListKey, plain bool) er
 			return err
 		}
 	}
-	if len(keys) == 0 {
+	// The newest key that is not a premium one: every signed-in app opens it.
+	i := 0
+	for i < len(keys) && keys[i].Premium {
+		i++
+	}
+	if i == len(keys) {
 		return nil
 	}
-	sealed, err := sources.SealKeyed(keys[0], text)
+	sealed, err := sources.SealKeyed(keys[i], text)
 	if err != nil {
 		return err
 	}
@@ -546,7 +551,7 @@ func main() {
 	// The lists go out sealed with this run's key (sources.SealKeyed),
 	// which the account service hands to signed-in users only; the plain
 	// copies stay while apps from before the sealed lists are around.
-	listKey, keys := newListKey(*keysIn, m.Updated)
+	listKey, premiumKey, keys := newListKey(*keysIn, m.Updated)
 	write := func(name string, links []string) {
 		text := strings.Join(links, "\n") + "\n"
 		if *plain {
@@ -593,9 +598,12 @@ func main() {
 		// per line), unsharded, so every install knows them. Written even
 		// when empty, so the fetch never fails.
 		// An own list goes out sealed with the build key and, on top, with
-		// this run's list key, so only a signed-in app opens it; the plain
-		// build-key copy stays for the apps from before the list keys.
-		writeOwn := func(name, text string) {
+		// one of this run's keys, so only a signed-in app opens it: the
+		// relays' with the list key, which every plan gets (in a shutdown
+		// they are the only way out), the own servers' with the premium
+		// key. The plain build-key copy stays for the apps from before the
+		// list keys.
+		writeOwn := func(name, text string, key sources.ListKey) {
 			sealed, err := sources.Seal(k, text)
 			if err != nil {
 				log.Fatal(err)
@@ -605,7 +613,7 @@ func main() {
 					log.Fatal(err)
 				}
 			}
-			keyed, err := sources.SealKeyed(listKey, string(sealed))
+			keyed, err := sources.SealKeyed(key, string(sealed))
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -614,7 +622,7 @@ func main() {
 			}
 		}
 		relays := strings.Fields(os.Getenv("OWN_RELAYS"))
-		writeOwn("own-0.bin", strings.Join(relays, "\n")+"\n")
+		writeOwn("own-0.bin", strings.Join(relays, "\n")+"\n", listKey)
 		m.Files["own-0.bin"] = len(relays)
 		// Split into sources.OwnBuckets parts; each app reads two. With
 		// fewer servers than parts, each part gets one of them.
@@ -630,7 +638,7 @@ func main() {
 				part = []string{links[b%len(links)]}
 			}
 			name := fmt.Sprintf("own-%d.bin", b+1)
-			writeOwn(name, strings.Join(part, "\n")+"\n")
+			writeOwn(name, strings.Join(part, "\n")+"\n", premiumKey)
 			m.Files[name] = len(part)
 		}
 	}

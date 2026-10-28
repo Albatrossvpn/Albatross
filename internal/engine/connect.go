@@ -145,6 +145,9 @@ func (e *Engine) Connect(country string) error {
 		return err
 	}
 	country = strings.ToUpper(strings.TrimSpace(country))
+	if country != "" && !e.Can(FeatureLocations) {
+		country = "" // the fastest: choosing comes with a higher plan
+	}
 	// Checked before anything changes: a refusal must leave the engine
 	// idle, not searching with no loop running.
 	if err := e.needAdmin(); err != nil {

@@ -557,7 +557,9 @@ var protoPrior = map[uint8]float64{
 func (e *Engine) pickBatch(size int) []candidate {
 	now := time.Now()
 	nowMin := pool.Minutes(now)
+	ownOK := e.Can(FeatureOwn) // before the lock: it reads the account
 	e.mu.Lock()
+	srcs := append([]sources.Source(nil), e.srcs...) // read after the lock
 	target := e.target
 	allowPlain := e.settings.AllowPlain
 	protocol := e.settings.Protocol
@@ -645,6 +647,10 @@ func (e *Engine) pickBatch(size int) []candidate {
 			}
 		}
 		if en.Flags&pool.FlagPlain != 0 && !allowPlain {
+			return
+		}
+		if !ownOK && planOwnEntry(en, srcs) {
+			// The own servers come with a higher plan.
 			return
 		}
 		if wantProto != 0 && en.Proto != wantProto {

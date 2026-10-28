@@ -68,6 +68,13 @@ type Info struct {
 	UsedSeconds int64  `json:"used_seconds"`
 	ExpiresAt   int64  `json:"expires_at"` // unix seconds
 	ResetsAt    int64  `json:"resets_at"`  // unix seconds: when the allowance renews
+	// Features are what the plan has beyond connecting (the service's
+	// FEATURES); none named (nil) is a service from before the plans had
+	// features, and an empty list a plan with none. Plans says which plan
+	// brings each feature, PlanDevices how many devices each plan has.
+	Features    []string          `json:"features"`
+	Plans       map[string]string `json:"plans,omitempty"`
+	PlanDevices map[string]int    `json:"plan_devices,omitempty"`
 }
 
 // Why returns the reason this account cannot connect now, or "" if it can.

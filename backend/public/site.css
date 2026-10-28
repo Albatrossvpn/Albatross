@@ -171,6 +171,14 @@ label.check { display: flex; align-items: center; gap: 10px; margin-bottom: 14px
 .bar i { display: block; height: 100%; width: 0; border-radius: 99px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .5s; }
 .bar i.warn { background: var(--warn); }
 .bar i.full { background: var(--bad); }
+/* What the plan has, ticked in gold; what a higher plan brings, with its medal. */
+.features { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.features li { position: relative; padding-left: 24px; font-size: 15px; }
+.features li.no { color: var(--muted); }
+.features li::before { content: ""; position: absolute; left: 3px; top: 7px; width: 10px; height: 5px; border-left: 2px solid var(--gold); border-bottom: 2px solid var(--gold); transform: rotate(-45deg); }
+.features li.no::before { top: 5px; width: 9px; height: 9px; border: 2px solid var(--line); border-radius: 50%; transform: none; }
+.plan-badge.small { font-size: 11px; padding: 2px 9px 2px 6px; }
+.plan-badge.small svg { width: 11px; height: 11px; }
 .kv { display: grid; grid-template-columns: auto 1fr; gap: 8px 20px; font-size: 14px; margin-top: 18px; }
 .kv dt { color: var(--muted); }
 .kv dd { margin: 0; text-align: right; font-weight: 600; }

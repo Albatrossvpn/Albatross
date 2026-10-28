@@ -129,6 +129,54 @@ export const TIERS = {
 };
 export const DEFAULT_TIER = "bronze";
 
+/**
+ * What a plan adds beyond connecting, from the cheapest to run and least
+ * worth to the user up to the dearest: each feature comes with the plan
+ * named here and every plan above it. Every plan connects to the fastest
+ * location with every protocol and the public servers, reaches the
+ * relays inside the country in a shutdown, refuses unencrypted traffic,
+ * opens local sites directly and shares servers with friends. The
+ * administrator can move a feature to another plan (planFeatures).
+ */
+export const FEATURES = {
+  locations: { name: "Choose a location", tier: "silver" },
+  adblock: { name: "Ad & tracker blocker", tier: "silver" },
+  bypass_apps: { name: "Local apps outside the VPN", tier: "silver" },
+  protocols: { name: "Choose the protocol", tier: "gold" },
+  tun: { name: "Protect the whole device", tier: "gold" },
+  gps: { name: "Override GPS location", tier: "gold" },
+  edge: { name: "Albatross Edge servers", tier: "gold" },
+  own: { name: "Albatross's own servers", tier: "vip" },
+  lan: { name: "Share with other devices", tier: "vip" },
+};
+
+const RANK = Object.fromEntries(Object.keys(TIERS).map((t, i) => [t, i]));
+
+/**
+ * The plan each feature comes with: FEATURES' own, with the administrator's
+ * choices (a JSON object of feature to plan, the plan_features setting)
+ * where they name a known feature and plan.
+ */
+export function planFeatures(chosen = "") {
+  const out = Object.fromEntries(Object.entries(FEATURES).map(([id, f]) => [id, f.tier]));
+  let c = {};
+  try {
+    c = typeof chosen === "string" ? (chosen ? JSON.parse(chosen) : {}) : chosen || {};
+  } catch {
+    return out;
+  }
+  for (const [id, tier] of Object.entries(c && typeof c === "object" ? c : {})) {
+    if (Object.hasOwn(FEATURES, id) && Object.hasOwn(TIERS, tier)) out[id] = tier;
+  }
+  return out;
+}
+
+/** The features a plan has, given which plan each comes with (planFeatures). */
+export function featuresOf(tier, plans = planFeatures()) {
+  const r = RANK[tierOf(tier)];
+  return Object.keys(FEATURES).filter((id) => RANK[plans[id]] <= r);
+}
+
 // The plan an account's data allowance earns when none is chosen for
 // it: no limit is VIP, 100 GB and up Gold, 10 GB and up Silver, less
 // Bronze.
@@ -157,9 +205,10 @@ export const SUB_ACTIVE = 6 * 3600;
  * What the app and the panels are told about an account. A device asking
  * whether it may connect passes `others`, how many other devices hold one
  * of the account's slots right now: it may not when they fill the plan. A
- * page passes `active`, how many devices hold a slot, to show it.
+ * page passes `active`, how many devices hold a slot, to show it; `plans`
+ * is which plan each feature comes with (planFeatures).
  */
-export function accountOf(user, now, { others = -1, active = -1 } = {}) {
+export function accountOf(user, now, { others = -1, active = -1, plans = planFeatures() } = {}) {
   const p = rollPeriod(user, now);
   const tier = tierOf(user.tier);
   const limit = TIERS[tier].devices;
@@ -184,6 +233,11 @@ export function accountOf(user, now, { others = -1, active = -1 } = {}) {
     used_seconds: p.used_seconds,
     expires_at: user.expires_at,
     resets_at: user.reset_days > 0 ? p.period_start + user.reset_days * DAY : 0,
+    // What the plan includes, and which plan brings each feature and how
+    // many devices each plan has, for the apps to show what is locked.
+    features: featuresOf(tier, plans),
+    plans,
+    plan_devices: Object.fromEntries(Object.entries(TIERS).map(([t, v]) => [t, v.devices])),
   };
 }
 

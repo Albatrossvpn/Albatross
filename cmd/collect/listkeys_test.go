@@ -12,22 +12,33 @@ import (
 	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
-// Each run adds a key with a new id and keeps the recent ones, newest first.
+// Each run adds a list key and a premium one with new ids, the list key the
+// newest, and keeps the recent ones, newest first.
 func TestListKeysRotate(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "keys.json")
 	now := time.Unix(1761480000, 0)
-	k1, keys := newListKey(path, now)
-	if k1.ID != 1761480000 || len(keys) != 1 || len(k1.Key) != 32 {
-		t.Fatalf("first key %+v %v", k1, keys)
+	k1, p1, keys := newListKey(path, now)
+	if p1.ID != 1761480000 || k1.ID != 1761480001 || !p1.Premium || k1.Premium || len(keys) != 2 || len(k1.Key) != 32 || bytes.Equal(k1.Key, p1.Key) {
+		t.Fatalf("first keys %+v %+v %v", k1, p1, keys)
+	}
+	if keys[0].ID != k1.ID || keys[0].Premium || keys[1].ID != p1.ID || !keys[1].Premium {
+		t.Fatalf("the file: %+v", keys)
 	}
 	if err := writeListKeys(path, keys); err != nil {
 		t.Fatal(err)
 	}
-	// The same second again: a different id all the same, and the old key kept.
-	k2, keys := newListKey(path, now)
-	if k2.ID != 1761480001 || len(keys) != 2 || keys[0].ID != k2.ID || keys[1].ID != k1.ID {
-		t.Fatalf("second key %+v %v", k2, keys)
+	// The same second again: different ids all the same, and the old keys kept.
+	k2, p2, keys := newListKey(path, now)
+	if p2.ID != 1761480002 || k2.ID != 1761480003 || len(keys) != 4 || keys[0].ID != k2.ID || keys[3].ID != p1.ID {
+		t.Fatalf("second keys %+v %+v %v", k2, p2, keys)
+	}
+	// What the file holds reads back with the premium keys marked.
+	if err := writeListKeys(path, keys); err != nil {
+		t.Fatal(err)
+	}
+	if got := readListKeys(path); len(got) != 4 || got[0].Premium || !got[1].Premium || got[1].ID != p2.ID {
+		t.Fatalf("read back: %+v", got)
 	}
 	// The file holds at most keyKeep keys.
 	var many []listKeyFile
@@ -36,8 +47,8 @@ func TestListKeysRotate(t *testing.T) {
 	}
 	b, _ := json.Marshal(many)
 	os.WriteFile(path, b, 0o600)
-	_, keys = newListKey(path, now)
-	if len(keys) != keyKeep || keys[0].ID != 1761480000 {
+	_, _, keys = newListKey(path, now)
+	if len(keys) != keyKeep || keys[0].ID != 1761480001 {
 		t.Fatalf("kept %d, first %d", len(keys), keys[0].ID)
 	}
 }
@@ -92,6 +103,16 @@ func TestHotFromSealedLists(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(out, "hot.txt.sealed"))
 	if id, _ := sources.KeyedID(string(data)); id != 20 || sources.OpenKeyed(keys, string(data)) != a+"\n"+c+"\n" {
 		t.Fatalf("sealed hot.txt: id %d", id)
+	}
+	// A premium key newer than the list keys is not one every app has: the
+	// newest list key seals hot.txt.
+	premium := append([]sources.ListKey{{ID: 30, Key: bytes.Repeat([]byte{3}, 32), Premium: true}}, keys...)
+	if err := writeHot(out, []string{a}, premium, false); err != nil {
+		t.Fatal(err)
+	}
+	data, _ = os.ReadFile(filepath.Join(out, "hot.txt.sealed"))
+	if id, _ := sources.KeyedID(string(data)); id != 20 {
+		t.Fatalf("hot.txt sealed with key %d", id)
 	}
 	// Without keys (an old setup), the plain list as before.
 	if err := writeHot(out, []string{a}, nil, false); err != nil {

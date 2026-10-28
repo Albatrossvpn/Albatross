@@ -157,11 +157,16 @@ func readJSON(r *http.Request, v any) error {
 type apiError struct {
 	Error string `json:"error"`
 	Code  string `json:"code,omitempty"`
+	// For "plan": the feature the plan lacks and the plan that has it.
+	Feature string `json:"feature,omitempty"`
+	Tier    string `json:"tier,omitempty"`
 }
 
 func fail(w http.ResponseWriter, err error) {
 	code := ""
 	var limit *engine.LimitError
+	var plan *engine.PlanError
+	out := apiError{Error: err.Error()}
 	switch {
 	case errors.Is(err, engine.ErrNeedAdmin):
 		code = "need_admin"
@@ -171,9 +176,12 @@ func fail(w http.ResponseWriter, err error) {
 		code = "limit"
 	case errors.Is(err, engine.ErrNoInAppUpdate):
 		code = "no_in_app"
+	case errors.As(err, &plan):
+		code, out.Feature, out.Tier = "plan", plan.Feature, plan.Tier
 	}
+	out.Code = code
 	w.WriteHeader(http.StatusBadRequest)
-	writeJSON(w, apiError{Error: err.Error(), Code: code})
+	writeJSON(w, out)
 }
 
 func ok(w http.ResponseWriter) { writeJSON(w, map[string]bool{"ok": true}) }
@@ -259,6 +267,12 @@ func (s *Server) target(w http.ResponseWriter, r *http.Request) {
 	if err := readJSON(r, &req); err != nil {
 		fail(w, err)
 		return
+	}
+	if req.Country != "" {
+		if err := s.eng.Locked(engine.FeatureLocations); err != nil {
+			fail(w, err)
+			return
+		}
 	}
 	s.eng.SetTarget(strings.ToUpper(req.Country))
 	ok(w)
