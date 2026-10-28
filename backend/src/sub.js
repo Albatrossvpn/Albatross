@@ -286,9 +286,9 @@ export async function cleanEdges(env, n = EDGE_ADDRS, pick = Math.random) {
   }
 }
 
-/** The edge's links for an account that may connect, by name and by clean addresses. */
+/** The edge's links for an account that may connect on a plan with the edge, by name and by clean addresses. */
 export async function edgeFor(env, account) {
-  if (!account.allowed) return [];
+  if (!account.allowed || !(account.features || []).includes("edge")) return [];
   return edgeLinks(env.EDGE_HOST, env.EDGE_UUID, await cleanEdges(env));
 }
 

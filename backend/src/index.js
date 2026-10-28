@@ -1,8 +1,8 @@
 // The account service: the apps sign in and report use here, users see and
 // change their account on the website, the administrator manages everyone.
 import {
-  DAY, DEFAULT_TIER, DEVICE_ACTIVE, SUB_ACTIVE, TIERS, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, maxDevices, versionLess,
-  randomPassword, rollPeriod, safeEqual, sign, tag, tierForQuota, tierOf, verify, verifyPassword,
+  DAY, DEFAULT_TIER, DEVICE_ACTIVE, FEATURES, SUB_ACTIVE, TIERS, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, maxDevices, planFeatures,
+  versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, tierForQuota, tierOf, verify, verifyPassword,
 } from "./lib.js";
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
@@ -18,6 +18,7 @@ const DEFAULTS = {
   default_valid_days: "0",
   default_reset_days: "0", // allowances renew only when the admin recharges them
   default_tier: "auto", // the plan sign-ups get: by their allowance, or a named plan
+  plan_features: "", // which plan brings each feature, where it differs from FEATURES (JSON)
   download_windows: "",
   download_android: "",
 };
@@ -133,6 +134,17 @@ async function settings(env) {
   return out;
 }
 
+// Which plan brings each feature (planFeatures), read at most once a
+// minute per isolate: every app asks for its account every minute.
+let plansCache = { at: 0, plans: null };
+async function plansOf(env) {
+  if (!plansCache.plans || Date.now() - plansCache.at > 60_000) {
+    const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'plan_features'").first();
+    plansCache = { at: Date.now(), plans: planFeatures(row ? row.value : "") };
+  }
+  return plansCache.plans;
+}
+
 // An IPv6 client is usually given a whole /64, so the limits count the
 // prefix as one address; otherwise each few guesses could take a new one.
 function clientAddress(request) {
@@ -236,6 +248,8 @@ async function publicInfo(env) {
     turnstile_sitekey: env.TURNSTILE_SITEKEY || "",
     downloads: { windows: s.download_windows, android: s.download_android },
     tiers: TIERS,
+    features: FEATURES,
+    plans: planFeatures(s.plan_features),
   });
 }
 
@@ -360,9 +374,10 @@ const upsertDevice = (env, user, d, t, until) => env.DB.prepare(
  * many devices hold one.
  */
 async function viewOf(env, user, d, t) {
-  if (!d) return accountOf(user, t, { active: await busyDevices(env, user, "", t) });
+  const plans = await plansOf(env);
+  if (!d) return accountOf(user, t, { active: await busyDevices(env, user, "", t), plans });
   await upsertDevice(env, user, d, t, -1);
-  return accountOf(user, t, { others: await busyDevices(env, user, d.id, t) });
+  return accountOf(user, t, { others: await busyDevices(env, user, d.id, t), plans });
 }
 
 /**
@@ -372,7 +387,7 @@ async function viewOf(env, user, d, t) {
  * counts the devices that stay out.
  */
 async function claimSlot(env, user, d, t, hold = DEVICE_ACTIVE) {
-  const a = accountOf(user, t, { others: await busyDevices(env, user, d.id, t) });
+  const a = accountOf(user, t, { others: await busyDevices(env, user, d.id, t), plans: await plansOf(env) });
   await upsertDevice(env, user, d, t, a.allowed ? t + hold : 0);
   return a;
 }
@@ -463,7 +478,7 @@ async function signup(request, env) {
     throw e;
   }
   const user = await userByName(env, username);
-  return json({ token: await session(env, user), account: accountOf(user, t) }, 201);
+  return json({ token: await session(env, user), account: accountOf(user, t, { plans: await plansOf(env) }) }, 201);
 }
 
 async function me(request, env) {
@@ -473,11 +488,13 @@ async function me(request, env) {
   return json({ account, created_at: user.created_at, total_bytes: user.total_bytes, total_seconds: user.total_seconds });
 }
 
-/** The edge's links for the signed-in user (edge/README.md); none while the account may not connect. */
+/** The edge's links for the signed-in user (edge/README.md); none while the account may not connect, or on a plan without the edge. */
 async function edge(request, env) {
   await requireCurrentClient(request, env);
   const { user } = await authUser(request, env);
   const a = await viewOf(env, user, deviceOf(request), now());
+  // The edge comes with a plan ("edge"): the others are told why it is not theirs.
+  if (a.allowed && !a.features.includes("edge")) return json({ links: [], reason: "plan" });
   return json({ links: a.allowed ? edgeLinks(env.EDGE_HOST, env.EDGE_UUID) : [], reason: a.reason });
 }
 
@@ -487,32 +504,39 @@ const LIST_KEYS_GIVEN = 12;
 
 /**
  * The keys that open the collector's sealed lists (cmd/collect -keys-out),
- * for a signed-in user who may connect: the newest first. A copy of the
- * app with the sign-in cut out gets none, and reads no list.
+ * for a signed-in user who may connect: the newest first. The lists of
+ * the project's own servers are sealed with keys of their own (premium),
+ * given only on a plan that has the own servers. A copy of the app with
+ * the sign-in cut out gets none, and reads no list.
  */
 async function listKeys(request, env) {
   await requireCurrentClient(request, env);
   const { user } = await authUser(request, env);
   const a = await viewOf(env, user, deviceOf(request), now());
   if (!a.allowed) return json({ keys: [], reason: a.reason });
-  return json({ keys: await recentListKeys(env), reason: "" });
+  const { keys, premium } = await recentListKeys(env);
+  // One list of keys, which the apps match to a list by its id.
+  return json({ keys: a.features.includes("own") ? [...keys, ...premium].sort((x, y) => y.id - x.id) : keys, reason: "" });
 }
 
 /**
  * The same keys for the administrator: the tester inside the country
  * (deploy/tester) opens the sealed lists with them and seals the hot.txt it
- * publishes with the newest.
+ * publishes with the newest of `keys`, which never holds a premium key.
  */
 async function adminListKeys(request, env) {
   await authAdmin(request, env);
-  return json({ keys: await recentListKeys(env), reason: "" });
+  const { keys, premium } = await recentListKeys(env);
+  return json({ keys, premium_keys: premium, reason: "" });
 }
 
+/** The newest stored list keys, the premium ones (the own servers' lists) apart. */
 async function recentListKeys(env) {
-  return (await storedListKeys(env))
+  const all = (await storedListKeys(env))
     .filter((k) => Number.isSafeInteger(k.id) && typeof k.key === "string" && /^[0-9a-f]{64}$/.test(k.key))
-    .sort((x, y) => y.id - x.id)
-    .slice(0, LIST_KEYS_GIVEN);
+    .sort((x, y) => y.id - x.id);
+  const pick = (premium) => all.filter((k) => !!k.premium === premium).slice(0, LIST_KEYS_GIVEN).map(({ id, key }) => ({ id, key }));
+  return { keys: pick(false), premium: pick(true) };
 }
 
 /**
@@ -549,6 +573,11 @@ async function subscription(request, url, env) {
   if (!a.allowed) return new Response("This account cannot connect right now (" + a.reason + ").", { status: 403 });
   const choice = String(url.searchParams.get("c") || "").toUpperCase().replace("EDGE", "edge");
   if (choice && choice !== "edge" && !/^[A-Z]{2}$/.test(choice)) return new Response("Not found", { status: 404 });
+  // One country's servers come with choosing a location, the edge's with the edge.
+  const needs = choice === "edge" ? "edge" : choice ? "locations" : "";
+  if (needs && !a.features.includes(needs)) {
+    return new Response(`${FEATURES[needs].name} comes with the ${TIERS[a.plans[needs]].name} plan and above. The subscription for all servers works on every plan.`, { status: 403 });
+  }
   const [entries, updated, edge] = await Promise.all([subPool(env), listUpdated(env), edgeFor(env, a)]);
   const sub = buildSub(entries, choice, env.SITE_NAME || "Albatross", edge, updated);
   const h = subHeaders(sub.title, a);
@@ -596,7 +625,7 @@ async function usage(request, env) {
   // Sessions are renewed while they are in use.
   const renewed = payload.exp - t < SESSION / 2 ? await session(env, fresh) : token;
   const d = deviceOf(request);
-  return json({ token: renewed, account: d ? await claimSlot(env, fresh, d, t) : accountOf(fresh, t) });
+  return json({ token: renewed, account: d ? await claimSlot(env, fresh, d, t) : accountOf(fresh, t, { plans: await plansOf(env) }) });
 }
 
 async function changePassword(request, env) {
@@ -868,12 +897,27 @@ async function adminSaveSettings(request, env) {
     if (k === "signup_open") v = b[k] === true || v === "1" ? "1" : "0";
     else if (k === "default_tier") {
       if (v !== "auto" && !Object.hasOwn(TIERS, v)) throw new HttpError(400, `The plan is auto or one of ${Object.keys(TIERS).join(", ")}.`);
+    } else if (k === "plan_features") {
+      // A JSON object of feature to plan; kept whole, as planFeatures reads it.
+      let c;
+      try {
+        c = typeof b[k] === "string" ? JSON.parse(b[k] || "{}") : b[k];
+      } catch {
+        throw new HttpError(400, "plan_features must be a JSON object of feature to plan.");
+      }
+      if (!c || typeof c !== "object" || Array.isArray(c)) throw new HttpError(400, "plan_features must be a JSON object of feature to plan.");
+      for (const [id, tier] of Object.entries(c)) {
+        if (!Object.hasOwn(FEATURES, id)) throw new HttpError(400, `No feature is called ${id}.`);
+        if (!Object.hasOwn(TIERS, tier)) throw new HttpError(400, `The plan for ${id} is one of ${Object.keys(TIERS).join(", ")}.`);
+      }
+      v = JSON.stringify(planFeatures(c));
     } else if (k.startsWith("download_")) {
       if (v && !/^https:\/\//.test(v)) throw new HttpError(400, "Download links must start with https://");
     } else if (!/^\d{1,16}$/.test(v)) throw new HttpError(400, `Bad value for ${k}.`);
     stmts.push(env.DB.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2").bind(k, v));
   }
   if (stmts.length) await env.DB.batch(stmts);
+  plansCache = { at: 0, plans: null };
   return json(await settings(env));
 }
 

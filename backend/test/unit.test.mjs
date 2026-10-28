@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { keyedID, openKeyed, pool } from "../src/sub.js";
-import { DAY, TIERS, accountOf, checkPassword, checkUsername, hashPassword, maxDevices, randomPassword, rollPeriod, safeEqual, sign, tierOf, verify, verifyPassword } from "../src/lib.js";
+import {
+  DAY, FEATURES, TIERS, accountOf, checkPassword, checkUsername, featuresOf, hashPassword, maxDevices, planFeatures, randomPassword, rollPeriod, safeEqual, sign,
+  tierOf, verify, verifyPassword,
+} from "../src/lib.js";
 
 test("passwords are salted and verified", async () => {
   const a = await hashPassword("correct horse");
@@ -243,4 +246,26 @@ test("a subscription of a full hot list of long links builds (no argument-limit 
   const text = Buffer.from(sub.body, "base64").toString("utf8");
   assert.equal(text.split("\n").filter(Boolean).length, 450);
   assert.ok(text.includes("Germany"), "the names survive the encoding (and the flag, which is not ASCII)");
+});
+
+test("each feature comes with its plan and every plan above it", () => {
+  assert.deepEqual(featuresOf("bronze"), []);
+  assert.deepEqual(featuresOf("silver"), ["locations", "adblock", "bypass_apps"]);
+  assert.deepEqual(featuresOf("gold"), ["locations", "adblock", "bypass_apps", "protocols", "tun", "gps", "edge"]);
+  assert.deepEqual(featuresOf("vip"), Object.keys(FEATURES));
+  assert.deepEqual(featuresOf("platinum"), [], "an unknown plan is the first one");
+  for (const f of Object.values(FEATURES)) assert.ok(Object.hasOwn(TIERS, f.tier), f.name);
+});
+
+test("the administrator's choice of plan for a feature wins where it names a known feature and plan", () => {
+  const p = planFeatures('{"lan":"gold","own":"platinum","teleport":"vip"}');
+  assert.equal(p.lan, "gold");
+  assert.equal(p.own, "vip", "an unknown plan keeps the feature's own");
+  assert.equal(Object.hasOwn(p, "teleport"), false);
+  assert.deepEqual(planFeatures("not json"), planFeatures(), "an unreadable setting is no choice");
+  assert.deepEqual(featuresOf("gold", p), ["locations", "adblock", "bypass_apps", "protocols", "tun", "gps", "edge", "lan"]);
+  const a = accountOf({ username: "x", tier: "silver", quota_bytes: 0, max_seconds: 0, expires_at: 0, reset_days: 0 }, 1e9, { plans: p });
+  assert.deepEqual(a.features, ["locations", "adblock", "bypass_apps"]);
+  assert.equal(a.plans.lan, "gold");
+  assert.deepEqual(a.plan_devices, { bronze: 1, silver: 2, gold: 4, vip: 0 });
 });
