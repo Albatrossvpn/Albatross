@@ -43,6 +43,9 @@ type Fetcher struct {
 	CacheDir string
 	// Now is the clock for dated addresses (see fetchDated); nil is time.Now.
 	Now func() time.Time
+	// Warp makes the links of the device's own WARP account (KindWarp);
+	// nil where there is no device.
+	Warp func(ctx context.Context) (string, error)
 
 	bytes atomic.Int64
 }
@@ -90,6 +93,19 @@ func (f *Fetcher) Fetch(ctx context.Context, s Source) Result {
 		return f.fetchFeed(ctx, s)
 	case s.Kind == KindSubscription && strings.Contains(s.URL, "{YYYY}"):
 		return f.fetchDated(ctx, s)
+	case s.Kind == KindWarp:
+		res := Result{Source: s, Via: "device"}
+		if f.Warp == nil {
+			res.Err = errors.New("no WARP account on this side")
+			return res
+		}
+		text, err := f.Warp(ctx)
+		if err != nil {
+			return f.fallback(res, err)
+		}
+		f.store(s, cacheMeta{URL: "warp:" + s.URL, FetchedAt: time.Now()}, text)
+		res.Text = text
+		return res
 	}
 	return f.fetchOne(ctx, s)
 }
