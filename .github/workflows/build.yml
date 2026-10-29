@@ -166,8 +166,22 @@ jobs:
           go test -c -o /tmp/mobile.test ./mobile
           sudo --preserve-env=SING_BOX,XRAY,E2E_UPSTREAM,E2E_HOST_IP /tmp/mobile.test -test.count=1 -test.v -test.run AndroidPath
 
+  # The account's Actions storage is small: what runs that are over left
+  # behind goes before this run stores its own (build/tidy-artifacts.sh).
+  tidy:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Delete the artifacts of finished runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash build/tidy-artifacts.sh
+
   build:
-    needs: test
+    needs: [test, tidy]
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
