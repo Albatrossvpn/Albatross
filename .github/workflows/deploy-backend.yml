@@ -116,6 +116,8 @@ jobs:
         # The website serves them (/download/); a release stores its own
         # files, this covers the release before that and a new bucket.
         env:
+          # The repository's releases are not public: the files come as the workflow.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         run: |
