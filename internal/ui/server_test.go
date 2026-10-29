@@ -204,3 +204,20 @@ func TestSignInThroughThePage(t *testing.T) {
 		t.Fatalf("after signing out: %v", a)
 	}
 }
+
+// A protocol is shown by its name in the protocol list, REALITY named.
+func TestProtocolName(t *testing.T) {
+	for _, c := range []struct{ proto, security, want string }{
+		{"vless", "reality", "VLESS Reality"},
+		{"vless", "tls", "VLESS"},
+		{"hysteria2", "", "Hysteria 2"},
+		{"wireguard", "", "WireGuard"},
+		{"warpplus", "", "WARP+"},
+		{"mystery", "", "mystery"},
+		{"", "", ""},
+	} {
+		if got := protocolName(c.proto, c.security); got != c.want {
+			t.Errorf("protocolName(%q, %q) = %q, want %q", c.proto, c.security, got, c.want)
+		}
+	}
+}

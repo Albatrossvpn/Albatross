@@ -257,6 +257,14 @@ test("each feature comes with its plan and every plan above it", () => {
   for (const f of Object.values(FEATURES)) assert.ok(Object.hasOwn(TIERS, f.tier), f.name);
 });
 
+test("priority on the own servers and direct support are the highest plan's alone", () => {
+  for (const f of ["priority", "support"]) {
+    assert.equal(FEATURES[f].tier, "vip");
+    assert.ok(!featuresOf("gold").includes(f), f + " is not in Gold");
+    assert.ok(featuresOf("vip").includes(f), f + " is in VIP");
+  }
+});
+
 test("the administrator's choice of plan for a feature wins where it names a known feature and plan", () => {
   const p = planFeatures('{"lan":"gold","own":"platinum","teleport":"vip"}');
   assert.equal(p.lan, "gold");

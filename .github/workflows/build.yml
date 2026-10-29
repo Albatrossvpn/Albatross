@@ -250,21 +250,18 @@ jobs:
             export ACCOUNT_URL MIRROR_URL UPDATE_KEY
           fi
           bash build/package.sh
-      # Artifacts count against the account's small Actions storage (0.5 GB
-      # on the free plan), and a run's builds are some 400 MB: only what a
-      # later job of the run reads is kept, for a day, and the builds
-      # themselves only when a release publishes them.
-      - uses: actions/upload-artifact@v7
+      # The builds go from one job to the next through the cache, not as
+      # artifacts: artifacts count against the account's Actions storage
+      # (0.5 GB on the free plan; a run's builds are some 440 MB, and the
+      # storage stays full for hours after it was), the cache has a limit of
+      # its own. A key per run and attempt (an entry cannot be replaced), and
+      # a restore takes the newest attempt's when the job it needs was not
+      # run again; the Windows and Linux jobs share an archive.
+      - uses: actions/cache/save@v6
         with:
-          name: Albatross-folder
+          key: folder-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/Albatross
-          retention-days: 1
-      - uses: actions/upload-artifact@v7
-        if: inputs.release != '' || startsWith(github.ref, 'refs/tags/v')
-        with:
-          name: Albatross-portable-${{ steps.version.outputs.version }}
-          path: dist/*.zip
-          retention-days: 1
+          enableCrossOsArchive: true
 
   android:
     needs: build
@@ -374,12 +371,11 @@ jobs:
           signer="$("$tools/apksigner" verify --print-certs "$apk" | grep -m1 'SHA-256' | awk '{print $NF}')"
           echo "APK signer SHA-256: $signer"
           echo "- APK signer SHA-256: \`$signer\`, signed with $want, $(du -m "$apk" | cut -f1) MB" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/cache/save@v6
         if: inputs.release != '' || startsWith(github.ref, 'refs/tags/v')
         with:
-          name: Albatross-android-${{ env.VERSION }}
+          key: android-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/*.apk
-          retention-days: 1
       # The same app, debuggable, connects on an emulator: proves the cores,
       # Tor and the VPN service run on Android, not just that it builds. A
       # release asks for an account, so the commit's own run (without one)
@@ -436,10 +432,13 @@ jobs:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/cache/restore@v6
         with:
-          name: Albatross-folder
+          key: folder-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: folder-${{ github.run_id }}-
           path: dist/Albatross
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -540,12 +539,12 @@ jobs:
             if (-not (Test-Path (Join-Path $dir $f))) { throw "missing $f after install" }
           }
           "installed OK: $dir"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/cache/save@v6
         if: inputs.release != '' || startsWith(github.ref, 'refs/tags/v')
         with:
-          name: Albatross-Setup-${{ env.VERSION }}
+          key: setup-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/Albatross-Setup-*.exe
-          retention-days: 1
+          enableCrossOsArchive: true
 
   # Only this job publishes the release, once every build and test passed,
   # so a platform that failed never ships half a release marked latest.
@@ -554,14 +553,19 @@ jobs:
     needs: [backend, test, build, installer, android]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/cache/restore@v6
         with:
-          name: Albatross-android-${{ needs.build.outputs.version }}
-          path: dist
-      - uses: actions/download-artifact@v8
+          key: android-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: android-${{ github.run_id }}-
+          path: dist/*.apk
+          fail-on-cache-miss: true
+      - uses: actions/cache/restore@v6
         with:
-          name: Albatross-Setup-${{ needs.build.outputs.version }}
-          path: dist
+          key: setup-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: setup-${{ github.run_id }}-
+          path: dist/Albatross-Setup-*.exe
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
       # One download per platform: the Windows installer and one Android
       # APK for every phone.
       - name: Name the APK

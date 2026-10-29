@@ -100,6 +100,16 @@ function renderFeatures(a) {
     has(id) ? `<li class="yes">${esc(f.name)}</li>` : `<li class="no">${esc(f.name)} ${planPill(a.plans[id], "small")}</li>`).join("");
 }
 
+// VIP accounts reach support directly: the chat link and the address.
+function renderSupport() {
+  const links = [];
+  if (info.support_url) links.push(`<a class="btn primary" href="${esc(info.support_url)}" target="_blank" rel="noopener">Message support</a>`);
+  if (info.contact) links.push(`<a class="btn" href="mailto:${esc(info.contact)}">${esc(info.contact)}</a>`);
+  const show = acct.features ? acct.features.includes("support") : false;
+  $("#support").classList.toggle("hidden", !show || !links.length);
+  $("#support-links").innerHTML = links.join("");
+}
+
 function render(a) {
   acct = a;
   $("#auth").classList.add("hidden");
@@ -109,6 +119,7 @@ function render(a) {
   else $("#sub-list").innerHTML = `<span class="muted note">The servers are available while the account can connect.</span>`;
   $("#d-name").textContent = a.username;
   $("#d-plan").innerHTML = planPill(a.tier, "big");
+  $("#member").className = "card member " + (info.tiers && info.tiers[a.tier] ? a.tier : "");
   const pill = $("#d-status");
   pill.textContent = a.allowed ? "Active" : { disabled: "Off", expired: "Expired", devices: "Devices in use" }[a.reason] || "Limit reached";
   pill.className = "pill" + (a.allowed ? "" : " bad");
@@ -125,6 +136,7 @@ function render(a) {
   rows.push(["Account ends", esc(a.expires_at ? fmtDate(a.expires_at) : "Never")]);
   $("#d-kv").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
   renderFeatures(a);
+  renderSupport();
   renderSub();
   loadDevices();
 }

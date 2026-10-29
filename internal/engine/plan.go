@@ -30,6 +30,11 @@ const (
 	FeatureEdge       = "edge"        // the edge's servers
 	FeatureOwn        = "own"         // the project's own servers (not the relays)
 	FeatureLAN        = "lan"         // Settings.AllowLAN
+	// FeaturePriority puts the project's own servers, which public lists
+	// do not crowd, first in line, in a shutdown too; FeatureSupport is
+	// direct support, which the app links to.
+	FeaturePriority = "priority"
+	FeatureSupport  = "support"
 )
 
 // PlanError says a feature does not come with the account's plan.
@@ -60,6 +65,17 @@ func (e *Engine) Can(feature string) bool {
 		return true
 	}
 	return slices.Contains(v.Info.Features, feature)
+}
+
+// Has reports whether the signed-in account's plan names the feature. Unlike
+// Can, a build without accounts, or a service that names no features, has
+// none: for what only a plan that pays for it gets.
+func (e *Engine) Has(feature string) bool {
+	if e.acct == nil {
+		return false
+	}
+	v := e.acct.View()
+	return v.SignedIn && slices.Contains(v.Info.Features, feature)
 }
 
 // Locked returns a PlanError when the plan does not have the feature, nil

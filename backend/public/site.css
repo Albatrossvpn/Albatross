@@ -1,8 +1,8 @@
 /* Light, in the icon's royal blue and gold, as the app and the website. The
-   headings and the wordmark are in the app's serif fonts (SIL Open Font
-   License, next to the fonts), which hold only the Latin letters. */
-@font-face { font-family: "Cormorant Garamond"; src: url(/fonts/cormorant-garamond-600.woff2) format("woff2"); font-weight: 600; font-display: swap; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
-@font-face { font-family: "Cinzel"; src: url(/fonts/cinzel-600.woff2) format("woff2"); font-weight: 600; font-display: swap; unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+   headings and the wordmark are in Manrope (SIL Open Font License, next to
+   the fonts), which holds only the Latin letters. */
+@font-face { font-family: "Manrope"; src: url(/fonts/manrope-700.woff2) format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Manrope"; src: url(/fonts/manrope-800.woff2) format("woff2"); font-weight: 800; font-display: swap; }
 :root {
   --bg: #f6f7fb;
   --bg-2: #eef1f8;
@@ -23,7 +23,7 @@
   --radius: 16px;
   --shadow: 0 1px 2px rgba(15, 27, 61, 0.04), 0 18px 44px -18px rgba(15, 27, 61, 0.28);
   --font: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --serif: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+  --serif: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   color-scheme: light;
 }
 
@@ -37,8 +37,8 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 img, svg { max-width: 100%; }
 h1, h2, h3 { line-height: 1.15; margin: 0; letter-spacing: -0.02em; }
-/* The serif, with figures that line up (its own sit low, a 1 reads as I). */
-.hero h1, .block h2, .panel h1, .prose h1, dialog h2 { font-family: var(--serif); font-weight: 600; letter-spacing: 0; font-variant-numeric: lining-nums; }
+/* Manrope, with figures that line up. */
+.hero h1, .block h2, .panel h1, .prose h1, dialog h2 { font-family: var(--serif); font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: lining-nums; }
 p { margin: 0; }
 .hidden { display: none !important; }
 .wrap { width: min(1080px, 100% - 40px); margin-inline: auto; }
@@ -47,7 +47,7 @@ p { margin: 0; }
 /* Navigation */
 .nav { padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px); background: rgba(255, 255, 255, 0.86); border-bottom: 1px solid rgba(190, 147, 66, 0.28); }
 .nav .wrap { display: flex; align-items: center; gap: 28px; height: 64px; }
-.brand { display: flex; align-items: center; gap: 12px; font-family: "Cinzel", Georgia, serif; font-weight: 600; font-size: 16px; color: var(--text); letter-spacing: .22em; text-transform: uppercase; }
+.brand { display: flex; align-items: center; gap: 12px; font-family: "Manrope", ui-sans-serif, system-ui, sans-serif; font-weight: 700; font-size: 16px; color: var(--text); letter-spacing: .22em; text-transform: uppercase; }
 .brand:hover { text-decoration: none; }
 .brand img { width: 28px; height: 28px; }
 .nav nav { display: flex; gap: 22px; margin-left: 12px; }
@@ -155,13 +155,41 @@ label.check { display: flex; align-items: center; gap: 10px; margin-bottom: 14px
 .pill { display: inline-block; padding: 3px 10px; border-radius: 99px; font-size: 12px; font-weight: 700; background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
 .pill.bad { background: color-mix(in srgb, var(--bad) 16%, transparent); color: var(--bad); }
 .pill.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
-/* Plan badges: a medal with the plan's name, bronze to VIP. */
-.plan-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px 3px 7px; border-radius: 999px; font-size: 12px; font-weight: 800; letter-spacing: .03em; color: #fff; text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -1px 0 rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.2); vertical-align: middle; white-space: nowrap; line-height: 1.3; }
-.plan-badge svg { width: 13px; height: 13px; fill: #fff; flex: none; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3)); }
-.plan-badge.bronze { background: linear-gradient(160deg, #e0996a 0%, #b9743f 50%, #80481f 100%); }
-.plan-badge.silver { background: linear-gradient(160deg, #d6dde6 0%, #98a3b4 50%, #67727f 100%); }
-.plan-badge.gold { background: linear-gradient(160deg, #ffd96b 0%, #e0a51d 50%, #a87507 100%); }
-.plan-badge.vip { background: linear-gradient(160deg, #a78bff 0%, #6d3bf5 50%, #3d1db0 100%); }
+/* Plan badges: a medal of the plan's metal, bronze to an obsidian VIP. */
+.plan-badge { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 5px; padding: 3px 11px 3px 7px; border-radius: 999px; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; vertical-align: middle; white-space: nowrap; line-height: 1.3; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 rgba(0, 0, 0, 0.12), 0 4px 10px -6px rgba(0, 0, 0, 0.45); }
+.plan-badge svg { width: 13px; height: 13px; flex: none; }
+.plan-badge.bronze { color: #3b1f0e; background: linear-gradient(135deg, #f0c39b 0%, #b8743f 50%, #e3a777 100%); }
+.plan-badge.bronze svg { fill: #6e3a17; }
+.plan-badge.silver { color: #2a3140; background: linear-gradient(135deg, #fbfcfe 0%, #b9c0cc 50%, #eceff4 100%); }
+.plan-badge.silver svg { fill: #4a5468; }
+.plan-badge.gold { color: #3e2e0a; background: linear-gradient(135deg, #fbefcb 0%, #d4ad57 50%, #f5dfa6 100%); }
+.plan-badge.gold svg { fill: #8a6424; }
+.plan-badge.vip { color: #f1d9a0; background: linear-gradient(160deg, #1d2333 0%, #05070d 100%); box-shadow: inset 0 0 0 1px #c49a48, 0 4px 10px -6px rgba(0, 0, 0, 0.6); }
+.plan-badge.vip svg { fill: #e8c46e; }
+/* A light that crosses the metal now and then. */
+.plan-badge::after, .member .sheen { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 100%; pointer-events: none; background: linear-gradient(110deg, rgba(255, 255, 255, 0) 38%, rgba(255, 255, 255, 0.7) 50%, rgba(255, 255, 255, 0) 62%); transform: translateX(-120%); animation: sheen 6s ease-in-out infinite; }
+.plan-badge.vip::after { background: linear-gradient(110deg, rgba(255, 236, 190, 0) 38%, rgba(255, 236, 190, 0.35) 50%, rgba(255, 236, 190, 0) 62%); }
+.plan-badge.small::after { display: none; }
+@keyframes sheen { 0% { transform: translateX(-120%); } 55%, 100% { transform: translateX(120%); } }
+@media (prefers-reduced-motion: reduce) { .plan-badge::after, .member .sheen { animation: none; } }
+/* The top card is a membership card of the plan's own metal. */
+.card.member { position: relative; overflow: hidden; border-color: var(--gold-line); }
+.card.member > * { position: relative; }
+.card.member .sheen { position: absolute; }
+.card.member.bronze { color: #2b1508; background: linear-gradient(135deg, #f0c39b 0%, #c98a55 40%, #e9b58a 62%, #a9643a 100%); border-color: #a9643a; }
+.card.member.silver { color: #222937; background: linear-gradient(135deg, #fafbfd 0%, #c3cad6 40%, #eef1f5 62%, #a9b1bf 100%); border-color: #a7afbc; }
+.card.member.gold { color: #2e2208; background: linear-gradient(135deg, #fbefcb 0%, #d4ad57 42%, #f5dfa6 62%, #b98a35 100%); border-color: #b98a35; }
+.card.member.vip { color: #fff; background: radial-gradient(120% 90% at 85% 0%, #2a2f3f 0%, #0c0f18 55%, #05070d 100%); border-color: rgba(201, 162, 74, 0.75); box-shadow: 0 30px 60px -30px rgba(5, 7, 13, 0.7); }
+.card.member.bronze, .card.member.silver, .card.member.gold, .card.member.vip { --muted: currentColor; }
+.card.member .muted, .card.member .meter .top, .card.member .kv dt { opacity: .78; }
+.card.member .meter .top b { color: inherit; }
+.card.member .bar { background: rgba(0, 0, 0, 0.14); }
+.card.member.vip .bar { background: rgba(255, 255, 255, 0.14); }
+.card.member.vip .bar i { background: linear-gradient(90deg, #c49a48, #f1d9a0); }
+.card.member .plan-badge { color: inherit; background: rgba(0, 0, 0, 0.16); box-shadow: none; }
+.card.member .plan-badge svg { fill: currentColor; }
+.card.member .plan-badge::after { display: none; }
+.card.member.vip .plan-badge { color: #e8c46e; background: rgba(232, 196, 110, 0.16); }
 .plan-badge.big { font-size: 14px; padding: 5px 14px 5px 10px; gap: 7px; }
 .plan-badge.big svg { width: 16px; height: 16px; }
 .meter { margin-top: 16px; }

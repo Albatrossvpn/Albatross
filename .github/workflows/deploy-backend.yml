@@ -53,11 +53,12 @@ jobs:
           COMPANY_NAME: ${{ vars.COMPANY_NAME }}
           COMPANY_ADDRESS: ${{ vars.COMPANY_ADDRESS }}
           CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+          SUPPORT_URL: ${{ vars.SUPPORT_URL }}
         run: |
           args=()
           [ -n "$DOMAIN" ] && args+=(--domain "$DOMAIN")
           [ -n "$SITE_NAME" ] && args+=(--var "SITE_NAME:$SITE_NAME")
-          args+=(--var "COMPANY_NAME:$COMPANY_NAME" --var "COMPANY_ADDRESS:$COMPANY_ADDRESS" --var "CONTACT_EMAIL:$CONTACT_EMAIL")
+          args+=(--var "COMPANY_NAME:$COMPANY_NAME" --var "COMPANY_ADDRESS:$COMPANY_ADDRESS" --var "CONTACT_EMAIL:$CONTACT_EMAIL" --var "SUPPORT_URL:$SUPPORT_URL")
           # The edge's name, from its own settings, so the service can hand out its links.
           edge="$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' ../edge/wrangler.toml | head -1)"
           args+=(--var "EDGE_HOST:$edge")

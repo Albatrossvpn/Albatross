@@ -517,6 +517,11 @@ func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Se
 	return out
 }
 
+// ownFirstLead is how much better the plan with priority ranks the own
+// servers, in the milliseconds of rank: they come first unless a public
+// server is a good deal faster, and a slow or failing own one still loses.
+const ownFirstLead = 400
+
 // bestServers picks the lowest-delay usable servers in a country.
 func (e *Engine) bestServers(country string, n int, exclude map[string]bool) []*Server {
 	return e.rankedServers(country, n, exclude, (*Server).usable)
@@ -534,6 +539,7 @@ func (e *Engine) recentServers(country string, n int, exclude map[string]bool) [
 
 func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, ok func(*Server, time.Time) bool) []*Server {
 	now := time.Now()
+	ownFirst := e.Has(FeaturePriority) // before the lock: it reads the account
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	reg, p := e.reg.Regime, e.reg.Probe
@@ -564,7 +570,14 @@ func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, o
 		}
 		list = append(list, s)
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].rankIn(now, reg, p) < list[j].rankIn(now, reg, p) })
+	rank := func(s *Server) float64 {
+		v := s.rankIn(now, reg, p)
+		if ownFirst && s.Own {
+			v -= ownFirstLead
+		}
+		return v
+	}
+	sort.Slice(list, func(i, j int) bool { return rank(list[i]) < rank(list[j]) })
 	// WireGuard peers sharing a private key fight over one session, and each
 	// warp-plus method is a whole process; keep the group light.
 	//
@@ -1265,6 +1278,7 @@ type ConnInfo struct {
 	Target      string `json:"target"`
 	Server      string `json:"server"`
 	Proto       string `json:"proto"`
+	Security    string `json:"security"`
 	ExitIP      string `json:"exit_ip"`
 	Delay       int    `json:"delay"`
 	Since       int64  `json:"since"`
@@ -1304,9 +1318,9 @@ func (e *Engine) connInfo() *ConnInfo {
 	info.CountryName = countryName(info.Country)
 	info.Flag = geo.Flag(info.Country)
 	if active != nil {
-		info.Server, info.Proto = active.server.Name, active.server.Proto
+		info.Server, info.Proto, info.Security = active.server.Name, active.server.Proto, active.server.Security
 	} else if len(c.servers) > 0 {
-		info.Server, info.Proto = c.servers[0].Name, c.servers[0].Proto
+		info.Server, info.Proto, info.Security = c.servers[0].Name, c.servers[0].Proto, c.servers[0].Security
 	}
 	return info
 }

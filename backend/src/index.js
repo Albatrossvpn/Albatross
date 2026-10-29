@@ -245,6 +245,9 @@ async function publicInfo(env) {
     company: env.COMPANY_NAME || "",
     address: env.COMPANY_ADDRESS || "",
     contact: env.CONTACT_EMAIL || "",
+    // Where VIP accounts reach support directly (a chat link), besides the
+    // contact address.
+    support_url: env.SUPPORT_URL || "",
     signup_open: s.signup_open === "1",
     turnstile_sitekey: env.TURNSTILE_SITEKEY || "",
     downloads: { windows: s.download_windows, android: s.download_android },
