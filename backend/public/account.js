@@ -100,6 +100,16 @@ function renderFeatures(a) {
     has(id) ? `<li class="yes">${esc(f.name)}</li>` : `<li class="no">${esc(f.name)} ${planPill(a.plans[id], "small")}</li>`).join("");
 }
 
+// Data on sale in the Telegram bot, for an account with a data limit: a link to the bot's store, with the prices.
+function renderBuy() {
+  const st = info.stars;
+  const show = !!st && /^[A-Za-z0-9_]{5,32}$/.test(st.bot || "") && acct.quota_bytes > 0 && !(acct.resets_at > 0); // an allowance that renews by itself is not recharged in the bot
+  $("#buy").classList.toggle("hidden", !show);
+  if (!show) return;
+  $("#buy-text").textContent = `Need more data? Pay with Telegram Stars in our bot: ${st.packages.map((p) => `${p.gb} GB for ${p.stars} \u2B50`).join(", ")}. Say which account to add it to (${acct.username || "this one"}): what is left stays, and the days start again.`;
+  $("#buy-link").href = `https://t.me/${st.bot}?start=buy`;
+}
+
 // VIP accounts reach support directly: the chat link and the address.
 function renderSupport() {
   const links = [];
@@ -137,6 +147,7 @@ function render(a) {
   $("#d-kv").innerHTML = rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("");
   renderFeatures(a);
   renderSupport();
+  renderBuy();
   renderSub();
   loadDevices();
 }

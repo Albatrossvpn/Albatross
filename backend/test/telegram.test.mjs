@@ -5,99 +5,9 @@ import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 import { d1 } from "./d1.mjs";
 import { check, connect, disconnect, heal, repair, sweep, webhook } from "../src/telegram.js";
+import { ADMIN_REQUEST, HOOK_URL, SARA, SECRET, TEAM, TOKEN, datas, labels, media, nextMessage, nextUpdate, press, real, secretOf, telegram, text, world } from "./tg-helpers.mjs";
 
-const HOOK_URL = "https://accounts.albatrossvpn.online/api/v1/telegram";
-
-const TOKEN = "123456789:" + "A".repeat(35);
-const SECRET = "s".repeat(40);
-const TEAM = 777;
-const SARA = 4242;
-const ADMIN_REQUEST = () => new Request("https://accounts.albatrossvpn.online/api/v1/admin/settings");
-const real = globalThis.fetch;
 afterEach(() => (globalThis.fetch = real));
-
-const b64u = (bytes) => Buffer.from(bytes).toString("base64url");
-async function secretOf(tokenSecret) {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(tokenSecret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return b64u(new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode("albatross telegram webhook"))));
-}
-
-/** The Bot API: every call is kept (with the token it was made with) and answered the way Telegram does, unless a test says otherwise. */
-function telegram(overrides = {}) {
-  const calls = [];
-  let next = 500;
-  // What the bot's menu and texts are, as a person would see them.
-  const shown = { menus: new Map(), description: "", about: "" };
-  const scoped = (p) => JSON.stringify(p.scope || "all");
-  const remembered = {
-    getMyCommands: (p) => ({ ok: true, result: shown.menus.get(scoped(p)) || [] }),
-    setMyCommands: (p) => (shown.menus.set(scoped(p), p.commands), { ok: true, result: true }),
-    getMyDescription: () => ({ ok: true, result: { description: shown.description } }),
-    setMyDescription: (p) => ((shown.description = p.description), { ok: true, result: true }),
-    getMyShortDescription: () => ({ ok: true, result: { short_description: shown.about } }),
-    setMyShortDescription: (p) => ((shown.about = p.short_description), { ok: true, result: true }),
-  };
-  globalThis.fetch = async (url, init) => {
-    const [, token, method] = /\/bot([^/]+)\/(\w+)$/.exec(String(url));
-    const payload = JSON.parse(init.body);
-    calls.push({ method, token, ...payload });
-    const o = overrides[method];
-    const given = typeof o === "function" ? o(payload) : o;
-    const body = given ?? (remembered[method] ? remembered[method](payload) : method === "getMe" ? { ok: true, result: { username: "AlbatrossSupportBot" } } : method === "sendMessage" || method === "copyMessage" ? { ok: true, result: { message_id: next++ } } : { ok: true, result: true });
-    return new Response(JSON.stringify(body), { status: body.ok ? 200 : body.error_code || 400 });
-  };
-  return { calls, shown, of: (method) => calls.filter((c) => c.method === method) };
-}
-
-const labels = (markup) => (markup ? markup.inline_keyboard.flat().map((b) => b.text) : []);
-const datas = (markup) => (markup ? markup.inline_keyboard.flat().map((b) => b.callback_data || b.url) : []);
-
-let uid = 1000;
-let mid = 10;
-const text = (chat, words, extra = {}) => ({ update_id: ++uid, message: { message_id: ++mid, from: { id: chat, first_name: "Sara", username: "sara_tg" }, chat: { id: chat, type: "private" }, text: words, ...extra } });
-const media = (chat, extra) => ({ update_id: ++uid, message: { message_id: ++mid, from: { id: chat, first_name: "Sara", username: "sara_tg" }, chat: { id: chat, type: "private" }, ...extra } });
-const press = (chat, data, message_id = 55) => ({ update_id: ++uid, callback_query: { id: `cb${uid}`, from: { id: chat, first_name: "Sara", username: "sara_tg" }, data, message: { message_id, chat: { id: chat, type: "private" } } } });
-
-/** A service with a connected bot, a paired team chat (unless `team` is false), a model that answers `answer`, and a mailbox (unless `mail` is false). */
-async function world({ answer = "Update the app first.", team = true, mail = true } = {}) {
-  const api = telegram();
-  const env = { DB: d1(), TOKEN_SECRET: SECRET, CONTACT_EMAIL: "support@albatrossvpn.online", sent: [], asked: [], answer, aiDown: false };
-  env.AI = { run: async (model, input) => { env.asked.push(input); if (env.aiDown) throw new Error("the model is away"); return { response: env.answer }; } };
-  env.EMAIL = { send: async (m) => void env.sent.push(m) };
-  if (mail) await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('support_notify_to', 'owner@example.com')").run();
-  const linked = await connect(env, ADMIN_REQUEST(), TOKEN);
-  assert.deepEqual(linked, { username: "AlbatrossSupportBot" });
-  const kit = {
-    blocked: async (_e, key, max, window) => {
-      const row = await env.DB.prepare("SELECT count, since FROM attempts WHERE key = ?1").bind(key).first();
-      return !!row && Math.floor(Date.now() / 1000) - row.since <= window && row.count >= max;
-    },
-    count: (_e, key, window) =>
-      env.DB.prepare(
-        `INSERT INTO attempts (key, count, since) VALUES (?1, 1, ?2)
-         ON CONFLICT (key) DO UPDATE SET count = CASE WHEN ?2 - since > ?3 THEN 1 ELSE count + 1 END, since = CASE WHEN ?2 - since > ?3 THEN ?2 ELSE since END`,
-      ).bind(key, Math.floor(Date.now() / 1000), window).run(),
-  };
-  const w = {
-    env, api, kit,
-    async send(update, headers = {}) {
-      const res = await webhook(new Request("https://accounts.albatrossvpn.online/api/v1/telegram", { method: "POST", headers: { "X-Telegram-Bot-Api-Secret-Token": await secretOf(SECRET), ...headers }, body: JSON.stringify(update) }), env, kit, undefined);
-      return res;
-    },
-    row: (sql, ...args) => env.DB.prepare(sql).bind(...args).first(),
-    rows: async (sql, ...args) => (await env.DB.prepare(sql).bind(...args).all()).results,
-    lastText: (chat) => api.of("sendMessage").filter((c) => c.chat_id === chat).pop(),
-    setting: async (key) => ((await env.DB.prepare("SELECT value FROM settings WHERE key = ?1").bind(key).first()) || {}).value ?? null,
-  };
-  if (team) {
-    const code = (await w.row("SELECT value FROM settings WHERE key = 'telegram_pair_code'")).value;
-    await w.send(text(TEAM, `/pair ${code}`));
-    assert.equal(await w.setting("telegram_owner_chat"), String(TEAM));
-  }
-  w.boot = api.calls.slice();
-  api.calls.length = 0;
-  return w;
-}
 
 // ---------- Connecting ----------
 
@@ -121,9 +31,9 @@ test("connecting sets the webhook with the derived secret, one connection, the m
   assert.equal(hook.url, "https://accounts.albatrossvpn.online/api/v1/telegram");
   assert.equal(hook.secret_token, await secretOf(SECRET));
   assert.match(hook.secret_token, /^[A-Za-z0-9_-]{1,256}$/);
-  assert.deepEqual(hook.allowed_updates, ["message", "callback_query"]);
+  assert.deepEqual(hook.allowed_updates, ["message", "callback_query", "pre_checkout_query"], "payments are asked about too");
   assert.equal(hook.max_connections, 1, "updates arrive one after the other");
-  assert.deepEqual(of("setMyCommands")[0].commands.map((c) => c.command), ["start", "menu", "human", "close", "help"]);
+  assert.deepEqual(of("setMyCommands")[0].commands.map((c) => c.command), ["start", "menu", "human", "close", "password", "help"]);
   assert.ok(of("setMyDescription")[0].description.includes("Albatross"));
   assert.equal(await w.setting("telegram_bot_username"), "AlbatrossSupportBot");
   assert.equal(await w.setting("telegram_webhook_url"), "https://accounts.albatrossvpn.online/api/v1/telegram");
@@ -196,13 +106,13 @@ test("the bot's menu and texts are set when connecting, and what Telegram refuse
   assert.equal(linked.username, "AlbatrossSupportBot");
   assert.match(linked.warning, /did not take the bot's description: Bad Request: DESCRIPTION_TOO_LONG\. "Check the bot" tries again\.$/);
   assert.equal(api.of("setMyShortDescription").length, 1, "what Telegram does take is set all the same");
-  assert.deepEqual(api.shown.menus.get('"all"').map((c) => c.command), ["start", "menu", "human", "close", "help"]);
+  assert.deepEqual(api.shown.menus.get('"all"').map((c) => c.command), ["start", "menu", "human", "close", "password", "help"]);
   assert.equal(JSON.parse((await env.DB.prepare("SELECT value FROM settings WHERE key = 'telegram_texts'").first()).value).ok, false);
   // All taken: no warning, and a second connecting writes nothing that is already right.
   const good = telegram();
   const again = await connect({ DB: d1(), TOKEN_SECRET: SECRET }, ADMIN_REQUEST(), TOKEN);
   assert.equal(again.warning, undefined);
-  assert.ok(good.shown.description.startsWith("Albatross VPN support.") && good.shown.about.startsWith("Albatross VPN support:"));
+  assert.ok(good.shown.description.startsWith("Albatross VPN support.") && good.shown.about === "Albatross VPN support and data. albatrossvpn.online" && good.shown.about.length <= 120 && good.shown.description.length <= 512 && good.shown.description.endsWith("albatrossvpn.online"));
   const writes = good.calls.filter((c) => c.method.startsWith("setMy")).length;
   await connect({ DB: d1(), TOKEN_SECRET: SECRET }, ADMIN_REQUEST(), TOKEN);
   assert.equal(good.calls.filter((c) => c.method.startsWith("setMy")).length, writes, "a bot whose texts are right is not written to again");
@@ -323,7 +233,7 @@ test("install, plans, account and downloads are screens with links, not answers 
   await w.send(press(SARA, "p"));
   assert.ok(w.api.of("editMessageText")[2].text.includes("unlimited devices"));
   await w.send(press(SARA, "a"));
-  assert.ok(w.api.of("editMessageText")[3].text.includes("Never send yours here"));
+  assert.ok(w.api.of("editMessageText")[3].text.includes("Never send your password here"));
   await w.send(press(SARA, "d"));
   assert.ok(w.api.of("editMessageText")[4].text.includes("SHA-256"));
   await w.send(press(SARA, "menu"));
@@ -446,9 +356,9 @@ test("an update Telegram sends twice is handled once, and bots, groups and chann
   await w.send(u);
   assert.equal(w.env.asked.length, 1);
   assert.equal(w.api.of("sendMessage").length, 1);
-  await w.send({ update_id: ++uid, message: { message_id: 1, from: { id: 9, is_bot: true, first_name: "Bot" }, chat: { id: 9, type: "private" }, text: "hi" } });
-  await w.send({ update_id: ++uid, message: { message_id: 2, from: { id: SARA, first_name: "Sara" }, chat: { id: -100123, type: "supergroup" }, text: "hi all" } });
-  await w.send({ update_id: ++uid, channel_post: { message_id: 3, chat: { id: -100999, type: "channel" }, text: "news" } });
+  await w.send({ update_id: nextUpdate(), message: { message_id: 1, from: { id: 9, is_bot: true, first_name: "Bot" }, chat: { id: 9, type: "private" }, text: "hi" } });
+  await w.send({ update_id: nextUpdate(), message: { message_id: 2, from: { id: SARA, first_name: "Sara" }, chat: { id: -100123, type: "supergroup" }, text: "hi all" } });
+  await w.send({ update_id: nextUpdate(), channel_post: { message_id: 3, chat: { id: -100999, type: "channel" }, text: "news" } });
   assert.equal(w.api.of("sendMessage").length, 1);
 });
 
@@ -693,7 +603,7 @@ test("a team chat that cannot be reached is not a silent loss: the owner is mail
 
 test("a team group that became a supergroup is followed, by the service message and by Telegram's refusal", async () => {
   const w = await world();
-  await w.send({ update_id: ++uid, message: { message_id: 1, chat: { id: TEAM, type: "group" }, migrate_to_chat_id: -100777 } });
+  await w.send({ update_id: nextUpdate(), message: { message_id: 1, chat: { id: TEAM, type: "group" }, migrate_to_chat_id: -100777 } });
   assert.equal(await w.setting("telegram_owner_chat"), "-100777");
   w.api.calls.length = 0;
   await w.send(text(SARA, "/human"));
@@ -710,7 +620,7 @@ test("a team group that became a supergroup is followed, by the service message 
 test("an administrator who writes anonymously in the team's group is the team: pairs it and answers tickets", async () => {
   const w = await world({ team: false });
   const GROUP = -100555;
-  const anonymous = (words, extra = {}) => ({ update_id: ++uid, message: { message_id: ++mid, from: { id: 1087968824, is_bot: true, first_name: "Group", username: "GroupAnonymousBot" }, sender_chat: { id: GROUP, type: "supergroup" }, chat: { id: GROUP, type: "supergroup" }, text: words, ...extra } });
+  const anonymous = (words, extra = {}) => ({ update_id: nextUpdate(), message: { message_id: nextMessage(), from: { id: 1087968824, is_bot: true, first_name: "Group", username: "GroupAnonymousBot" }, sender_chat: { id: GROUP, type: "supergroup" }, chat: { id: GROUP, type: "supergroup" }, text: words, ...extra } });
   await w.send(anonymous(`/pair ${await w.setting("telegram_pair_code")}`));
   assert.equal(await w.setting("telegram_owner_chat"), String(GROUP));
   await w.send(text(SARA, "/human"));
@@ -726,7 +636,7 @@ test("an administrator who writes anonymously in the team's group is the team: p
   await w.send(anonymous("/stats@AlbatrossSupportBot"));
   assert.ok(w.lastText(GROUP).text.includes("Today (UTC)"));
   // A real bot is still not a person.
-  await w.send({ update_id: ++uid, message: { message_id: 5, from: { id: 9, is_bot: true, username: "OtherBot" }, chat: { id: GROUP, type: "supergroup" }, text: "/stats" } });
+  await w.send({ update_id: nextUpdate(), message: { message_id: 5, from: { id: 9, is_bot: true, username: "OtherBot" }, chat: { id: GROUP, type: "supergroup" }, text: "/stats" } });
   assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === GROUP).length, 1);
 });
 
@@ -887,7 +797,7 @@ test("the team lists tickets, reads the day's numbers, shows a ticket's chat and
   await w.send(press(TEAM, "o:f:1001", 70));
   assert.ok(w.lastText(TEAM).text.includes("Ticket #1001") && w.lastText(TEAM).text.includes("How do I update?"));
   // Buttons are the team's: a person cannot press them.
-  await w.send({ update_id: ++uid, callback_query: { id: "x", from: { id: SARA }, data: "o:c:1001", message: { message_id: 1, chat: { id: SARA, type: "private" } } } });
+  await w.send({ update_id: nextUpdate(), callback_query: { id: "x", from: { id: SARA }, data: "o:c:1001", message: { message_id: 1, chat: { id: SARA, type: "private" } } } });
   assert.equal(w.api.of("answerCallbackQuery").pop().text, "Not for you.");
   assert.equal((await w.row("SELECT status FROM tg_tickets WHERE id = 1001")).status, "open");
   await w.send(press(TEAM, "o:b:" + SARA, 70));

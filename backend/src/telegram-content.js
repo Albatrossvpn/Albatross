@@ -13,6 +13,8 @@ export const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "
 
 const btn = (text, data) => ({ text, callback_data: data });
 const link = (text, url) => ({ text, url });
+const WEBSITE = link("🌐 albatrossvpn.online", SITE);
+const WEBSITE_LINE = `🌐 <a href="${SITE}">albatrossvpn.online</a>`;
 const keys = (...rows) => ({ inline_keyboard: rows });
 
 export const DEVICES = {
@@ -29,15 +31,17 @@ const MENU_BUTTON = btn("⬅ Menu", "menu");
 const MENU_NEW = btn("📋 Menu", "mn");
 const TEAM_BUTTON = btn("🧑‍💼 Talk to our team", "h");
 
-/** The main menu. */
-export function menu(name = "") {
+const BUY_BUTTON = btn("⭐ Buy data", "s");
+
+/** The main menu; with a Buy button when data is on sale. */
+export function menu(name = "", selling = false) {
   const hello = name ? `Hi ${esc(name)}!` : "Hi!";
   return {
-    text: `🛡 <b>Albatross Support</b>\n\n${hello} I can get you connected, walk you through installing the app, and answer questions about plans and your account.\n\nPick a topic, or just type your question.`,
+    text: `🛡 <b>Albatross Support</b>\n\n${hello} I can get you connected, walk you through installing the app, answer questions about plans and your account${selling ? ", and sell you data with Telegram Stars" : ""}.\n\nPick a topic, or just type your question.\n\n${WEBSITE_LINE}`,
     markup: keys(
       [btn("🔌 I can't connect", "c"), btn("📲 Install the app", "i")],
       [btn("💎 Plans & upgrading", "p"), btn("👤 Account & data", "a")],
-      [btn("⬇️ Downloads", "d"), TEAM_BUTTON],
+      ...(selling ? [[BUY_BUTTON, btn("⬇️ Downloads", "d")], [TEAM_BUTTON]] : [[btn("⬇️ Downloads", "d"), TEAM_BUTTON]]),
     ),
   };
 }
@@ -51,9 +55,11 @@ Type your question and I answer right away, or use the menu.
 /close - close your ticket, or end this chat
 /help - this message
 
-I am an AI assistant and can be wrong. Never send a password here. A chat ends with /close or about half an hour after your last message: a short summary goes to our team, and the chat is deleted.`;
+I am an AI assistant and can be wrong. Never send a password here. A chat ends with /close or about half an hour after your last message: a short summary goes to our team, and the chat is deleted.
 
-export const help = () => ({ text: HELP, markup: keys([MENU_NEW]) });
+${WEBSITE_LINE}`;
+
+export const help = () => ({ text: HELP, markup: keys([WEBSITE], [MENU_NEW]) });
 
 // ---------- A connection that fails ----------
 
@@ -170,26 +176,42 @@ export function installGuide(device) {
 
 // ---------- Plans, account, downloads ----------
 
-export const PLANS = {
-  text: `💎 <b>Plans</b>
+const planLine = (p) => `${p.plan}, ${p.devices ? `${p.devices} device${p.devices === 1 ? "" : "s"}` : "unlimited devices"}`;
+const validText = (days) => (days > 0 ? `valid ${days} days` : "no end date");
+const dateOf = (unix) => (unix > 0 ? new Date(unix * 1000).toISOString().slice(0, 10) : "no end date");
+const gbOf = (bytes) => `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB`;
 
-Every account connects to the fastest location with every protocol.
+/**
+ * The plans: what each has and how an account gets it. The plan comes with
+ * the account's data (10 GB and more Silver, 100 GB and more Gold, no limit
+ * VIP: lib.js tierForQuota). `shop` is `{ catalog, days }` while data is on
+ * sale, and then the screen lists the packages and offers to buy one.
+ */
+export function plans(shop = null) {
+  const buy = shop
+    ? `⭐ <b>Buy data here, with Telegram Stars</b>\nThe plan comes with the size of the package:\n${shop.catalog.map((p) => `• ${p.gb} GB - ⭐${p.stars} - ${p.plan}`).join("\n")}\nEach package is ${validText(shop.days)}.`
+    : "To move up or to recharge, ask where you got your account. The account, its data and its devices carry over.";
+  return {
+    text: `💎 <b>Plans</b>
 
-🥉 <b>Bronze</b> - 1 device
+Every account connects to the fastest location with every protocol. The plan decides how many devices and which extras; <b>it comes with your data</b>.
+
+🥉 <b>Bronze</b> - under 10 GB - 1 device
 The fastest location found for you, relays inside the country in a shutdown, unencrypted traffic blocked.
 
-🥈 <b>Silver</b> - 2 devices
+🥈 <b>Silver</b> - 10 GB and more - 2 devices
 Everything in Bronze, plus choosing any location, the ad and tracker blocker, and local apps outside the VPN (Android).
 
-🥇 <b>Gold</b> - 4 devices
+🥇 <b>Gold</b> - 100 GB and more - 4 devices
 Everything in Silver, plus choosing the protocol, Albatross's own servers (the fastest), Albatross Edge through Cloudflare, protecting the whole device (Windows) and GPS that matches the VPN (Android).
 
-👑 <b>VIP</b> - unlimited devices
-Everything in Gold, plus our private servers first, direct support from the team, and sharing the connection with every device on your Wi-Fi.
+👑 <b>VIP</b> - no data limit - unlimited devices
+Everything in Gold, plus our private servers first, direct support from the team, and sharing the connection with every device on your Wi-Fi. VIP is given by our team: ask them.
 
-To move up or to recharge, ask where you got your account. The account, its data and its devices carry over.`,
-  markup: keys([TEAM_BUTTON], [MENU_BUTTON]),
-};
+${buy}`,
+    markup: shop ? keys([BUY_BUTTON], [TEAM_BUTTON, WEBSITE], [MENU_BUTTON]) : keys([TEAM_BUTTON, WEBSITE], [MENU_BUTTON]),
+  };
+}
 
 export const ACCOUNT_INFO = {
   text: `👤 <b>Account and data</b>
@@ -197,9 +219,10 @@ export const ACCOUNT_INFO = {
 - You sign in with a username and a password. No email, name or phone number.
 - Your data or time allowance and its end date are shown in the app and on your account page.
 - One account works on all your devices, up to your plan's limit.
-- Passwords cannot be seen or reset in this chat. Never send yours here.
-- Allowance used up or expired? It needs a recharge from where you got the account.`,
-  markup: keys([link("🔗 Open account page", ACCOUNT)], [TEAM_BUTTON], [MENU_BUTTON]),
+- Never send your password here: nobody can read it back to you.
+- Forgot the password of an account you bought in this chat? Tap Forgot password, or send /password: only the Telegram account that bought it gets a new one.
+- Allowance used up or expired? Add data with Buy data (when it is on sale), or ask where you got the account.`,
+  markup: keys([btn("🔑 Forgot password", "pw")], [link("🔗 Open account page", ACCOUNT), WEBSITE], [TEAM_BUTTON], [MENU_BUTTON]),
 };
 
 export const DOWNLOADS = {
@@ -273,6 +296,132 @@ export const noTeam = (mailed) => ({
   markup: keys([MENU_NEW]),
 });
 
+// ---------- Buying data with Telegram Stars ----------
+
+/** The packages, with the Stars each costs and the plan it earns. `cat` is sales.js catalog. */
+export function store(cat, days) {
+  const rows = [];
+  for (let i = 0; i < cat.length; i += 2) rows.push(cat.slice(i, i + 2).map((p) => btn(`${p.gb} GB · ⭐${p.stars}`, `s:${p.gb}`)));
+  return {
+    text: `⭐ <b>Buy data with Telegram Stars</b>\n\n${cat.map((p) => `• <b>${p.gb} GB</b> - ⭐${p.stars} - ${planLine(p)}`).join("\n")}\n\nEach package is ${validText(days)}. Its size gives the plan: 10 GB and more is Silver, 100 GB and more is Gold. Use it to open a new account, or add it to the one you have.\n\nTap a package:`,
+    markup: keys(...rows, [btn("💎 What each plan has", "p"), btn("📄 Terms", "st")], [WEBSITE, MENU_BUTTON]),
+  };
+}
+
+/** A package was picked: a new account, or one that exists? */
+export function storeChoice(p, days) {
+  return {
+    text: `⭐ <b>${p.gb} GB - ⭐${p.stars}</b>\n${planLine(p)}, ${validText(days)}.\n\nShall I open a new account with it, or add it to an account you already have?`,
+    markup: keys([btn("🆕 A new account", `sn:${p.gb}`), btn("🔄 Add to my account", `sr:${p.gb}`)], [btn("⬅ Packages", "s")]),
+  };
+}
+
+export const askAccount = (p) => ({
+  text: `🔄 <b>Add ${p.gb} GB to your account</b>\n\nSend me the account's <b>username</b> (never the password).`,
+  markup: keys([btn("⬅ Packages", "s")]),
+});
+export const NOT_A_USERNAME = { text: "That does not look like a username: it has 3 to 32 letters, digits, dots, dashes or underscores. Send it again, or go back.", markup: keys([btn("⬅ Packages", "s")]) };
+export const NO_SUCH_ACCOUNT = { text: "I cannot find an account with that username. Check it and send it again, or choose a new account instead.", markup: keys([btn("⬅ Packages", "s")]) };
+export const CANNOT_RECHARGE = { text: "That account cannot be recharged here: it has no data limit, renews by itself, or is switched off. Tap Talk to our team and we will look at it.", markup: keys([TEAM_BUTTON], [btn("⬅ Packages", "s")]) };
+export const TOO_MANY_LOOKUPS = { text: "That is a lot of usernames for now. Please wait a little.", markup: keys([btn("⬅ Packages", "s")]) };
+
+/** The order, before the payment: what it is, for whom, and the terms to agree to. */
+export function checkout(o, p, days) {
+  const what = o.kind === "topup" ? `Added to the account <code>${esc(o.target)}</code>: what is left of its data stays, and the days start again.` : "A new account, made as soon as you pay; its username and password come in this chat.";
+  return {
+    text: `🧾 <b>Your order</b>\n\n<b>${o.gb} GB</b> - ⭐${o.stars}\n${planLine(p)}, ${validText(days)}\n${what}\n\nBy paying you agree to the terms (tap Terms to read them). Telegram takes the payment in Stars; I never see your payment details.`,
+    markup: keys([btn(`✅ I agree - pay ⭐${o.stars}`, `sp:${o.id}`)], [btn("📄 Terms", "st"), btn("⬅ Packages", "s")]),
+  };
+}
+
+export const terms = (days) => ({
+  text: `📄 <b>Terms of buying data</b>
+
+- You buy data for the Albatross VPN service, paid in Telegram Stars. Telegram takes the payment; we never see your payment details.
+- A package gives the data shown, ${days > 0 ? `valid for ${days} days from the payment` : "with no end date"}. Data you have not used when the package ends is gone. Adding a package to an account adds it to what is left and starts the days again.
+- A new account's username and password are sent in this chat right after the payment. Keep them private; if you lose the password, ask our team.
+- If we cannot deliver what you paid for, the payment is refunded automatically. Once data has been used, a payment is not refunded.
+- Telegram and Telegram support cannot help with purchases in this bot. For any problem with a payment, send /paysupport.
+
+${WEBSITE_LINE}`,
+  markup: keys([btn("⬅ Packages", "s"), MENU_NEW]),
+});
+
+export const PAYSUPPORT = {
+  text: `💬 <b>Payment support</b>
+
+Have a problem with a payment? Tap <b>Talk to our team</b> (or send /human) and tell us what you bought and the payment number from your receipt (it looks like P12). We deal with payment problems as soon as we can.
+
+Telegram and Telegram support cannot help with purchases in this bot. You can also write to ${MAIL}, or see ${WEBSITE_LINE}.`,
+  markup: keys([TEAM_BUTTON], [MENU_NEW]),
+};
+
+export const STORE_OFF = {
+  text: "Buying data in this chat is not available right now. To get or recharge an account, ask where you got yours, or tap Talk to our team.",
+  markup: keys([TEAM_BUTTON], [MENU_NEW]),
+};
+export const ORDER_GONE = { text: "That order is no longer open. Pick a package again.", markup: keys([BUY_BUTTON], [MENU_NEW]) };
+
+// ---------- A new password for an account bought in this bot ----------
+
+export const NO_OWN_ACCOUNT = {
+  text: "I can only make a new password for an account that <b>this Telegram account bought in this chat</b>. I do not see one. For any other account, ask where you got it, or tap Talk to our team.",
+  markup: keys([TEAM_BUTTON], [MENU_NEW]),
+};
+
+/** The accounts a person bought, to pick from. */
+export const pickAccount = (names) => ({
+  text: "🔑 <b>Forgot password</b>\n\nWhich account?",
+  markup: keys(...names.map((n) => [btn(n, `pw:${n}`)]), [MENU_NEW]),
+});
+
+/** Before it is done: it signs everything out. */
+export const confirmReset = (name) => ({
+  text: `🔑 <b>A new password for <code>${esc(name)}</code>?</b>\n\nEvery device signed in to this account is signed out, and the new password is shown here, once.`,
+  markup: keys([btn("✅ Yes, make a new password", `py:${name}`)], [btn("⬅ Cancel", "a")]),
+});
+
+export const newPassword = (name, password) => ({
+  text: `🔑 <b>New password</b>\n\nAccount: <code>${esc(name)}</code>\nPassword: <code>${esc(password)}</code>\n\nSign in again on your devices with it. <b>Save it now</b>: I cannot show it again. You can change it on your account page.`,
+  markup: keys([link("🔗 Account page", ACCOUNT)], [MENU_NEW]),
+});
+export const TOO_MANY_RESETS = { text: "A new password was made for you several times today already. Please try again tomorrow, or tap Talk to our team.", markup: keys([TEAM_BUTTON], [MENU_NEW]) };
+
+/** After a new account's payment: the account, once. */
+export function receiptNew(r) {
+  return {
+    text: `✅ <b>Payment received - thank you!</b>
+
+Payment <b>P${r.id}</b>: ${r.gb} GB for ⭐${r.stars}
+
+<b>Your account</b>
+Username: <code>${esc(r.username)}</code>
+Password: <code>${esc(r.password)}</code>
+Plan: ${planLine(r)}
+Data: ${r.gb} GB, ${r.expires > 0 ? `until ${dateOf(r.expires)}` : "no end date"}
+
+Open Albatross and sign in with these. <b>Save the password now</b>: I cannot show it again. You can change it on your account page.`,
+    markup: keys([link("⬇️ Download the app", `${SITE}/#download`)], [link("🔗 Account page", ACCOUNT), WEBSITE], [MENU_NEW]),
+  };
+}
+
+/** After data was added to an account. */
+export function receiptTopup(r) {
+  return {
+    text: `✅ <b>Payment received - thank you!</b>
+
+Payment <b>P${r.id}</b>: ${r.gb} GB for ⭐${r.stars}
+
+The account <code>${esc(r.username)}</code> now has <b>${gbOf(r.quota_bytes)}</b> of data, ${r.expires > 0 ? `until ${dateOf(r.expires)}` : "with no end date"}. Plan: ${planLine(r)}.`,
+    markup: keys([link("🔗 Account page", ACCOUNT), WEBSITE], [MENU_NEW]),
+  };
+}
+
+export const receiptTest = (id) => `✅ <b>Test payment received</b> (P${id}). Stars work end to end. Give it back with /refund P${id}.`;
+export const GAVE_BACK = (id, stars, why) => ({ text: `↩ <b>Your payment P${id} (⭐${stars}) was refunded.</b> ${why}`, markup: keys([TEAM_BUTTON], [MENU_NEW]) });
+export const DELIVERY_FAILED = "Something went wrong while delivering your data, so the Stars were given back.";
+export const BY_TEAM = "Our team refunded it.";
+
 // ---------- The team's side ----------
 
 export const OWNER_HELP = `<b>Team commands</b>
@@ -281,6 +430,9 @@ export const OWNER_HELP = `<b>Team commands</b>
 /stats - today's numbers
 /close 1042 - close a ticket (or reply /close to one of its messages)
 /block 123456 - block a user, and /unblock to let them back
+/sales - today's sales and the last payments
+/refund P12 - give a payment back (the account is switched off, or the data taken off again)
+/teststars - a test payment of 1 Star, to see that selling works
 
 Reply to a ticket's message to answer the person. Photos, files and voice notes work too.`;
 

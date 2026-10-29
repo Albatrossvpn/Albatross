@@ -8,6 +8,7 @@ import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
 import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
+import { SALES_DEFAULTS, SALES_RANGE, catalog as salesCatalog, config as salesConfig } from "./sales.js";
 import { SWEEP_CRON, check as telegramCheck, connect as telegramConnect, disconnect as telegramDisconnect, heal as telegramHeal, repair as telegramRepair, sweep as telegramSweep, webhook as telegramWebhook } from "./telegram.js";
 
 const SESSION = 30 * DAY; // an app or browser session
@@ -28,6 +29,7 @@ const DEFAULTS = {
   support_mail_status: "", // what the last try to mail one came to (written by the service, never by the panel)
   telegram_bot_username: "", // the support bot's name, once its token is set (read-only here)
   telegram_owner_chat: "", // the team's chat, once paired with /pair (read-only here)
+  ...SALES_DEFAULTS, // selling data with Telegram Stars (sales.js)
 };
 
 class HttpError extends Error {
@@ -205,7 +207,7 @@ const forget = (env, key) => env.DB.prepare("DELETE FROM attempts WHERE key = ?1
 /** GET /support/info: what the websites' chat shows besides itself (the Telegram bot, once there is one). */
 async function supportInfo(env) {
   const s = await settings(env);
-  return json({ telegram: s.telegram_bot_username || "" });
+  return json({ telegram: s.telegram_bot_username || "", stars: starsInfo(s, await salesConfig(env)) });
 }
 
 // What the support chat (support.js) takes from here: answers, rate limits,
@@ -276,6 +278,7 @@ const DUMMY = "pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
 async function publicInfo(env) {
   const s = await settings(env);
+  const shop = await salesConfig(env);
   return json({
     name: env.SITE_NAME || "Albatross",
     company: env.COMPANY_NAME || "",
@@ -290,8 +293,15 @@ async function publicInfo(env) {
     tiers: TIERS,
     features: FEATURES,
     plans: planFeatures(s.plan_features),
+    stars: starsInfo(s, shop),
   });
 }
+
+/** Data on sale in the Telegram bot, for the websites' "how to buy": null while it is not (or there is no bot to sell in). */
+const starsInfo = (s, shop) =>
+  shop.enabled && s.telegram_bot_username
+    ? { bot: s.telegram_bot_username, days: shop.days, packages: salesCatalog(shop).map(({ gb, stars, plan, devices }) => ({ gb, stars, plan, devices })) }
+    : null;
 
 // ---------- Encrypted DNS for Apple devices ----------
 //
@@ -934,7 +944,7 @@ async function adminDelete(request, env, id) {
 async function withPairing(env) {
   const out = await settings(env);
   const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'telegram_pair_code'").first();
-  return { ...out, telegram_pair_code: out.telegram_bot_username && row ? row.value : "" };
+  return { ...out, telegram_pair_code: out.telegram_bot_username && row ? row.value : "", stars_packages: salesCatalog(await salesConfig(env)) };
 }
 
 async function adminSettings(request, env) {
@@ -972,6 +982,11 @@ async function adminSaveSettings(request, env) {
       continue;
     } else if (k === "support_notify_to") {
       if (v && !/^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(v)) throw new HttpError(400, "That is not an email address.");
+    } else if (k === "stars_enabled") {
+      v = b[k] === true || v === "1" ? "1" : "0";
+    } else if (Object.hasOwn(SALES_RANGE, k)) {
+      const [lo, hi] = SALES_RANGE[k];
+      if (!/^\d{1,16}$/.test(v) || Number(v) < lo || Number(v) > hi) throw new HttpError(400, `${k} is a number from ${lo} to ${hi}.`);
     } else if (!/^\d{1,16}$/.test(v)) throw new HttpError(400, `Bad value for ${k}.`);
     stmts.push(env.DB.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2").bind(k, v));
   }

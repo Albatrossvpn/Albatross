@@ -720,7 +720,7 @@ test("telegram: the administrator connects a bot with its token; Telegram's refu
   assert.ok(tgCalls.some((c) => c.method === "setMyCommands" && c.commands.some((m) => m.command === "human")));
   // The websites learn the bot's name, and the account page's support link leads to it.
   const info = await call("GET", "support/info", { headers: { Origin: "https://albatrossvpn.online" } });
-  assert.deepEqual(info.body, { telegram: "MockSupportBot" });
+  assert.deepEqual(info.body, { telegram: "MockSupportBot", stars: null });
   assert.equal(info.headers.get("access-control-allow-origin"), "https://albatrossvpn.online");
   assert.equal((await call("GET", "public")).body.support_url, "https://t.me/MockSupportBot");
   // The panel cannot write what the service writes.
@@ -784,7 +784,35 @@ test("telegram: the webhook answers only Telegram, a person gets the menu, the t
   assert.ok(tgCalls.some((c) => c.method === "deleteWebhook"));
   assert.equal((await post(said(42, "/start"))).status, 404);
   assert.deepEqual(sql("SELECT chat_id FROM tg_users"), []);
-  assert.deepEqual((await call("GET", "support/info")).body, { telegram: "" });
+  assert.deepEqual((await call("GET", "support/info")).body, { telegram: "", stars: null });
+});
+
+test("stars: the settings are checked, the panel shows the packages they make, and the websites hear of the store only while it is on sale and there is a bot", async () => {
+  const put = (b) => call("PUT", "admin/settings", { token: admin, body: b });
+  const first = (await call("GET", "admin/settings", { token: admin })).body;
+  assert.equal(first.stars_enabled, "0", "selling starts off");
+  assert.deepEqual(first.stars_packages.map((p) => [p.gb, p.stars, p.plan]), [[5, 15, "Bronze"], [10, 29, "Silver"], [25, 72, "Silver"], [50, 143, "Silver"], [100, 285, "Gold"]], "10,000 toman a GB, 270,000 a dollar, 13 dollars per 1,000 Stars");
+  assert.equal((await call("GET", "public")).body.stars, null);
+  for (const bad of [{ stars_price_toman: "0" }, { stars_usd_toman: "5" }, { stars_usd_per_1000: "500" }, { stars_valid_days: "99999" }, { stars_price_toman: "abc" }]) assert.equal((await put(bad)).status, 400, JSON.stringify(bad));
+  // On, with no bot to sell in: the websites hear nothing.
+  assert.equal((await put({ stars_enabled: true })).body.stars_enabled, "1");
+  assert.equal((await call("GET", "public")).body.stars, null);
+  // With a bot: the packages, in the bot's name, for the websites (the account pages and, with their CORS, the public site).
+  assert.equal((await put({ telegram_bot_token: TG_TOKEN })).status, 200);
+  const on = (await call("GET", "public")).body.stars;
+  assert.equal(on.bot, "MockSupportBot");
+  assert.equal(on.days, 30);
+  assert.deepEqual(on.packages[1], { gb: 10, stars: 29, plan: "Silver", devices: 2 });
+  const shown = await call("GET", "support/info", { headers: { Origin: "https://albatrossvpn.online" } });
+  assert.deepEqual(shown.body.stars, on);
+  assert.equal(shown.body.telegram, "MockSupportBot");
+  // The rates make the prices.
+  const cheaper = await put({ stars_usd_toman: "540000" });
+  assert.equal(cheaper.body.stars_packages[1].stars, 15);
+  assert.equal((await call("GET", "public")).body.stars.packages[1].stars, 15);
+  await put({ stars_usd_toman: "270000", stars_enabled: false });
+  assert.equal((await call("GET", "public")).body.stars, null);
+  await put({ telegram_bot_token: "" });
 });
 
 test("too many failed administrator logins lock the sign-in for a while", async () => {

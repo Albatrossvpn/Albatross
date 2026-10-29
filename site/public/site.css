@@ -323,6 +323,18 @@ footer .legal { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(-
 .tier.vip li b { color: #f1d9a0; }
 .plans .note { margin: 26px auto 0; max-width: 640px; text-align: center; color: var(--muted); font-size: 15px; }
 
+/* How to buy: the steps, and the packages the account service's settings make (site.js). */
+.buy { max-width: 880px; margin: 44px auto 0; padding: 32px 28px 28px; border-radius: 26px; text-align: center; background: #fff; border: 1px solid rgba(196, 154, 72, 0.4); box-shadow: inset 0 1px 0 #fff, 0 18px 44px -28px rgba(15, 27, 61, 0.35); }
+.buy[hidden] { display: none; }
+.buy h3 { margin: 6px 0 10px; font-family: var(--serif); font-size: 28px; }
+.buy ol { text-align: left; max-width: 640px; margin: 22px auto; padding-left: 22px; display: flex; flex-direction: column; gap: 10px; font-size: 15px; }
+.buy .packs { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin: 22px 0; }
+.buy .pack { display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; border-radius: 16px; background: linear-gradient(180deg, #fffdf8, #f6efdd); border: 1px solid rgba(196, 154, 72, 0.35); }
+.buy .pack b { font-size: 20px; }
+.buy .pack span { font-weight: 700; color: #8a6414; }
+.buy .pack small { color: var(--muted); }
+.buy .small { max-width: 640px; margin: 14px auto 0; color: var(--muted); font-size: 14px; }
+
 /* The app, as it looks connected, over the photo: midnight sky, the route in gold. */
 .phone { position: absolute; right: 6%; bottom: -46px; width: 248px; padding: 9px; border-radius: 42px; background: linear-gradient(160deg, #2a3147, #0b0f1c 60%); box-shadow: 0 0 0 1px rgba(196, 154, 72, 0.55), 0 50px 90px -30px rgba(5, 7, 13, 0.75); transform: rotate(-3deg); }
 .phone::after { content: ""; position: absolute; inset: 0; border-radius: 42px; pointer-events: none; background: linear-gradient(110deg, rgba(255, 255, 255, 0) 40%, rgba(255, 255, 255, 0.16) 50%, rgba(255, 255, 255, 0) 60%); background-size: 250% 100%; animation: phone-sheen 7s ease-in-out infinite; }

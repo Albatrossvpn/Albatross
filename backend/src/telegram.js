@@ -11,7 +11,11 @@
 // they are deleted; a ticket's messages until it is closed, and a closed
 // ticket keeps its number and nothing of the person. Rate limits remember a
 // keyed hash of a person's id, never the id.
-import { DAY, b64u, safeEqual, tag } from "./lib.js";
+//
+// The bot also sells data with Telegram Stars (the last section; what a
+// payment does to an account is in sales.js).
+import { DAY, TIERS, b64u, checkUsername, safeEqual, tag, tierOf } from "./lib.js";
+import * as sales from "./sales.js";
 import { CANNED, allowed, cleanMessages, mailOwner, oneLine, reply, stamp, today } from "./support.js";
 import * as view from "./telegram-content.js";
 
@@ -28,7 +32,7 @@ const AI_TIMEOUT = 18_000; // the platform leaves 30 seconds after the response 
 const TOKEN = /^\d{5,12}:[A-Za-z0-9_-]{30,64}$/;
 const FIRST_TICKET = 1000;
 // One connection: Telegram sends the next update only after the last was answered.
-const HOOK = { allowed_updates: ["message", "callback_query"], max_connections: 1 };
+const HOOK = { allowed_updates: ["message", "callback_query", "pre_checkout_query"], max_connections: 1 };
 
 const enc = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
@@ -40,11 +44,22 @@ const COMMANDS = [
   { command: "menu", description: "Show the main menu" },
   { command: "human", description: "Talk to our team (opens a ticket)" },
   { command: "close", description: "Close your ticket, or end this chat" },
+  { command: "password", description: "A new password for an account you bought here" },
   { command: "help", description: "How this bot works" },
 ];
+// While data is on sale the menu also has what Telegram requires of a bot that sells.
+const STORE_COMMANDS = [
+  { command: "buy", description: "Buy data with Telegram Stars" },
+  { command: "terms", description: "Terms of buying data" },
+  { command: "paysupport", description: "Help with a payment" },
+];
+const commandsFor = (selling) => (selling ? [...COMMANDS.slice(0, 3), ...STORE_COMMANDS, ...COMMANDS.slice(3)] : COMMANDS);
 const TEAM_COMMANDS = [
   { command: "tickets", description: "The open tickets" },
   { command: "stats", description: "Today's numbers" },
+  { command: "sales", description: "Sales, and the last payments" },
+  { command: "refund", description: "Give a payment back" },
+  { command: "teststars", description: "Test a payment of 1 Star" },
   { command: "close", description: "Close a ticket" },
   { command: "block", description: "Block a user" },
   { command: "unblock", description: "Let a user back" },
@@ -53,8 +68,8 @@ const TEAM_COMMANDS = [
 // What people see of the bot before they write: its menu of commands, a
 // description (shown in an empty chat) and an "about" line (its profile, and
 // the links people share).
-const ABOUT = "Albatross VPN support. Get help installing, connecting and managing your account. An AI assistant answers at once, and our team follows up on tickets.";
-const SHORT = "Albatross VPN support: instant answers, and a team behind them.";
+const ABOUT = "Albatross VPN support. Get help installing, connecting and managing your account, and buy data with Telegram Stars. An AI assistant answers at once, and our team follows up on tickets. albatrossvpn.online";
+const SHORT = "Albatross VPN support and data. albatrossvpn.online";
 const TEXTS_RETRY = 10 * 60; // seconds a refused attempt to set them waits
 
 // ---------- Settings and the Bot API ----------
@@ -133,7 +148,7 @@ function bot(env, token) {
 const sameCommands = (got, want) => Array.isArray(got) && got.length === want.length && got.every((c, i) => c.command === want[i].command && c.description === want[i].description);
 
 /** Makes the bot's menu and texts what this service wants: reads them, writes only what differs, and answers what Telegram refused (one phrase each, none when all is as wanted). */
-async function applyTexts(tg, team) {
+async function applyTexts(tg, team, commands) {
   const [menu, about, short, mine] = await Promise.all([
     tg.call("getMyCommands"),
     tg.call("getMyDescription"),
@@ -141,7 +156,7 @@ async function applyTexts(tg, team) {
     team ? tg.call("getMyCommands", { scope: { type: "chat", chat_id: team } }) : null,
   ]);
   const todo = [
-    [menu.ok && sameCommands(menu.result, COMMANDS), "menu", () => tg.call("setMyCommands", { commands: COMMANDS })],
+    [menu.ok && sameCommands(menu.result, commands), "menu", () => tg.call("setMyCommands", { commands })],
     [about.ok && (about.result || {}).description === ABOUT, "description", () => tg.call("setMyDescription", { description: ABOUT })],
     [short.ok && (short.result || {}).short_description === SHORT, "about line", () => tg.call("setMyShortDescription", { short_description: SHORT })],
     ...(team ? [[mine.ok && sameCommands(mine.result, TEAM_COMMANDS), "team menu", () => tg.call("setMyCommands", { commands: TEAM_COMMANDS, scope: { type: "chat", chat_id: team } })]] : []),
@@ -156,23 +171,41 @@ async function applyTexts(tg, team) {
 }
 
 /**
- * The menu and texts, set when this version of the service wants others than
- * the last time or the last try did not take; a refused try waits ten
- * minutes. `force` looks anyway. Answers `{ ok, note }`: what Telegram refused.
+ * Does `work` (it answers what was refused) when this version of the service
+ * wants others than the last time (`version`) or the last try did not take;
+ * a refused try waits ten minutes. `force` does it anyway. The outcome is kept
+ * under `key`: `{ v, at, ok, note }`.
  */
-async function refreshTexts(env, tg, team, force = false) {
-  const version = await tag("albatross telegram texts", JSON.stringify([COMMANDS, TEAM_COMMANDS, ABOUT, SHORT]));
+async function versioned(env, key, version, force, work) {
   let last = {};
   try {
-    last = JSON.parse(await setting(env, "telegram_texts")) || {};
+    last = JSON.parse(await setting(env, key)) || {};
   } catch {
     last = {};
   }
   if (!force && last.v === version && (last.ok || now() - last.at < TEXTS_RETRY)) return last;
-  const refused = await applyTexts(tg, team);
+  const refused = await work();
   const out = { v: version, at: now(), ok: refused.length === 0, note: refused.join("; ") };
-  await save(env, "telegram_texts", JSON.stringify(out));
+  await save(env, key, JSON.stringify(out));
   return out;
+}
+
+/** The menu and texts (the menu has the store's commands while data is on sale). Answers `{ ok, note }`: what Telegram refused. */
+async function refreshTexts(env, tg, team, force = false) {
+  const commands = commandsFor((await sales.config(env)).enabled);
+  const version = await tag("albatross telegram texts", JSON.stringify([commands, TEAM_COMMANDS, ABOUT, SHORT]));
+  return versioned(env, "telegram_texts", version, force, () => applyTexts(tg, team, commands));
+}
+
+const hookVersion = (url) => tag("albatross telegram hook", JSON.stringify([HOOK, url]));
+
+/** The webhook, set again (waiting updates kept) when this version of the service wants other updates than the last one set. */
+async function refreshHook(env, tg, url, force = false) {
+  if (!url) return { ok: true };
+  return versioned(env, "telegram_hook", await hookVersion(url), force, async () => {
+    const res = await tg.call("setWebhook", { url, secret_token: await hookSecret(env), ...HOOK });
+    return res.ok ? [] : [`webhook: ${oneLine(res.description, 100)}`];
+  });
 }
 
 /** The secret Telegram sends with every call, derived from the service's own so nothing else is stored. */
@@ -197,6 +230,7 @@ export async function connect(env, request, token) {
   const url = `${new URL(request.url).origin}/api/v1/telegram`;
   const hook = await tg.call("setWebhook", { url, secret_token: await hookSecret(env), ...HOOK, drop_pending_updates: true });
   if (!hook.ok) return { error: `Telegram could not set the webhook: ${oneLine(hook.description, 120)}` };
+  await save(env, "telegram_hook", JSON.stringify({ v: await hookVersion(url), at: now(), ok: true, note: "" }));
   // Another bot than before: the old one stops sending here, and what belonged to it is forgotten, the paired team chat included.
   const before = await config(env);
   if (before.token && before.token.split(":")[0] !== token.split(":")[0]) {
@@ -218,7 +252,7 @@ export async function connect(env, request, token) {
 export async function disconnect(env) {
   const { token } = await config(env);
   if (token) await bot(env, token).call("deleteWebhook", { drop_pending_updates: true });
-  await drop(env, ...KEYS, "telegram_pair_code", "telegram_texts");
+  await drop(env, ...KEYS, "telegram_pair_code", "telegram_texts", "telegram_hook");
   await forgetChats(env);
 }
 
@@ -294,10 +328,14 @@ async function failed(c, update, e) {
 /** Who gets what: the team's chat, the people in private chats, nobody else. */
 async function handle(c, update) {
   if (update.callback_query) return onCallback(c, update);
+  if (update.pre_checkout_query) return onCheckout(c, update);
   const m = update.message;
   if (!m || !m.chat) return;
   // A group that became a supergroup has a new id: the team follows it.
   if (m.migrate_to_chat_id) return c.team && m.chat.id === c.team ? moveTeam(c, m.migrate_to_chat_id) : undefined;
+  // What Telegram says of a payment: it was made, or it was given back.
+  if (m.successful_payment && m.from && !m.from.is_bot) return onPaid(c, m);
+  if (m.refunded_payment && m.from) return onRefunded(c, m);
   const person = !!m.from && !m.from.is_bot;
   // An administrator who writes anonymously in a group is the group (Telegram's own "GroupAnonymousBot").
   const anonymous = !!m.from && m.from.username === "GroupAnonymousBot" && m.chat.type !== "private";
@@ -318,7 +356,7 @@ function parseCommand(text, botName) {
 
 // ---------- Counting, limits, the stored conversation ----------
 
-const bump = (env, key) => env.DB.prepare("INSERT INTO tg_stats (day, key, n) VALUES (?1, ?2, 1) ON CONFLICT (day, key) DO UPDATE SET n = n + 1").bind(today(), key).run();
+const bump = (env, key, n = 1) => env.DB.prepare("INSERT INTO tg_stats (day, key, n) VALUES (?1, ?2, ?3) ON CONFLICT (day, key) DO UPDATE SET n = n + ?3").bind(today(), key, n).run();
 
 /** What the rate limits remember of a person: a keyed hash of the id. */
 const idTag = (c, chat) => tag(c.env.TOKEN_SECRET, `telegram:${chat}`);
@@ -399,6 +437,7 @@ async function onUser(c, update, m) {
   const text = typeof m.text === "string" ? m.text.trim() : "";
   const command = parseCommand(text, ""); // in a private chat every command is for this bot
   if (command) return onCommand(c, user, command.name, command.arg);
+  if (user.mode === "topup" && text) return onAccountName(c, user, text);
   if (user.mode === "ticket" && user.ticket_id > 0) return toTeam(c, user, m);
   if (!text) return tg.send(chat, view.CAN_ONLY_READ.text, view.CAN_ONLY_READ.markup);
   return ask(c, user, text);
@@ -408,16 +447,28 @@ async function onCommand(c, user, command, arg) {
   const { env, tg } = c;
   const chat = user.chat_id;
   const show = (s) => tg.send(chat, s.text, s.markup);
+  // A command ends the wait for an account's username.
+  if (user.mode === "topup") await setMode(env, chat, "");
   switch (command) {
     case "start": {
       if (user.ticket_id <= 0) await setMode(env, chat, "");
       const topic = arg.toLowerCase();
       if (topic === "human" || topic === "team") return openTicket(c, user);
-      const screens = { connect: view.connectPicker(), install: view.installPicker(), plans: view.PLANS, account: view.ACCOUNT_INFO, downloads: view.DOWNLOADS };
-      return show(Object.hasOwn(screens, topic) ? screens[topic] : view.menu(user.name));
+      if (topic === "buy") return showStore(c, user);
+      const shop = await shopOf(env);
+      const screens = { connect: view.connectPicker(), install: view.installPicker(), plans: view.plans(shop), account: view.ACCOUNT_INFO, downloads: view.DOWNLOADS };
+      return show(Object.hasOwn(screens, topic) ? screens[topic] : view.menu(user.name, !!shop));
     }
     case "menu":
-      return show(view.menu(user.name));
+      return show(view.menu(user.name, !!(await shopOf(env))));
+    case "buy":
+      return showStore(c, user);
+    case "terms":
+      return show(view.terms((await sales.config(env)).days));
+    case "paysupport":
+      return show(view.PAYSUPPORT);
+    case "password":
+      return forgotPassword(c, user);
     case "help":
       return show(view.help());
     case "human":
@@ -446,6 +497,7 @@ async function ask(c, user, text) {
   const context = [
     "The visitor writes to you in Telegram. Keep answers under 900 characters, in plain text.",
     'When the visitor needs a person, tell them to tap "Talk to our team" under your answer (or send /human), and end with the marker.',
+    ...((await shopOf(env)) ? ["Data can be bought in this bot with Telegram Stars: the menu's \"Buy data\" button (or /buy) shows the packages, their prices and the plan each earns, and the account and password are sent in the chat right after paying. You do not know the prices: send the person there. The plan comes with the data: Bronze under 10 GB, Silver from 10 GB, Gold from 100 GB; VIP (no data limit) is given by the team."] : []),
     ...(user.mode === "problem" && user.device ? [`They are on ${user.device} and the standard checklist did not help: if they have not said, ask for the exact message they see, the network (Wi-Fi or mobile data) and the app version.`] : []),
   ].join("\n");
   const answer = messages && messages.length && messages[messages.length - 1].role === "user" ? await reply(env, messages, context, AI_TIMEOUT) : null;
@@ -625,12 +677,20 @@ async function endChat(c, user, told = false) {
 /** Every minute: a few chats that went quiet are summarized and forgotten, tickets nobody writes to are closed, old rows go. */
 export async function sweep(env, kit) {
   const began = Date.now();
-  const { token, name, team } = await config(env);
+  const { token, name, team, url } = await config(env);
   if (!token) return;
   const c = { env, tg: bot(env, token), team, name, kit };
   const t = now();
   const over = () => Date.now() - began > SWEEP_BUDGET;
+  await refreshHook(env, c.tg, url).catch(log("hook"));
   await refreshTexts(env, c.tg, team).catch(log("texts"));
+  // Stars Telegram took that were not delivered within minutes are given back.
+  const stuck = await env.DB.prepare("SELECT id FROM stars_payments WHERE status = 'paid' AND updated < ?1 LIMIT 5").bind(t - 180).all();
+  for (const row of stuck.results) {
+    if (over()) break;
+    await giveBack(c, row.id, view.DELIVERY_FAILED).catch(log("sweep"));
+  }
+  await sales.purge(env, t).catch(log("sweep"));
   const quiet = await env.DB.prepare("SELECT * FROM tg_users WHERE mode != 'ticket' AND blocked = 0 AND updated < ?1 ORDER BY updated LIMIT ?2").bind(t - IDLE, SWEEP_MAX).all();
   for (const user of quiet.results) {
     if (over()) break;
@@ -664,8 +724,9 @@ async function onCallback(c, update) {
   const user = await touch(env, chat, q.from, update.update_id);
   if (!user || user.blocked) return tg.answer(q.id);
   const [kind, arg, extra] = data.split(":");
-  // Leaving the guide for a connection that fails ends its "describe the problem" step.
-  if (user.mode === "problem" && !["no", "fb", "h", "tc", "r"].includes(kind)) {
+  const extraOf = (d) => d.slice(d.indexOf(":") + 1);
+  // Leaving the guide for a connection that fails ends its "describe the problem" step, and leaving the store ends the wait for an account's username.
+  if (((user.mode === "problem" && !["no", "fb", "h", "tc", "r"].includes(kind)) || user.mode === "topup") && !["sr", "fb"].includes(kind)) {
     await setMode(env, chat, "");
     user.mode = "";
   }
@@ -678,10 +739,10 @@ async function onCallback(c, update) {
   switch (kind) {
     case "menu":
       await tg.answer(q.id);
-      return edit(view.menu(user.name));
+      return edit(view.menu(user.name, !!(await shopOf(env))));
     case "mn":
       await tg.answer(q.id);
-      return show(view.menu(user.name));
+      return show(view.menu(user.name, !!(await shopOf(env))));
     case "c":
       await tg.answer(q.id);
       return edit(arg ? view.connectGuide(arg) : view.connectPicker());
@@ -701,7 +762,18 @@ async function onCallback(c, update) {
       return edit(arg ? view.installGuide(arg) : view.installPicker());
     case "p":
       await tg.answer(q.id);
-      return edit(view.PLANS);
+      return edit(view.plans(await shopOf(env)));
+    case "s":
+    case "sn":
+    case "sr":
+    case "sp":
+    case "st":
+      await tg.answer(q.id);
+      return onStoreButton(c, user, kind, arg, edit, show);
+    case "pw":
+    case "py":
+      await tg.answer(q.id);
+      return onPasswordButton(c, user, kind, extraOf(data), edit, show);
     case "a":
       await tg.answer(q.id);
       return edit(view.ACCOUNT_INFO);
@@ -770,6 +842,9 @@ async function onTeam(c, m) {
   if (name === "help") return done(tg.send(chat, view.OWNER_HELP));
   if (name === "tickets") return done(listTickets(c));
   if (name === "stats") return done(stats(c));
+  if (name === "sales") return done(salesReport(c));
+  if (name === "refund") return done(refundByTeam(c, arg));
+  if (name === "teststars") return done(testStars(c, m.from.id));
   if (name === "block" || name === "unblock") {
     // Replying to a ticket's message says whom, too.
     const target = arg || (replied ? ((await ticketOf(env, replied.ticket_id)) || {}).chat_id || "" : "");
@@ -868,4 +943,255 @@ async function onTeamButton(c, q, data, msg) {
     return tg.send(c.team, `📜 <b>Ticket #${id}</b>\n\n${out || "<i>Nothing kept.</i>"}`);
   }
   return tg.answer(q.id);
+}
+
+// ---------- Selling data with Telegram Stars ----------
+//
+// A person picks a package (a new account, or data for one they have), reads
+// and agrees to the terms, and gets an invoice in Stars. Telegram asks, and
+// waits ten seconds, whether the order can be fulfilled (onCheckout); then
+// says it was paid (onPaid), and the account is made or recharged at once and
+// its username and password are sent in the same chat. A payment that cannot
+// be delivered is given back.
+
+/** The packages on sale now, with the settings; null while selling is off. */
+async function shopOf(env) {
+  const cfg = await sales.config(env);
+  return cfg.enabled ? { cfg, catalog: sales.catalog(cfg), days: cfg.days } : null;
+}
+
+async function showStore(c, user) {
+  const shop = await shopOf(c.env);
+  const s = shop ? view.store(shop.catalog, shop.days) : view.STORE_OFF;
+  return c.tg.send(user.chat_id, s.text, s.markup);
+}
+
+/** Orders a person may make: ten an hour, three hundred a day in all. */
+const mayOrder = (c, t) => allowed(c.env, c.kit, [{ key: `tg:order:${t}`, max: 10, window: 3600 }, { key: `tg:orders:all:${today()}`, max: 300, window: DAY }]);
+
+async function makeOrder(c, user, shop, p, kind, target = "") {
+  const order = { chat_id: user.chat_id, kind, gb: p.gb, stars: p.stars, days: shop.days, target };
+  return { ...order, id: await sales.newOrder(c.env, { chat: order.chat_id, kind, gb: p.gb, stars: p.stars, days: shop.days, target }) };
+}
+
+/** The store's buttons: the packages, a package's choice, a new account, one to recharge, the order's payment, the terms. */
+async function onStoreButton(c, user, kind, arg, edit, show) {
+  const { env, tg } = c;
+  const chat = user.chat_id;
+  const shop = await shopOf(env);
+  if (!shop) return edit(view.STORE_OFF);
+  const p = arg && kind !== "sp" ? shop.catalog.find((x) => x.gb === Number(arg)) : null;
+  switch (kind) {
+    case "s":
+      return edit(p ? view.storeChoice(p, shop.days) : view.store(shop.catalog, shop.days));
+    case "st":
+      return show(view.terms(shop.days));
+    case "sn": {
+      if (!p) return edit(view.store(shop.catalog, shop.days));
+      if (!(await mayOrder(c, await idTag(c, chat)))) return tg.send(chat, view.SLOW_DOWN);
+      return edit(view.checkout(await makeOrder(c, user, shop, p, "new"), p, shop.days));
+    }
+    case "sr":
+      if (!p) return edit(view.store(shop.catalog, shop.days));
+      await setMode(env, chat, "topup", String(p.gb));
+      return edit(view.askAccount(p));
+    default: // "sp": the person agreed, and the invoice is sent
+      return sendInvoice(c, user, Number(arg));
+  }
+}
+
+/** A person writes the username of the account to recharge. */
+async function onAccountName(c, user, text) {
+  const { env, tg } = c;
+  const chat = user.chat_id;
+  const send = (s) => tg.send(chat, s.text, s.markup);
+  const shop = await shopOf(env);
+  const p = shop && shop.catalog.find((x) => x.gb === Number(user.device));
+  if (!p) {
+    await setMode(env, chat, "");
+    return send(shop ? view.store(shop.catalog, shop.days) : view.STORE_OFF);
+  }
+  const name = text.trim().toLowerCase();
+  if (!checkUsername(name)) return send(view.NOT_A_USERNAME);
+  const t = await idTag(c, chat);
+  // Whether a username exists is told to whoever asks, a few times an hour: nobody can list the accounts.
+  if (!(await allowed(env, c.kit, [{ key: `tg:lookup:${t}`, max: 10, window: 3600 }, { key: `tg:lookups:all:${today()}`, max: 500, window: DAY }]))) return send(view.TOO_MANY_LOOKUPS);
+  const account = await sales.accountFor(env, name);
+  if (!account) return send(view.NO_SUCH_ACCOUNT);
+  if (!account.fits) return send(view.CANNOT_RECHARGE);
+  if (!(await mayOrder(c, t))) return tg.send(chat, view.SLOW_DOWN);
+  await setMode(env, chat, "");
+  return send(view.checkout(await makeOrder(c, user, shop, p, "topup", account.username), p, shop.days));
+}
+
+/** The order's invoice, in Stars (no provider and no key: Telegram's own currency, XTR). */
+async function sendInvoice(c, user, orderId) {
+  const { env, tg } = c;
+  const chat = user.chat_id;
+  const order = await sales.orderOf(env, orderId);
+  if (!order || order.chat_id !== chat || order.status !== "new") return tg.send(chat, view.ORDER_GONE.text, view.ORDER_GONE.markup);
+  if (order.kind !== "test" && !(await shopOf(env))) return tg.send(chat, view.STORE_OFF.text, view.STORE_OFF.markup);
+  const test = order.kind === "test";
+  const valid = order.days > 0 ? `valid ${order.days} days` : "no end date";
+  const res = await tg.call("sendInvoice", {
+    chat_id: chat,
+    title: test ? "Test payment" : `${order.gb} GB of data`,
+    description: (test ? "A test payment of 1 Star, to see that buying works. It can be given back." : `Albatross VPN data: ${order.gb} GB, ${valid}. ${order.kind === "topup" ? `Added to the account ${order.target}.` : "A new account."}`).slice(0, 255),
+    payload: `o${order.id}`,
+    provider_token: "",
+    currency: "XTR",
+    prices: [{ label: test ? "Test" : `${order.gb} GB`, amount: order.stars }],
+  });
+  if (!res.ok) await tg.send(chat, `I could not send the invoice: ${view.esc(oneLine(res.description, 120))}. Please try again, or tell our team.`);
+}
+
+/** Telegram asks, once the person pressed Pay, whether the order can be fulfilled: answered within its ten seconds. */
+async function onCheckout(c, update) {
+  const { env, tg } = c;
+  const q = update.pre_checkout_query;
+  const answer = (ok, why = "") => tg.call("answerPreCheckoutQuery", { pre_checkout_query_id: q.id, ok, ...(ok ? {} : { error_message: why }) });
+  const found = /^o(\d+)$/.exec(String(q.invoice_payload || ""));
+  const order = found ? await sales.orderOf(env, Number(found[1])) : null;
+  if (!order || !q.from || order.chat_id !== q.from.id || q.currency !== "XTR" || q.total_amount !== order.stars) return answer(false, "This invoice is not valid. Pick a package again with /buy.");
+  const blockedRow = await env.DB.prepare("SELECT blocked FROM tg_users WHERE chat_id = ?1").bind(q.from.id).first();
+  if (blockedRow && blockedRow.blocked) return answer(false, "You cannot buy here.");
+  if (order.kind !== "test" && !(await shopOf(env))) return answer(false, "Selling is paused. Please try again later.");
+  if (now() - order.created > 3600) return answer(false, "This invoice has expired. Pick a package again with /buy.");
+  if (order.kind === "topup") {
+    const account = await sales.accountFor(env, order.target);
+    if (!account || !account.fits) return answer(false, "That account cannot be recharged any more. Ask our team.");
+  }
+  // One payment per order: a second invoice of the same order, or a second press, is turned away.
+  if (!(await sales.claimOrder(env, order.id, now()))) return answer(false, "This invoice was already paid, or is being paid. Pick a package again with /buy.");
+  return answer(true);
+}
+
+/** Telegram says a payment was made: the data is delivered, once, and the person gets the account and its password. */
+async function onPaid(c, m) {
+  const { env, tg } = c;
+  const paid = m.successful_payment;
+  const payer = m.from.id;
+  const charge = String(paid.telegram_payment_charge_id || "");
+  if (!charge) return;
+  const found = /^o(\d+)$/.exec(String(paid.invoice_payload || ""));
+  const order = found ? await sales.orderOf(env, Number(found[1])) : null;
+  if (!order || order.chat_id !== payer || paid.currency !== "XTR" || paid.total_amount !== order.stars) {
+    // Paid for what no order matches: the Stars go back, and the team is told.
+    const res = await tg.call("refundStarPayment", { user_id: payer, telegram_payment_charge_id: charge });
+    await tellTeam(c, 0, `⚠️ A payment of ⭐${Number(paid.total_amount) || 0} matched no order, ${res.ok ? "and was refunded" : `and could NOT be refunded (${view.esc(oneLine(res.description, 100))})`}. Charge <code>${view.esc(charge)}</code>.`, undefined, false);
+    return;
+  }
+  const rec = await sales.recordPayment(env, { chargeId: charge, chat: payer, order, stars: paid.total_amount });
+  if (!rec.fresh) return; // Telegram sent it twice
+  let out;
+  try {
+    out = await sales.deliver(env, order, rec.id);
+  } catch (e) {
+    log("delivery")(e && e.message ? e.message : e);
+    return giveBack(c, rec.id, view.DELIVERY_FAILED);
+  }
+  await bump(env, "sales");
+  await bump(env, "stars", order.stars);
+  if (out.kind === "test") {
+    await tg.send(payer, view.receiptTest(rec.id));
+    return;
+  }
+  const plan = TIERS[tierOf(out.tier)];
+  const receipt = out.kind === "new"
+    ? view.receiptNew({ id: rec.id, gb: order.gb, stars: order.stars, username: out.username, password: out.password, plan: plan.name, devices: plan.devices, expires: out.expires_at })
+    : view.receiptTopup({ id: rec.id, gb: order.gb, stars: order.stars, username: out.username, quota_bytes: out.quota_bytes, plan: plan.name, devices: plan.devices, expires: out.expires_at });
+  let sent = await tg.send(payer, receipt.text, receipt.markup);
+  if (!sent.ok) sent = await tg.send(payer, receipt.text, receipt.markup);
+  const who = `<code>${view.esc(out.username)}</code> (${plan.name})`;
+  await tellTeam(c, 0, `💰 <b>Sale P${rec.id}</b> - ${order.gb} GB for ⭐${order.stars} - ${out.kind === "new" ? "new account" : "recharge of"} ${who}${sent.ok ? "" : `\n⚠️ The receipt could NOT be sent (${view.esc(oneLine(sent.description, 100))}): reset the account's password in the panel and tell the buyer (id <code>${payer}</code>).`}`, undefined, false);
+}
+
+/** Gives a payment back (Telegram's refund), switches off what it gave, and tells the buyer and the team. False when it could not. */
+async function giveBack(c, id, why) {
+  const { env, tg } = c;
+  const pay = await sales.paymentOf(env, id);
+  if (!pay || pay.status === "refunded") return false;
+  const res = await tg.call("refundStarPayment", { user_id: pay.chat_id, telegram_payment_charge_id: pay.charge_id });
+  if (!res.ok) {
+    await env.DB.prepare("UPDATE stars_payments SET status = 'failed', updated = ?2 WHERE id = ?1").bind(id, now()).run();
+    await tellTeam(c, 0, `⚠️ <b>Payment P${id}</b> (⭐${pay.stars}) could not be delivered and could NOT be refunded: ${view.esc(oneLine(res.description, 120))}. Refund it by hand with /refund P${id}.`, undefined, false);
+    return false;
+  }
+  await env.DB.prepare("UPDATE stars_payments SET status = 'refunded', updated = ?2 WHERE id = ?1").bind(id, now()).run();
+  await sales.reverse(env, pay);
+  await bump(env, "refunds");
+  const said = view.GAVE_BACK(id, pay.stars, why);
+  await tg.send(pay.chat_id, said.text, said.markup);
+  if (why !== view.BY_TEAM) await tellTeam(c, 0, `↩ <b>Payment P${id}</b> (⭐${pay.stars}) was refunded: ${view.esc(why)}`, undefined, false);
+  return true;
+}
+
+/** Telegram says a payment was given back (not by this service): what it gave is taken back too. */
+async function onRefunded(c, m) {
+  const { env } = c;
+  const charge = String((m.refunded_payment || {}).telegram_payment_charge_id || "");
+  const pay = charge ? await env.DB.prepare("SELECT * FROM stars_payments WHERE charge_id = ?1").bind(charge).first() : null;
+  if (!pay || pay.status === "refunded") return;
+  await env.DB.prepare("UPDATE stars_payments SET status = 'refunded', updated = ?2 WHERE id = ?1").bind(pay.id, now()).run();
+  await sales.reverse(env, pay);
+  await tellTeam(c, 0, `↩ Telegram says <b>payment P${pay.id}</b> (⭐${pay.stars}) was refunded. ${pay.username ? `The account <code>${view.esc(pay.username)}</code> was ${pay.kind === "new" ? "switched off" : "reduced by the data it got"}.` : ""}`, undefined, false);
+}
+
+/** /refund P12 in the team's chat. */
+async function refundByTeam(c, arg) {
+  const { env, tg } = c;
+  const id = Number(String(arg).trim().replace(/^p/i, ""));
+  if (!Number.isSafeInteger(id) || id <= 0) return tg.send(c.team, "Say which payment: /refund P12 (the number is in /sales).");
+  const pay = await sales.paymentOf(env, id);
+  if (!pay) return tg.send(c.team, `There is no payment P${id}.`);
+  if (pay.status === "refunded") return tg.send(c.team, `P${id} was already refunded.`);
+  const done = await giveBack(c, id, view.BY_TEAM);
+  if (done) await tg.send(c.team, `↩ P${id} refunded (⭐${pay.stars}).${pay.username ? ` ${pay.kind === "new" ? "The account" : "The data on"} <code>${view.esc(pay.username)}</code> ${pay.kind === "new" ? "is switched off" : "was taken off again"}.` : ""}`);
+}
+
+/** /sales: today's numbers and the last payments. */
+async function salesReport(c) {
+  const { env } = c;
+  const { results } = await env.DB.prepare("SELECT key, n FROM tg_stats WHERE day = ?1 AND key IN ('sales', 'stars', 'refunds')").bind(today()).all();
+  const n = Object.fromEntries(results.map((r) => [r.key, r.n]));
+  const last = await env.DB.prepare("SELECT id, kind, gb, stars, username, status FROM stars_payments ORDER BY id DESC LIMIT 8").all();
+  const lines = last.results.map((r) => `<b>P${r.id}</b> - ${r.kind === "test" ? "test" : `${r.gb} GB`} ⭐${r.stars}${r.username ? ` - <code>${view.esc(r.username)}</code>` : ""} - ${r.status}`);
+  const shop = await shopOf(env);
+  return c.tg.send(c.team, `💰 <b>Sales</b> (${shop ? "on sale" : "selling is off"})\nToday (UTC): ${n.sales || 0} sold for ⭐${n.stars || 0}, ${n.refunds || 0} refunded\n\n${lines.join("\n") || "<i>No payments yet.</i>"}\n\n<i>/refund P12 gives one back.</i>`);
+}
+
+/** /teststars: an invoice of 1 Star to the person who asked, to see that selling works end to end (it can be refunded). */
+async function testStars(c, person) {
+  const id = await sales.newOrder(c.env, { chat: person, kind: "test", gb: 0, stars: 1, days: 0 });
+  return sendInvoice(c, { chat_id: person }, id);
+}
+
+// ---------- A new password for an account bought here ----------
+//
+// Only the Telegram account that bought a new account (the number its
+// purchase remembered, sales.js) can ask for its password anew: the person
+// has no other proof, and none is asked. All the account's devices are signed
+// out and the new password is shown once, in this chat.
+
+async function forgotPassword(c, user) {
+  const names = await sales.ownedAccounts(c.env, user.chat_id);
+  const s = !names.length ? view.NO_OWN_ACCOUNT : names.length === 1 ? view.confirmReset(names[0]) : view.pickAccount(names);
+  return c.tg.send(user.chat_id, s.text, s.markup);
+}
+
+async function onPasswordButton(c, user, kind, name, edit, show) {
+  const { env, tg } = c;
+  const chat = user.chat_id;
+  const names = await sales.ownedAccounts(env, chat);
+  if (kind === "pw") {
+    if (!name || name === "pw") return edit(!names.length ? view.NO_OWN_ACCOUNT : names.length === 1 ? view.confirmReset(names[0]) : view.pickAccount(names));
+    return edit(names.includes(name) ? view.confirmReset(name) : view.NO_OWN_ACCOUNT);
+  }
+  // "py": done, if the account is still this person's and not too often.
+  if (!names.includes(name)) return edit(view.NO_OWN_ACCOUNT);
+  if (!(await allowed(env, c.kit, [{ key: `tg:reset:${await idTag(c, chat)}`, max: 3, window: DAY }]))) return show(view.TOO_MANY_RESETS);
+  const password = await sales.resetPassword(env, chat, name);
+  if (!password) return edit(view.NO_OWN_ACCOUNT);
+  await bump(env, "passwords");
+  return edit(view.newPassword(name, password));
 }
