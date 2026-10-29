@@ -12,6 +12,19 @@
 set -euo pipefail
 account="${1%/}" site="${2%/}" name="$3" source="$4" sha="$5" force="${6:-false}"
 . "$(dirname "$0")/lib.sh"
+
+# fetch_release <url> <file> downloads a release file. A release of a private
+# repository has no public address: with GH_TOKEN set the file comes through
+# the GitHub CLI, which asks as the workflow; otherwise the address is opened
+# as it is.
+fetch_release() {
+  local url="$1" file="$2" re='^https://github\.com/([^/]+/[^/]+)/releases/download/([^/]+)/([^/]+)$'
+  if [ -n "${GH_TOKEN:-}" ] && [[ "$url" =~ $re ]] && command -v gh > /dev/null 2>&1; then
+    gh release download "${BASH_REMATCH[2]}" --repo "${BASH_REMATCH[1]}" --pattern "${BASH_REMATCH[3]}" --output "$file" --clobber
+  else
+    curl -fsSL --retry 4 --retry-delay 5 --max-time 900 -o "$file" "$url"
+  fi
+}
 case "$name" in
   *.apk) type="application/vnd.android.package-archive" ;;
   *.exe) type="application/vnd.microsoft.portable-executable" ;;
@@ -24,7 +37,7 @@ if have_wrangler; then
   fi
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
-  curl -fsSL --retry 4 --retry-delay 5 --max-time 900 -o "$tmp/$name" "$source"
+  fetch_release "$source" "$tmp/$name"
   got="$(sha256sum < "$tmp/$name" | cut -d' ' -f1)"
   [ "$got" = "$sha" ] || { echo "$source has SHA-256 $got, expected $sha" >&2; exit 1; }
   r2_put "$name" "$tmp/$name" "$type" "public, max-age=86400"
