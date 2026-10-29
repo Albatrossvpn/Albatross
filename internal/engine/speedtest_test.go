@@ -34,12 +34,12 @@ func withSpeedServer(t *testing.T, phase time.Duration) (up *atomic.Int64) {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	oldPhase, oldChunk := speedPhase, speedUpChunk
+	oldPhase, oldChunk, oldCap := speedPhase, speedUpChunk, speedCap
 	oldDown, oldUp, oldPing := speedURL, speedUpURL, speedPingURL
-	speedPhase, speedUpChunk = phase, 2<<20
+	speedPhase, speedUpChunk, speedCap = phase, 2<<20, 1<<30
 	speedURL, speedUpURL, speedPingURL = srv.URL+"/__down?bytes=", srv.URL+"/__up", srv.URL+"/ping"
 	t.Cleanup(func() {
-		speedPhase, speedUpChunk = oldPhase, oldChunk
+		speedPhase, speedUpChunk, speedCap = oldPhase, oldChunk, oldCap
 		speedURL, speedUpURL, speedPingURL = oldDown, oldUp, oldPing
 	})
 	return up
@@ -134,5 +134,22 @@ func TestRateLeavesOutTheStart(t *testing.T) {
 	// Under two seconds: the whole average.
 	if got := rateOf([]rateSample{{0, 0}, {time.Second, 125_000}}); got < 0.99e6 || got > 1.01e6 {
 		t.Fatalf("short transfer: %.0f", got)
+	}
+}
+
+// A fast line does not use data for nothing: an upload stops at the cap, a
+// request after the one that reached it.
+func TestSpeedUploadStopsAtTheCap(t *testing.T) {
+	up := withSpeedServer(t, 5*time.Second)
+	speedCap = 5 << 20 // after withSpeedServer: its cleanup restores it
+	start := time.Now()
+	if err := speedUpload(t.Context(), http.DefaultClient, func(float64) {}); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Fatalf("an upload that reached the cap took %v of a 5 s phase", took)
+	}
+	if got := up.Load(); got < speedCap || got > speedCap+speedUpChunk {
+		t.Fatalf("the server got %d bytes, want from %d to %d", got, speedCap, speedCap+speedUpChunk)
 	}
 }

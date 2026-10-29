@@ -212,6 +212,7 @@ func TestProtocolName(t *testing.T) {
 		{"vless", "tls", "VLESS"},
 		{"hysteria2", "", "Hysteria 2"},
 		{"wireguard", "", "WireGuard"},
+		{"warpplus", "", "WARP+"},
 		{"mystery", "", "mystery"},
 		{"", "", ""},
 	} {

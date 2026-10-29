@@ -51,10 +51,18 @@ type conn struct {
 	DownRate int64  `json:"down_rate"`
 }
 
+// otherProtocols are the names of what the protocol list does not offer.
+var otherProtocols = map[string]string{
+	"direct": "Direct", "warpplus": "WARP+", "psiphon": "Psiphon", "masque": "MASQUE", "masque2": "MASQUE", "gool": "WARP in WARP",
+}
+
 // protocolName is how a protocol is shown: its name in the protocol list,
 // with REALITY, the TLS that looks like a well-known site, named.
 func protocolName(proto, security string) string {
 	name := proto
+	if n, ok := otherProtocols[proto]; ok {
+		name = n
+	}
 	for _, p := range engine.ProtocolChoices() {
 		if p.Value == proto && p.Value != "" {
 			name = p.Label

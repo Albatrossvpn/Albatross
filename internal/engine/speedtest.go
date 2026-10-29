@@ -46,12 +46,12 @@ var (
 	// speedUpChunk is the bytes of one upload request; a fast line takes
 	// several in a phase.
 	speedUpChunk int64 = 25 << 20
+	// speedCap is the most bytes a phase moves: a fast line finishes the
+	// measurement sooner instead of using the account's data for nothing.
+	speedCap int64 = 64 << 20
 )
 
-const (
-	speedDown  = 100 << 20 // more than a phase moves on most lines
-	speedPings = 6
-)
+const speedPings = 6
 
 // ErrNotConnected is a speed test asked for while nothing is connected.
 var ErrNotConnected = errors.New("Connect first, then test the speed.")
@@ -183,6 +183,7 @@ func speedPing(ctx context.Context, client *http.Client) (ping, jitter int, err 
 type rateMeter struct {
 	mu      sync.Mutex
 	start   time.Time
+	end     time.Time // when the transfer stopped; zero while it goes on
 	total   int64
 	samples []rateSample // at most one in 100 ms
 }
@@ -190,6 +191,12 @@ type rateMeter struct {
 type rateSample struct {
 	at time.Duration
 	n  int64
+}
+
+func (m *rateMeter) bytes() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.total
 }
 
 func (m *rateMeter) add(n int) {
@@ -206,11 +213,28 @@ func (m *rateMeter) add(n int) {
 	}
 }
 
+// stop says the transfer is over, so what follows is not counted as idle time.
+func (m *rateMeter) stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.end.IsZero() {
+		m.end = time.Now()
+	}
+}
+
 // rate is the speed in bits a second.
 func (m *rateMeter) rate() float64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return rateOf(m.samples)
+	if m.start.IsZero() {
+		return 0
+	}
+	end := m.end
+	if end.IsZero() {
+		end = time.Now()
+	}
+	samples := append(append([]rateSample(nil), m.samples...), rateSample{end.Sub(m.start), m.total})
+	return rateOf(samples)
 }
 
 func rateOf(samples []rateSample) float64 {
@@ -240,7 +264,7 @@ func rateOf(samples []rateSample) float64 {
 func speedDownload(ctx context.Context, client *http.Client, tell func(float64)) error {
 	ctx, cancel := context.WithTimeout(ctx, speedPhase+5*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, speedURL+strconv.Itoa(speedDown), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, speedURL+strconv.FormatInt(speedCap, 10), nil)
 	if err != nil {
 		return err
 	}
@@ -272,13 +296,14 @@ func speedDownload(ctx context.Context, client *http.Client, tell func(float64))
 			break
 		}
 		if err != nil {
-			if err == io.EOF || (ctx.Err() != nil && meter.total > 0) {
+			if err == io.EOF || (ctx.Err() != nil && meter.bytes() > 0) {
 				break
 			}
 			return err
 		}
 	}
-	if meter.total == 0 {
+	meter.stop()
+	if meter.bytes() == 0 {
 		return errors.New("download: no data")
 	}
 	tell(meter.rate())
@@ -319,7 +344,7 @@ func speedUpload(ctx context.Context, client *http.Client, tell func(float64)) e
 	until := time.Now().Add(speedPhase)
 	done := make(chan error, 1)
 	go func() {
-		for time.Now().Before(until) {
+		for time.Now().Before(until) && meter.bytes() < speedCap {
 			req, err := http.NewRequestWithContext(ctx, http.MethodPost, speedUpURL, &zeroBody{left: speedUpChunk, until: until, meter: meter})
 			if err != nil {
 				done <- err
@@ -353,6 +378,7 @@ func speedUpload(ctx context.Context, client *http.Client, tell func(float64)) e
 			if err != nil {
 				return err
 			}
+			meter.stop()
 			if meter.rate() == 0 {
 				return errors.New("upload: no data")
 			}
@@ -364,6 +390,7 @@ func speedUpload(ctx context.Context, client *http.Client, tell func(float64)) e
 			if ctx.Err() == context.Canceled {
 				return ctx.Err()
 			}
+			meter.stop()
 			tell(meter.rate())
 			return nil
 		}

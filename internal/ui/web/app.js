@@ -54,6 +54,12 @@ function api(method, path, body) {
   });
 }
 
+// A part of the page that fails to draw must not stop the others, least of
+// all the update notice: each runs on its own.
+function safely(fn) {
+  try { fn(); } catch (e) { if (window.console && console.error) console.error(e); }
+}
+
 var toastTimer;
 function toast(text) {
   var t = $("toast");
@@ -131,10 +137,10 @@ function render(s) {
   if (s.status === "idle" && !sub) sub = s.servers > 0 ? "Tap the button to connect" : "Getting ready…";
   $("status-sub").textContent = sub;
 
-  renderSteps(s, busy);
   $("smart").classList.toggle("hidden", busy || on);
-  renderSmart(s);
-  renderConnected(s, on);
+  safely(function () { renderSteps(s, busy); });
+  safely(function () { renderSmart(s); });
+  safely(function () { renderConnected(s, on); });
 
   $("help-row").classList.toggle("hidden", !s.help_available && !s.settings.help_others);
   $("crowd-row").classList.toggle("hidden", !s.crowd_available);
@@ -154,18 +160,20 @@ function render(s) {
   $("network").classList.toggle("hidden", !networkText || s.status === "connected");
   $("network").textContent = networkText || "";
 
-  renderUpdate(s.update);
-  renderAccount(s.account);
-  renderLocks();
-  renderPrivacy(s);
+  safely(function () { renderUpdate(s.update); });
+  safely(function () { renderAccount(s.account); });
+  safely(renderLocks);
+  safely(function () { renderPrivacy(s); });
   $("admin-chip").classList.toggle("hidden", !s.admin);
   if (!settingsBusy) fillSettings(s.settings);
-  renderGps(s);
+  safely(function () { renderGps(s); });
   $("version").textContent = s.version ? "v" + s.version : "";
-  if (view === "locations") renderLocations();
-  if (view === "plans") renderPlans();
-  if (view === "speed") renderSpeedWhere();
-  if (sheetKind === "protocol") renderSheet();
+  safely(function () {
+    if (view === "locations") renderLocations();
+    if (view === "plans") renderPlans();
+    if (view === "speed") renderSpeedWhere();
+    if (sheetKind === "protocol") renderSheet();
+  });
 }
 
 function renderSteps(s, busy) {
@@ -350,6 +358,8 @@ var DOTS = (function () {
   }
   return out;
 })();
+// An angle in degrees as the equivalent from -180 up to 180.
+function wrap180(d) { return (((d % 360) + 540) % 360) - 180; }
 function place(code) { return code && PLACES[code] ? { lon: PLACES[code][0], lat: PLACES[code][1] } : null; }
 
 // The globe spins slowly while off; while connecting it turns to the
@@ -368,7 +378,7 @@ function animStep(dt) {
   var ease = function (rate) { return 1 - Math.exp(-rate * dt); };
   if (aim) {
     // Turn toward the country, then lean in.
-    var dl = ((aim.lon - globe.lon + 540) % 360) - 180;
+    var dl = wrap180(aim.lon - globe.lon);
     globe.lon += dl * ease(2.6);
     globe.lat += (Math.max(-40, Math.min(50, aim.lat)) * 0.8 - globe.lat) * ease(2.6);
     globe.zoom += ((Math.abs(dl) < 8 ? 1.45 : 1) - globe.zoom) * ease(2.4);
@@ -377,6 +387,7 @@ function animStep(dt) {
     globe.lat += (18 - globe.lat) * ease(1.2);
     globe.zoom += (1 - globe.zoom) * ease(3);
   }
+  globe.lon = wrap180(globe.lon);
   drawGlobe(aim, busy);
 }
 
@@ -516,7 +527,7 @@ function frame(now) {
   if (now - lastFrame < every) return;
   var dt = Math.min(0.25, (now - lastFrame) / 1000);
   lastFrame = now;
-  animStep(dt);
+  safely(function () { animStep(dt); });
 }
 raf(frame);
 
@@ -532,7 +543,7 @@ $("mascot").addEventListener("click", function () {
 // file sharing be, and for games whatever answers fastest from here.
 var CATS = {
   stream: { codes: ["US", "GB", "CA", "DE", "FR", "NL", "JP", "AU", "IT", "ES", "SE", "CH", "KR", "IN", "BR"], hint: "Countries with the largest streaming libraries." },
-  p2p: { codes: ["NL", "CH", "SE", "RO", "ES", "CA", "DE", "FI", "NO", "IS", "LU", "MD", "BG", "CZ", "PL"], hint: "Countries where file sharing is commonly allowed." },
+  p2p: { codes: ["NL", "CH", "SE", "RO", "ES", "CA", "DE", "FI", "NO", "IS", "LU", "MD", "BG", "CZ", "PL"], hint: "Countries usually relaxed about file sharing. Mind your local law." },
   game: { ms: 350, hint: "The lowest ping from where you are, for games and calls." }
 };
 var cat = "";
@@ -555,6 +566,7 @@ function renderLocations() {
   var key = [locMode, q, cat, lock, planFor("locations"), state.target || "", state.servers, JSON.stringify(state.countries)].join("|");
   if (key === locKey) return;
   locKey = key;
+  if (!mapTouched) mapFitted = false;
   $("cat-hint").textContent = cat ? CATS[cat].hint : "";
   $("cat-hint").classList.toggle("hidden", !cat);
   $("loc-note").innerHTML = lock && planFor("locations") ? '<div class="lock-note" id="loc-lock">' + medal(planFor("locations"), true) +
@@ -625,6 +637,7 @@ $("loc-map-btn").addEventListener("click", function () { setLocMode("map"); });
 var mapView = { lon: 35, lat: 38, scale: 0 };
 var picked = null;
 var mapFitted = false;
+var mapTouched = false; // the user moved or zoomed it: it stays where they put it
 // The first time the map shows, it frames the user and the places with
 // servers (at least a stretch the size of Europe).
 function fitMap() {
@@ -658,6 +671,7 @@ function drawWorld() {
   if (!mapView.scale) mapView.scale = w / 70;
   mapView.scale = Math.max(w / 360, Math.min(w / 12, mapView.scale));
   mapView.lat = Math.max(-55, Math.min(75, mapView.lat));
+  mapView.lon = Math.max(-180, Math.min(180, mapView.lon));
   flatDots(ctx, w, h, mapView, "#9db0d8", 3);
   var heat = $("heat-toggle").checked;
   var pins = mapPins();
@@ -730,6 +744,7 @@ function pickAt(x, y) {
 }
 function zoomBy(k, x, y) {
   var cv = $("worldmap"), w = cv.clientWidth, h = cv.clientHeight;
+  mapTouched = true;
   if (x === undefined) { x = w / 2; y = h / 2; }
   var lon = mapView.lon + (x - w / 2) / mapView.scale, lat = mapView.lat - (y - h / 2) / mapView.scale;
   mapView.scale = Math.max(w / 360, Math.min(w / 12, mapView.scale * k));
@@ -749,6 +764,7 @@ $("map-go").addEventListener("click", function () { if (picked) connectTo(picked
     if (!drag) return;
     var dx = p.x - drag.x, dy = p.y - drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 3) moved = true;
+    mapTouched = true;
     mapView.lon -= dx / mapView.scale;
     mapView.lat += dy / mapView.scale;
     drag = p;
@@ -1031,6 +1047,7 @@ function showPlanModal(f) {
 function copyText(text) {
   var ta = document.createElement("textarea");
   ta.value = text;
+  ta.setAttribute("readonly", "");
   ta.style.cssText = "position:fixed;left:-1000px;top:0";
   document.body.appendChild(ta);
   ta.select();
