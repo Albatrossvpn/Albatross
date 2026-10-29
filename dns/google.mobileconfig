@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>DNSSettings</key>
+      <dict>
+        <key>DNSProtocol</key>
+        <string>HTTPS</string>
+        <key>ServerURL</key>
+        <string>https://dns.google/dns-query</string>
+        <key>ServerAddresses</key>
+        <array>
+          <string>8.8.8.8</string>
+          <string>8.8.4.4</string>
+          <string>2001:4860:4860::8888</string>
+          <string>2001:4860:4860::8844</string>
+        </array>
+      </dict>
+      <key>PayloadDescription</key>
+      <string>Encrypted DNS (Google) for every network</string>
+      <key>PayloadDisplayName</key>
+      <string>Encrypted DNS: Google</string>
+      <key>PayloadIdentifier</key>
+      <string>online.albatrossvpn.dns.google.settings</string>
+      <key>PayloadType</key>
+      <string>com.apple.dnsSettings.managed</string>
+      <key>PayloadUUID</key>
+      <string>a1b2c3d4-0000-4000-8000-000000000001</string>
+      <key>PayloadVersion</key>
+      <integer>1</integer>
+      <key>ProhibitDisablement</key>
+      <false/>
+    </dict>
+  </array>
+  <key>PayloadDescription</key>
+  <string>Looks names up over an encrypted connection to Google, so a network's resolver cannot answer with lies. Remove it any time in Settings, General, VPN &amp; Device Management.</string>
+  <key>PayloadDisplayName</key>
+  <string>Encrypted DNS (Google)</string>
+  <key>PayloadIdentifier</key>
+  <string>online.albatrossvpn.dns.google</string>
+  <key>PayloadRemovalDisallowed</key>
+  <false/>
+  <key>PayloadType</key>
+  <string>Configuration</string>
+  <key>PayloadUUID</key>
+  <string>a1b2c3d4-0000-4000-8000-000000000011</string>
+  <key>PayloadVersion</key>
+  <integer>1</integer>
+</dict>
+</plist>
