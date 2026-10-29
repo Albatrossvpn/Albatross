@@ -1,0 +1,22 @@
+name: Clear artifacts
+
+# Run by hand when uploads stop with "Artifact storage quota has been hit":
+# deletes what finished runs left (build/tidy-artifacts.sh). Every build run
+# does the same before it stores its own; the usage is recalculated a few
+# hours after.
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Delete
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash build/tidy-artifacts.sh
