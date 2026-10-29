@@ -14,7 +14,9 @@
 <meta name="apple-mobile-web-app-title" content="Albatross">
 <meta name="theme-color" content="#f6f7fb">
 <link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/support.css">
 <script type="module" src="/account.js"></script>
+<script src="/support.js" defer></script>
 </head>
 <body>
 <header class="nav">
@@ -58,6 +60,11 @@
       <div class="meter" id="m-data"></div>
       <div class="meter" id="m-time"></div>
       <dl class="kv" id="d-kv"></dl>
+    </div>
+    <div class="card hidden" id="buy">
+      <h2>Add data</h2>
+      <p class="muted" id="buy-text"></p>
+      <div class="row wrap-row"><a class="btn primary" id="buy-link" href="#" target="_blank" rel="noopener">Buy data in Telegram</a></div>
     </div>
     <div class="card hidden" id="support">
       <h2>Direct support</h2>

@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
@@ -13,6 +14,40 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const ADMIN = { username: "root", password: "admin-pass-for-tests" };
 const dir = mkdtempSync(join(tmpdir(), "albatross-api-"));
 let proc;
+
+// Telegram's Bot API, stood in for: the Worker is told to call this server instead (TELEGRAM_API).
+const TG_PORT = PORT + 1;
+const TG_TOKEN = "123456789:" + "A".repeat(35);
+const tgCalls = [];
+let tgNext = 900;
+let tgHook = "";
+// What the bot's menu, description and about line were set to, per scope and language, for the getters to answer.
+const tgShown = new Map();
+const tgSlot = (p) => JSON.stringify([p.scope || "all", p.language_code || ""]);
+const tgServer = createServer((req, res) => {
+  let body = "";
+  req.on("data", (d) => (body += d));
+  req.on("end", () => {
+    const [, token, method] = /^\/bot([^/]+)\/(\w+)$/.exec(req.url) || [];
+    // A call with a file (the bot's picture) is multipart: only that it came is noted.
+    const payload = body && !/^multipart\//.test(req.headers["content-type"] || "") ? JSON.parse(body) : body ? { multipart: true } : {};
+    tgCalls.push({ token, method, ...payload });
+    if (token === TG_TOKEN && method === "setWebhook") tgHook = payload.url;
+    if (token === TG_TOKEN && method === "deleteWebhook") tgHook = "";
+    const kept = tgShown.get(tgSlot(payload)) || {};
+    if (token === TG_TOKEN && /^setMy(Commands|Description|ShortDescription)$/.test(method)) tgShown.set(tgSlot(payload), { ...kept, [method]: payload });
+    const answer = token !== TG_TOKEN ? { ok: false, error_code: 401, description: "Unauthorized" }
+      : method === "getMe" ? { ok: true, result: { username: "MockSupportBot" } }
+      : method === "getWebhookInfo" ? { ok: true, result: { url: tgHook, pending_update_count: 0 } }
+      : method === "getMyCommands" ? { ok: true, result: (kept.setMyCommands || {}).commands || [] }
+      : method === "getMyDescription" ? { ok: true, result: { description: (kept.setMyDescription || {}).description || "" } }
+      : method === "getMyShortDescription" ? { ok: true, result: { short_description: (kept.setMyShortDescription || {}).short_description || "" } }
+      : method === "sendMessage" || method === "copyMessage" ? { ok: true, result: { message_id: tgNext++ } }
+      : { ok: true, result: true };
+    res.writeHead(answer.ok ? 200 : answer.error_code, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(answer));
+  });
+});
 
 // `ip` stands in for the client's address: the local Worker keeps a
 // CF-Connecting-IP header it is given.
@@ -43,9 +78,10 @@ before(async () => {
   assert.equal(k.status, 0, k.stdout + k.stderr);
   // A server left over from an earlier run would answer with its old data.
   assert.equal(await fetch(BASE + "/api/v1/public").then(() => true, () => false), false, `something already listens on port ${PORT}`);
-  proc = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--persist-to", dir,
+  await new Promise((resolve) => tgServer.listen(TG_PORT, "127.0.0.1", resolve));
+  proc = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--persist-to", dir, "--test-scheduled",
     "--var", "TOKEN_SECRET:" + "t".repeat(40), "--var", "ADMIN_USER:" + ADMIN.username, "--var", "ADMIN_PASSWORD:" + ADMIN.password,
-    "--var", "COMPANY_NAME:Example Co"], { stdio: ["ignore", "pipe", "pipe"], detached: true });
+    "--var", "COMPANY_NAME:Example Co", "--var", "TELEGRAM_API:http://127.0.0.1:" + TG_PORT], { stdio: ["ignore", "pipe", "pipe"], detached: true });
   let log = "";
   proc.stdout.on("data", (d) => (log += d));
   proc.stderr.on("data", (d) => (log += d));
@@ -59,6 +95,7 @@ before(async () => {
 });
 
 after(() => {
+  tgServer.close();
   // wrangler starts workerd as a child: stop the whole group.
   if (proc) try { process.kill(-proc.pid, "SIGTERM"); } catch {}
   setTimeout(() => { rmSync(dir, { recursive: true, force: true }); process.exit(); }, 500).unref();
@@ -605,6 +642,202 @@ test("copies older than the manifest's min_version are refused; the website neve
   assert.equal((await login({ "X-Albatross-Client": "web" })).status, 401, "the website is never refused");
   assert.equal((await put({ min_version: "" })).status, 200);
   assert.equal((await login({})).status, 401, "no minimum, no refusal");
+});
+
+test("support chat: bad requests are refused, only the websites may read the answers, and a model that is away is no error", async () => {
+  const say = (text) => ({ messages: [{ role: "user", content: text }] });
+  assert.equal((await call("POST", "support/chat", { body: {} })).status, 400);
+  assert.equal((await call("POST", "support/chat", { body: { messages: "hello" } })).status, 400);
+  assert.equal((await call("POST", "support/chat", { body: { messages: [{ role: "assistant", content: "hi" }] } })).status, 400);
+  // The model is not there when the Worker runs locally: the visitor still gets an answer.
+  const r = await call("POST", "support/chat", { body: say("I can't connect"), ip: "203.0.113.7", headers: { Origin: "https://albatrossvpn.online" } });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.reply && r.body.handoff === true && r.body.degraded === true, JSON.stringify(r.body));
+  assert.equal(r.headers.get("access-control-allow-origin"), "https://albatrossvpn.online");
+  const other = await call("POST", "support/chat", { body: say("hello"), ip: "203.0.113.7", headers: { Origin: "https://example.com" } });
+  assert.equal(other.headers.get("access-control-allow-origin"), null);
+  const pre = await call("OPTIONS", "support/chat", { headers: { Origin: "https://www.albatrossvpn.online" } });
+  assert.equal(pre.status, 204);
+  assert.equal(pre.headers.get("access-control-allow-origin"), "https://www.albatrossvpn.online");
+});
+
+test("support chat: one address gets forty messages an hour", async () => {
+  const ip = "203.0.113.50";
+  let last;
+  for (let i = 0; i < 41; i++) last = await call("POST", "support/chat", { body: { messages: [{ role: "user", content: "hello " + i }] }, ip });
+  assert.equal(last.status, 429);
+  assert.ok(last.body.reply && last.body.limited === true);
+});
+
+test("support close: the summary address is the administrator's to set, a conversation is mailed once", async () => {
+  assert.equal((await call("PUT", "admin/settings", { token: admin, body: { support_notify_to: "not an address" } })).status, 400);
+  const saved = await call("PUT", "admin/settings", { token: admin, body: { support_notify_to: "owner@example.com" } });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.support_notify_to, "owner@example.com");
+  const talk = {
+    messages: [{ role: "user", content: "The VPN does not connect on Android" }, { role: "assistant", content: "Update the app." }, { role: "user", content: "still nothing" }],
+    sid: "abcdef123456", contact: "@someone", page: "/account",
+  };
+  assert.equal((await call("POST", "support/close", { body: {} })).status, 400);
+  assert.equal((await call("POST", "support/close", { body: { messages: [{ role: "assistant", content: "hello" }] } })).status, 400);
+  const first = await call("POST", "support/close", { body: talk, ip: "203.0.113.9" });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.ok, true);
+  const again = await call("POST", "support/close", { body: talk, ip: "203.0.113.9" });
+  assert.equal(again.body.duplicate, true);
+  // The administrator is told what became of the mail (locally the mail service is a stand-in that takes it), and cannot write that line.
+  let status = "";
+  for (let i = 0; i < 40 && !status; i++) {
+    status = (await call("GET", "admin/settings", { token: admin })).body.support_mail_status;
+    if (!status) await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.match(status, /^(Sent|Not sent|Failed), \d{4}-\d\d-\d\d \d\d:\d\d UTC/);
+  const forged = await call("PUT", "admin/settings", { token: admin, body: { support_mail_status: "Sent, all fine" } });
+  assert.equal(forged.status, 200);
+  assert.equal(forged.body.support_mail_status, status);
+  assert.equal((await call("PUT", "admin/settings", { token: admin, body: { support_notify_to: "" } })).status, 200);
+});
+
+// A local D1 statement run through wrangler, for what a test cannot do through the API (moving time).
+function sql(command) {
+  const r = spawnSync("npx", ["wrangler", "d1", "execute", "DB", "--local", "--persist-to", dir, "--json", "--command", command], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  return JSON.parse(r.stdout)[0].results;
+}
+
+test("telegram: the administrator connects a bot with its token; Telegram's refusal and a malformed token are told", async () => {
+  const put = (b) => call("PUT", "admin/settings", { token: admin, body: b });
+  assert.equal((await put({ telegram_bot_token: "not a token" })).status, 400);
+  const refused = await put({ telegram_bot_token: "987654321:" + "B".repeat(35) });
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /did not accept this token: Unauthorized/);
+  // A setting that is wrong stops everything: the bot is not connected on the side.
+  tgCalls.length = 0;
+  assert.equal((await put({ default_tier: "nonsense", telegram_bot_token: TG_TOKEN })).status, 400);
+  assert.equal(tgCalls.length, 0, "Telegram was not even asked");
+  const ok = await put({ telegram_bot_token: TG_TOKEN });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.telegram_bot_username, "MockSupportBot");
+  assert.match(ok.body.telegram_pair_code, /^[A-HJ-NP-Z2-9]{8}$/, "the panel shows the code that pairs the team's chat");
+  assert.equal(ok.body.telegram_bot_token, undefined, "the token is never given back");
+  assert.equal(ok.body.telegram_webhook_url, undefined, "nor is what the service keeps for itself");
+  const checked = await put({ telegram_check: true });
+  assert.match(checked.body.telegram_check, /^@MockSupportBot is reachable; its webhook is set and 0 update\(s\) are waiting\. No errors\. Its menu and texts are set\.$/);
+  const hook = tgCalls.filter((c) => c.method === "setWebhook").pop();
+  assert.match(hook.url, /^https?:\/\/[^/]+\/api\/v1\/telegram$/, "Telegram is told this service's own address");
+  assert.match(hook.secret_token, /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(tgCalls.some((c) => c.method === "setMyCommands" && c.commands.some((m) => m.command === "human")));
+  // The websites learn the bot's name, and the account page's support link leads to it.
+  const info = await call("GET", "support/info", { headers: { Origin: "https://albatrossvpn.online" } });
+  assert.deepEqual(info.body, { telegram: "MockSupportBot", stars: null });
+  assert.equal(info.headers.get("access-control-allow-origin"), "https://albatrossvpn.online");
+  assert.equal((await call("GET", "public")).body.support_url, "https://t.me/MockSupportBot");
+  // The panel cannot write what the service writes.
+  const forged = await put({ telegram_bot_username: "Evil", telegram_owner_chat: "1" });
+  assert.equal(forged.body.telegram_bot_username, "MockSupportBot");
+  assert.equal(forged.body.telegram_owner_chat, "");
+});
+
+test("telegram: the webhook answers only Telegram, a person gets the menu, the team is paired with the code, and a quiet chat is summarized by the schedule", async () => {
+  const hook = tgCalls.filter((c) => c.method === "setWebhook").pop();
+  const settings = (await call("GET", "admin/settings", { token: admin })).body;
+  const post = (update, secret = hook.secret_token) => fetch(BASE + "/api/v1/telegram", { method: "POST", headers: { "Content-Type": "application/json", ...(secret ? { "X-Telegram-Bot-Api-Secret-Token": secret } : {}) }, body: JSON.stringify(update) });
+  let id = 5000;
+  const said = (chat, text, extra = {}) => ({ update_id: ++id, message: { message_id: id, from: { id: chat, first_name: "Sara", username: "sara_tg" }, chat: { id: chat, type: "private" }, text, ...extra } });
+  const pressed = (chat, data) => ({ update_id: ++id, callback_query: { id: `cb${id}`, from: { id: chat, first_name: "Sara", username: "sara_tg" }, data, message: { message_id: 77, chat: { id: chat, type: "private" } } } });
+  assert.equal((await post(said(42, "/start"), "")).status, 401);
+  assert.equal((await post(said(42, "/start"), "x".repeat(43))).status, 401);
+  assert.equal((await post({ hello: "world" })).status, 400);
+  tgCalls.length = 0;
+  assert.equal((await post(said(42, "/start"))).status, 200);
+  const sent = async (chat, tries = 40) => {
+    for (let i = 0; i < tries; i++) {
+      const m = tgCalls.filter((c) => c.method === "sendMessage" && c.chat_id === chat).pop();
+      if (m) return m;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return undefined;
+  };
+  // A person is asked for a language first, in all of them; the choice turns the picker into the menu.
+  const picker = await sent(42);
+  assert.ok(picker && picker.text.startsWith("🌐 <b>Choose your language</b>") && picker.reply_markup.inline_keyboard.flat().some((b) => b.callback_data === "l:en"), JSON.stringify(picker));
+  assert.equal((await post(pressed(42, "l:en"))).status, 200);
+  const edited = async (chat, tries = 40) => {
+    for (let i = 0; i < tries; i++) {
+      const m = tgCalls.filter((c) => c.method === "editMessageText" && c.chat_id === chat).pop();
+      if (m) return m;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return undefined;
+  };
+  const menu = await edited(42);
+  assert.ok(menu && menu.text.includes("Albatross Support") && menu.reply_markup.inline_keyboard.flat().length === 7, JSON.stringify(menu));
+  assert.equal(sql("SELECT COUNT(*) AS n FROM tg_langs")[0].n, 1, "the choice is kept");
+  // Pairing: the wrong code is refused, the right one makes this chat the team's.
+  await post(said(900, "/pair NOTTHECODE"));
+  assert.match((await sent(900)).text, /not right/);
+  tgCalls.length = 0;
+  await post(said(900, `/pair ${settings.telegram_pair_code}`));
+  assert.match((await sent(900)).text, /Paired/);
+  const paired = (await call("GET", "admin/settings", { token: admin })).body;
+  assert.equal(paired.telegram_owner_chat, "900");
+  assert.equal(paired.telegram_pair_code, "", "a code works once");
+  // A person opens a ticket: the team's chat gets it.
+  tgCalls.length = 0;
+  await post(said(42, "/human"));
+  const card = await sent(900);
+  assert.ok(card.text.includes("Ticket #1001") && card.reply_markup.inline_keyboard[0].length === 3, JSON.stringify(card));
+  assert.deepEqual(sql("SELECT mode, ticket_id FROM tg_users WHERE chat_id = 42"), [{ mode: "ticket", ticket_id: 1001 }]);
+  // A chat that went quiet is ended by the every-minute schedule; a ticket's chat stays.
+  await post(said(43, "/start"));
+  await sent(43);
+  await post(pressed(43, "l:en"));
+  await edited(43);
+  await post(said(43, "How do I install on Windows?"));
+  await new Promise((r) => setTimeout(r, 1500));
+  sql("UPDATE tg_users SET updated = 1000");
+  const run = await fetch(BASE + "/__scheduled?cron=" + encodeURIComponent("* * * * *"));
+  assert.equal(run.status, 200);
+  for (let i = 0; i < 50 && sql("SELECT chat_id FROM tg_users WHERE chat_id = 43").length; i++) await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(sql("SELECT chat_id FROM tg_users WHERE chat_id = 43"), [], "the quiet chat was ended and forgotten");
+  assert.equal(sql("SELECT mode FROM tg_users WHERE chat_id = 42")[0].mode, "ticket");
+  // Disconnecting forgets the bot and the chats; the webhook then answers nothing.
+  tgCalls.length = 0;
+  const off = await call("PUT", "admin/settings", { token: admin, body: { telegram_bot_token: "" } });
+  assert.equal(off.status, 200);
+  assert.equal(off.body.telegram_bot_username, "");
+  assert.ok(tgCalls.some((c) => c.method === "deleteWebhook"));
+  assert.equal((await post(said(42, "/start"))).status, 404);
+  assert.deepEqual(sql("SELECT chat_id FROM tg_users"), []);
+  assert.deepEqual((await call("GET", "support/info")).body, { telegram: "", stars: null });
+});
+
+test("stars: the settings are checked, the panel shows the packages they make, and the websites hear of the store only while it is on sale and there is a bot", async () => {
+  const put = (b) => call("PUT", "admin/settings", { token: admin, body: b });
+  const first = (await call("GET", "admin/settings", { token: admin })).body;
+  assert.equal(first.stars_enabled, "0", "selling starts off");
+  assert.deepEqual(first.stars_packages.map((p) => [p.gb, p.stars, p.plan]), [[5, 15, "Bronze"], [10, 29, "Silver"], [25, 72, "Silver"], [50, 143, "Silver"], [100, 285, "Gold"]], "10,000 toman a GB, 270,000 a dollar, 13 dollars per 1,000 Stars");
+  assert.equal((await call("GET", "public")).body.stars, null);
+  for (const bad of [{ stars_price_toman: "0" }, { stars_usd_toman: "5" }, { stars_usd_per_1000: "500" }, { stars_valid_days: "99999" }, { stars_price_toman: "abc" }]) assert.equal((await put(bad)).status, 400, JSON.stringify(bad));
+  // On, with no bot to sell in: the websites hear nothing.
+  assert.equal((await put({ stars_enabled: true })).body.stars_enabled, "1");
+  assert.equal((await call("GET", "public")).body.stars, null);
+  // With a bot: the packages, in the bot's name, for the websites (the account pages and, with their CORS, the public site).
+  assert.equal((await put({ telegram_bot_token: TG_TOKEN })).status, 200);
+  const on = (await call("GET", "public")).body.stars;
+  assert.equal(on.bot, "MockSupportBot");
+  assert.equal(on.days, 30);
+  assert.deepEqual(on.packages[1], { gb: 10, stars: 29, plan: "Silver", devices: 2 });
+  const shown = await call("GET", "support/info", { headers: { Origin: "https://albatrossvpn.online" } });
+  assert.deepEqual(shown.body.stars, on);
+  assert.equal(shown.body.telegram, "MockSupportBot");
+  // The rates make the prices.
+  const cheaper = await put({ stars_usd_toman: "540000" });
+  assert.equal(cheaper.body.stars_packages[1].stars, 15);
+  assert.equal((await call("GET", "public")).body.stars.packages[1].stars, 15);
+  await put({ stars_usd_toman: "270000", stars_enabled: false });
+  assert.equal((await call("GET", "public")).body.stars, null);
+  await put({ telegram_bot_token: "" });
 });
 
 test("too many failed administrator logins lock the sign-in for a while", async () => {

@@ -7,6 +7,9 @@ import {
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
+import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
+import { SALES_DEFAULTS, SALES_RANGE, catalog as salesCatalog, config as salesConfig } from "./sales.js";
+import { SWEEP_CRON, check as telegramCheck, connect as telegramConnect, disconnect as telegramDisconnect, heal as telegramHeal, repair as telegramRepair, sweep as telegramSweep, webhook as telegramWebhook } from "./telegram.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -22,6 +25,11 @@ const DEFAULTS = {
   plan_features: "", // which plan brings each feature, where it differs from FEATURES (JSON)
   download_windows: "",
   download_android: "",
+  support_notify_to: "", // where the support chat's summaries are mailed
+  support_mail_status: "", // what the last try to mail one came to (written by the service, never by the panel)
+  telegram_bot_username: "", // the support bot's name, once its token is set (read-only here)
+  telegram_owner_chat: "", // the team's chat, once paired with /pair (read-only here)
+  ...SALES_DEFAULTS, // selling data with Telegram Stars (sales.js)
 };
 
 class HttpError extends Error {
@@ -50,28 +58,32 @@ function randomUsernameSuffix() {
 }
 
 export default {
-  // Hourly: users' reports about servers, summed for the collector.
+  // Every minute: the Telegram bot's chats that went quiet.
+  // Hourly: users' reports about servers, summed for the collector, and a look at the bot's webhook.
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(publishCrowdServers(env));
+    if (event.cron === SWEEP_CRON) ctx.waitUntil(telegramSweep(env, supportKit(env)));
+    else ctx.waitUntil(Promise.allSettled([publishCrowdServers(env), telegramHeal(env)]));
   },
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/list/")) return mirror(request, url, env);
     if (url.pathname.startsWith("/dl/")) return download(request, url, env);
     if (url.pathname.startsWith("/sub/")) return subscription(request, url, env);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+    // The websites' support chat is read from the website's own origin.
+    const cors = url.pathname.startsWith("/api/v1/support/") ? (r) => supportCors(request, r) : (r) => r;
     try {
       if (!env.TOKEN_SECRET || env.TOKEN_SECRET.length < 24) throw new HttpError(503, "The service is not configured yet.");
-      return await route(request, env, url);
+      return cors(await route(request, env, url, ctx));
     } catch (e) {
-      if (e instanceof HttpError) return json({ error: e.message }, e.status);
+      if (e instanceof HttpError) return cors(json({ error: e.message }, e.status));
       console.error(e && e.stack ? e.stack : e);
-      return json({ error: "Something went wrong. Try again." }, 500);
+      return cors(json({ error: "Something went wrong. Try again." }, 500));
     }
   },
 };
 
-async function route(request, env, url) {
+async function route(request, env, url, ctx) {
   const path = url.pathname.replace(/^\/api\/v1\/?/, "");
   const key = `${request.method} ${path}`;
   const admin = path.match(/^admin\/users\/(\d+)(?:\/([a-z-]+))?$/);
@@ -101,6 +113,12 @@ async function route(request, env, url) {
     case "POST stats": return crowdReport(request, env);
     case "POST admin/crowd/publish": return adminPublishCrowd(request, env);
     case "GET stats": return crowdSummary(request, env, url);
+    case "POST telegram": return telegramWebhook(request, env, supportKit(env), ctx);
+    case "GET support/info": return supportInfo(env);
+    case "POST support/chat": return supportChat(request, env, supportKit(env));
+    case "POST support/close": return supportClose(request, env, supportKit(env), ctx);
+    case "OPTIONS support/chat":
+    case "OPTIONS support/close": return new Response(null, { status: 204 });
   }
   const list = path.match(/^admin\/list\/(.+)$/);
   if (list && request.method === "PUT") return adminPutList(request, env, list[1]);
@@ -186,6 +204,26 @@ async function count(env, key, window) {
 
 const forget = (env, key) => env.DB.prepare("DELETE FROM attempts WHERE key = ?1").bind(key).run();
 
+/** GET /support/info: what the websites' chat shows besides itself (the Telegram bot, once there is one). */
+async function supportInfo(env) {
+  const s = await settings(env);
+  return json({ telegram: s.telegram_bot_username || "", stars: starsInfo(s, await salesConfig(env)) });
+}
+
+// What the support chat (support.js) takes from here: answers, rate limits,
+// and who is signed in, for the mail to the owner.
+const supportKit = (env) => ({
+  json,
+  blocked,
+  count,
+  tag: (request) => clientTag(request, env),
+  account: async (request) => {
+    if (!request.headers.get("Authorization")) return "";
+    const { user } = await authUser(request, env);
+    return `${user.username} (${tierOf(user.tier)})`;
+  },
+});
+
 const tooMany = () => new HttpError(429, "Too many attempts. Wait a few minutes and try again.");
 
 /** Rate-limit keys for checking the password of `name` from this request's address. */
@@ -240,6 +278,7 @@ const DUMMY = "pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
 async function publicInfo(env) {
   const s = await settings(env);
+  const shop = await salesConfig(env);
   return json({
     name: env.SITE_NAME || "Albatross",
     company: env.COMPANY_NAME || "",
@@ -247,15 +286,22 @@ async function publicInfo(env) {
     contact: env.CONTACT_EMAIL || "",
     // Where VIP accounts reach support directly (a chat link), besides the
     // contact address.
-    support_url: env.SUPPORT_URL || "",
+    support_url: env.SUPPORT_URL || (s.telegram_bot_username ? `https://t.me/${s.telegram_bot_username}` : ""),
     signup_open: s.signup_open === "1",
     turnstile_sitekey: env.TURNSTILE_SITEKEY || "",
     downloads: { windows: s.download_windows, android: s.download_android },
     tiers: TIERS,
     features: FEATURES,
     plans: planFeatures(s.plan_features),
+    stars: starsInfo(s, shop),
   });
 }
+
+/** Data on sale in the Telegram bot, for the websites' "how to buy": null while it is not (or there is no bot to sell in). */
+const starsInfo = (s, shop) =>
+  shop.enabled && s.telegram_bot_username
+    ? { bot: s.telegram_bot_username, days: shop.days, packages: salesCatalog(shop).map(({ gb, stars, plan, devices }) => ({ gb, stars, plan, devices })) }
+    : null;
 
 // ---------- Encrypted DNS for Apple devices ----------
 //
@@ -894,9 +940,16 @@ async function adminDelete(request, env, id) {
   return json({ ok: true });
 }
 
+/** The settings, and the code that pairs the team's Telegram chat while there is a bot and no chat yet. */
+async function withPairing(env) {
+  const out = await settings(env);
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'telegram_pair_code'").first();
+  return { ...out, telegram_pair_code: out.telegram_bot_username && row ? row.value : "", stars_packages: salesCatalog(await salesConfig(env)) };
+}
+
 async function adminSettings(request, env) {
   await authAdmin(request, env);
-  return json(await settings(env));
+  return json(await withPairing(env));
 }
 
 async function adminSaveSettings(request, env) {
@@ -925,12 +978,34 @@ async function adminSaveSettings(request, env) {
       v = JSON.stringify(planFeatures(c));
     } else if (k.startsWith("download_")) {
       if (v && !/^https:\/\//.test(v)) throw new HttpError(400, "Download links must start with https://");
+    } else if (k === "support_mail_status" || k === "telegram_bot_username" || k === "telegram_owner_chat") {
+      continue;
+    } else if (k === "support_notify_to") {
+      if (v && !/^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(v)) throw new HttpError(400, "That is not an email address.");
+    } else if (k === "stars_enabled") {
+      v = b[k] === true || v === "1" ? "1" : "0";
+    } else if (Object.hasOwn(SALES_RANGE, k)) {
+      const [lo, hi] = SALES_RANGE[k];
+      if (!/^\d{1,16}$/.test(v) || Number(v) < lo || Number(v) > hi) throw new HttpError(400, `${k} is a number from ${lo} to ${hi}.`);
     } else if (!/^\d{1,16}$/.test(v)) throw new HttpError(400, `Bad value for ${k}.`);
     stmts.push(env.DB.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2").bind(k, v));
   }
+  // Everything else is valid: now the Telegram bot. A token connects it (and says so if Telegram refuses it, before anything is saved), an empty one disconnects it.
+  let warning = "";
+  if (b.telegram_bot_token !== undefined) {
+    const token = String(b.telegram_bot_token).trim();
+    if (!token) await telegramDisconnect(env);
+    else {
+      const linked = await telegramConnect(env, request, token);
+      if (linked.error) throw new HttpError(400, linked.error);
+      warning = linked.warning || "";
+    }
+  }
+  if (b.telegram_pair_reset === true) await telegramRepair(env);
+  const checked = b.telegram_check === true ? await telegramCheck(env) : "";
   if (stmts.length) await env.DB.batch(stmts);
   plansCache = { at: 0, plans: null };
-  return json(await settings(env));
+  return json({ ...(await withPairing(env)), ...(checked ? { telegram_check: checked } : {}), ...(warning ? { telegram_warning: warning } : {}) });
 }
 
 // ---------- Crowd learning ----------

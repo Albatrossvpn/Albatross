@@ -18,6 +18,7 @@
 <link rel="preload" href="/fonts/InterVariable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/fonts/manrope-800.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/support.css">
 <meta name="theme-color" content="#ffffff">
 </head>
 <body>
@@ -219,7 +220,21 @@
         <p class="also">Everything in Gold, and:</p>
         <ul><li><b>Our private servers first</b>: your connection prefers servers public lists do not crowd</li><li><b>Direct support</b> from our team</li><li>Share your connection with every device on your Wi-Fi</li></ul></div>
     </div>
-    <p class="note">Your plan comes with your account. To move up, ask for the plan where you got your account: your account, its data and its devices carry over.</p>
+    <div class="buy" id="buy" hidden>
+      <span class="eyebrow">How to buy</span>
+      <h3>Buy data with Telegram Stars.</h3>
+      <p class="lead">Pick a package in our Telegram bot and pay in Stars. Your account and its password arrive in the same chat, at once. The plan comes with the size: 10 GB and more is Silver, 100 GB and more is Gold.</p>
+      <ol>
+        <li><b>Open the bot</b> with the button below and tap Start.</li>
+        <li><b>Tap Buy data</b>, choose a package, and choose <b>a new account</b>, or add the data to an account you already have.</li>
+        <li><b>Agree to the terms and pay with Telegram Stars.</b> Telegram takes the payment: we never see your payment details, and we need no email or phone number.</li>
+        <li><b>Get your account.</b> The username and password come in the chat, and a recharge shows what the account has now. Sign in to the app and connect.</li>
+      </ol>
+      <div class="packs" id="buy-packs"></div>
+      <p><a class="btn primary" id="buy-link" href="#plans">Buy in Telegram</a></p>
+      <p class="small">Each package is valid <span id="buy-days">a while</span>. Forgot the password of an account you bought there? Send <code>/password</code> to the bot from the same Telegram account that bought it. The bot also has the terms (<code>/terms</code>) and payment support (<code>/paysupport</code>).</p>
+    </div>
+    <p class="note">Your plan comes with your data. To move up, add data in the bot, or ask for the plan where you got your account: your account, its data and its devices carry over.</p>
   </div>
 </section>
 
@@ -274,6 +289,8 @@
         <li>Name lookups for the sites you visit go through the tunnel.</li>
         <li>The account service receives a username, a password at sign-in, and counts of bytes and seconds. It never receives the sites you visit.</li>
         <li>Sharing what works on your network is off unless you turn on “Learn from other users”, and it sends counts only: no server or device addresses, no username, no install number.</li>
+        <li>If you buy data in the Telegram bot, Telegram takes the payment in Stars and we never see your payment details. We keep the payment's record (your Telegram number, the package, the account) for two years, for refunds, and the account remembers its buyer's number so that only that Telegram account can ask for a new password.</li>
+        <li>The support chat and the Telegram bot are answered by an AI assistant. When a chat ends, the conversation and a summary go to our team by email; nothing else of it is kept, except that the bot holds a chat until about half an hour after your last message, and a ticket until it is closed. Never write a password in either.</li>
       </ul></div>
       
     </div>
@@ -345,5 +362,6 @@
 </footer>
 
 <script src="/site.js"></script>
+<script src="/support.js" data-api="https://accounts.albatrossvpn.online" defer></script>
 </body>
 </html>

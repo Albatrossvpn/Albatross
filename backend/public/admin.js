@@ -266,6 +266,10 @@ $("#settings").addEventListener("click", async () => {
   $("#t-tier").value = s.default_tier || "auto";
   $("#t-win").value = s.download_windows;
   $("#t-and").value = s.download_android;
+  $("#t-support").value = s.support_notify_to || "";
+  $("#t-support-status").textContent = s.support_mail_status ? `Last summary: ${s.support_mail_status}.` : "";
+  showTelegram(s);
+  showStars(s);
   // Which plan brings each feature: the saved choice over the features' own.
   let chosen = {};
   try { chosen = JSON.parse(s.plan_features || "{}"); } catch {}
@@ -274,9 +278,56 @@ $("#settings").addEventListener("click", async () => {
   $("#t-error").textContent = "";
   $("#settings-dialog").showModal();
 });
+
+// ---------- The Telegram bot ----------
+
+// What the bot is doing, and what is left to set up: the token, then pairing the team's chat.
+function showTelegram(s) {
+  const bot = s.telegram_bot_username;
+  $("#t-tg").value = "";
+  $("#t-tg-actions").classList.toggle("hidden", !bot);
+  const status = $("#t-tg-status");
+  status.textContent = "";
+  if (!bot) { status.textContent = "Not connected."; return; }
+  status.append(`Connected as @${bot}. `);
+  if (s.telegram_owner_chat) status.append("Tickets arrive in your Telegram chat, and you answer by replying to them. ");
+  // A code, whenever there is one: to pair the first chat, or another one in its place.
+  if (s.telegram_pair_code) {
+    status.append(s.telegram_owner_chat ? "To move the tickets to another chat, send " : "To receive tickets in Telegram, open the bot from the account or group that should get them and send ");
+    const code = document.createElement("code");
+    code.textContent = `/pair ${s.telegram_pair_code}`;
+    status.append(code, " there. The code works once.");
+  }
+}
+// Selling data with Stars: the settings, and the packages they make.
+function showStars(s) {
+  $("#t-stars").checked = s.stars_enabled === "1";
+  $("#t-stars-price").value = s.stars_price_toman;
+  $("#t-stars-usd").value = s.stars_usd_toman;
+  $("#t-stars-worth").value = s.stars_usd_per_1000;
+  $("#t-stars-days").value = s.stars_valid_days;
+  const list = (s.stars_packages || []).map((p) => `${p.gb} GB = ${p.stars} ⭐ (${p.plan})`).join(", ");
+  $("#t-stars-preview").textContent = list ? `Packages at these prices: ${list}. Saved settings make these; the bot shows them once they are saved.` : "";
+}
+$("#t-tg-off").addEventListener("click", async () => {
+  if (!confirm("Disconnect the Telegram bot? Open tickets and chats are forgotten.")) return;
+  const s = await guard(() => call("PUT", "settings", { telegram_bot_token: "" }), $("#t-error"));
+  if (s) { showTelegram(s); toast("The bot is disconnected."); }
+});
+$("#t-tg-check").addEventListener("click", async () => {
+  const s = await guard(() => call("PUT", "settings", { telegram_check: true }), $("#t-error"));
+  if (!s) return;
+  showTelegram(s);
+  $("#t-tg-status").append(` ${s.telegram_check || ""}`);
+});
+$("#t-tg-pair").addEventListener("click", async () => {
+  const s = await guard(() => call("PUT", "settings", { telegram_pair_reset: true }), $("#t-error"));
+  if (s) { showTelegram(s); toast("A new pairing code is ready."); }
+});
 $("#t-cancel").addEventListener("click", () => $("#settings-dialog").close());
 $("#settings-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  const connecting = !!$("#t-tg").value.trim();
   const r = await guard(() => call("PUT", "settings", {
     signup_open: $("#t-signup").checked,
     default_quota_bytes: String(Math.round(num($("#t-quota").value) * GB)),
@@ -286,9 +337,28 @@ $("#settings-form").addEventListener("submit", async (e) => {
     default_tier: $("#t-tier").value,
     download_windows: $("#t-win").value.trim(),
     download_android: $("#t-and").value.trim(),
+    support_notify_to: $("#t-support").value.trim(),
+    stars_enabled: $("#t-stars").checked,
+    stars_price_toman: String(Math.round(num($("#t-stars-price").value))),
+    stars_usd_toman: String(Math.round(num($("#t-stars-usd").value))),
+    stars_usd_per_1000: String(Math.round(num($("#t-stars-worth").value))),
+    stars_valid_days: String(Math.round(num($("#t-stars-days").value))),
+    // A token connects the bot (and Telegram's refusal shows here); left empty, the bot stays as it is.
+    ...($("#t-tg").value.trim() ? { telegram_bot_token: $("#t-tg").value.trim() } : {}),
     plan_features: Object.fromEntries([...document.querySelectorAll("#t-features select")].map((el) => [el.dataset.feature, el.value])),
   }), $("#t-error"));
-  if (r) { $("#settings-dialog").close(); toast("Saved."); }
+  if (!r) return;
+  // A bot that was just connected stays on screen: its pairing code is the next step.
+  if (connecting) {
+    showTelegram(r);
+    showStars(r);
+    // Telegram may refuse the bot's menu or texts: the bot works, and the panel says what to do.
+    if (r.telegram_warning) $("#t-tg-status").append(` ${r.telegram_warning}`);
+    toast("Saved. The bot is connected.");
+    return;
+  }
+  $("#settings-dialog").close();
+  toast("Saved.");
 });
 
 // ---------- List controls ----------

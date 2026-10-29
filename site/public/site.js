@@ -48,6 +48,33 @@
     });
     if (v) document.querySelectorAll("[data-ver]").forEach(function (e) { e.textContent += " · version " + v; });
   }
+  // How to buy: the packages on sale in the Telegram bot, with their prices, from the account
+  // service (they follow its settings). The block is shown only while data is on sale.
+  var buy = document.getElementById("buy");
+  if (buy) {
+    fetch("https://accounts.albatrossvpn.online/api/v1/support/info").then(function (r) { return r.json(); }).then(function (j) {
+      var st = j && j.stars;
+      if (!st || !/^[A-Za-z0-9_]{5,32}$/.test(st.bot || "") || !st.packages || !st.packages.length) return;
+      var packs = document.getElementById("buy-packs");
+      st.packages.forEach(function (p) {
+        var d = document.createElement("div");
+        d.className = "pack";
+        var gb = document.createElement("b");
+        gb.textContent = (+p.gb) + " GB";
+        var stars = document.createElement("span");
+        stars.textContent = "\u2B50 " + (+p.stars);
+        var plan = document.createElement("small");
+        plan.textContent = String(p.plan || "").slice(0, 20);
+        d.appendChild(gb);
+        d.appendChild(stars);
+        d.appendChild(plan);
+        packs.appendChild(d);
+      });
+      document.getElementById("buy-days").textContent = st.days > 0 ? (+st.days) + " days" : "without an end date";
+      document.getElementById("buy-link").href = "https://t.me/" + st.bot + "?start=buy";
+      buy.hidden = false;
+    }).catch(function () {});
+  }
   document.querySelectorAll(".menu-panel a").forEach(function (a) {
     a.addEventListener("click", function () { a.closest("details").open = false; });
   });
