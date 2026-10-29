@@ -275,10 +275,22 @@ async function ownerAddress(env) {
   return isEmail(to) ? to : "";
 }
 
+/** What the last attempt to mail a summary came to, for the administrator's Settings (and whoever sets the mail up). */
+async function noteMail(env, text) {
+  try {
+    await env.DB.prepare("INSERT INTO settings (key, value) VALUES ('support_mail_status', ?1) ON CONFLICT (key) DO UPDATE SET value = ?1").bind(text.slice(0, 300)).run();
+  } catch (e) {
+    console.warn("support status:", e && e.message ? e.message : e);
+  }
+}
+
+const stamp = () => new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC";
+
 async function mailSummary(env, { messages, contact, meta }) {
   const to = await ownerAddress(env);
   if (!to || !env.EMAIL) {
     console.warn("support: no address or no mail binding; the summary is not sent");
+    await noteMail(env, `Not sent, ${stamp()}: ${to ? "this service has no mail binding" : "no address is set in Settings"}`);
     return false;
   }
   let summary = "";
@@ -289,7 +301,13 @@ async function mailSummary(env, { messages, contact, meta }) {
   }
   const { subject, text } = composeEmail({ summary: summary || fallbackSummary(messages), messages, contact, meta });
   const from = isEmail(env.CONTACT_EMAIL) ? env.CONTACT_EMAIL : "support@albatrossvpn.online";
-  await env.EMAIL.send({ from: { email: from, name: "Albatross support bot" }, to, subject, text });
+  try {
+    await env.EMAIL.send({ from: { email: from, name: "Albatross support bot" }, to, subject, text });
+  } catch (e) {
+    await noteMail(env, `Failed, ${stamp()}: ${oneLine(e && e.message ? e.message : e, 200)}`);
+    throw e;
+  }
+  await noteMail(env, `Sent, ${stamp()}`);
   return true;
 }
 
@@ -316,7 +334,7 @@ export async function close(request, env, kit, ctx) {
     country: request.headers.get("CF-IPCountry") || "",
     page: oneLine(b.page, 80).replace(/[^\w\-./#?=&]/g, ""),
     account,
-    time: new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC",
+    time: stamp(),
   };
   const work = mailSummary(env, { messages, contact, meta }).catch((e) => console.error("support mail:", e && e.stack ? e.stack : e));
   if (ctx && ctx.waitUntil) ctx.waitUntil(work);

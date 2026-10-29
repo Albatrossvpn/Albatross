@@ -267,6 +267,7 @@ $("#settings").addEventListener("click", async () => {
   $("#t-win").value = s.download_windows;
   $("#t-and").value = s.download_android;
   $("#t-support").value = s.support_notify_to || "";
+  $("#t-support-status").textContent = s.support_mail_status ? `Last summary: ${s.support_mail_status}.` : "";
   // Which plan brings each feature: the saved choice over the features' own.
   let chosen = {};
   try { chosen = JSON.parse(s.plan_features || "{}"); } catch {}

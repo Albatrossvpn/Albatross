@@ -28,7 +28,8 @@ function env({ answer = "Update the app first.", fail = false, notify = "owner@e
     sent: [],
     CONTACT_EMAIL: "support@albatrossvpn.online",
     AI: { run: async (model, input) => { e.asked.push({ model, input }); if (fail) throw new Error("the model is away"); return { response: answer }; } },
-    DB: { prepare: () => ({ first: async () => (notify ? { value: notify } : null) }) },
+    wrote: [],
+    DB: { prepare: () => ({ first: async () => (notify ? { value: notify } : null), bind: (v) => ({ run: async () => void e.wrote.push(v) }) }) },
   };
   if (mail) e.EMAIL = { send: async (m) => void e.sent.push(m) };
   return e;
@@ -153,6 +154,7 @@ test("close: the owner is mailed a plain-text summary with the conversation, onc
   assert.ok(!m.text.includes("<script"), "the page's address is cleaned");
   // The model was asked for the summary, not to answer.
   assert.ok(e.asked[0].input.messages[0].content.includes("RESOLVED or NEEDS FOLLOW-UP"));
+  assert.match(e.wrote[0], /^Sent, \d{4}-\d\d-\d\d \d\d:\d\d UTC$/, "the administrator can see that it went out");
   // The page saying the conversation is over again changes nothing.
   const again = await close(post(talk), e, kit({ spent: ["support:sid:"] }));
   assert.deepEqual(await again.json(), { ok: true, duplicate: true });
@@ -166,11 +168,18 @@ test("close: nothing to mail without a conversation, an address or the mail bind
   const noAddress = env({ notify: "" });
   await close(post(talk), noAddress, kit());
   assert.equal(noAddress.sent.length, 0);
+  assert.match(noAddress.wrote[0], /^Not sent, .*no address is set in Settings$/);
   const badAddress = env({ notify: "someone" });
   await close(post(talk), badAddress, kit());
   assert.equal(badAddress.sent.length, 0);
   const noMail = env({ mail: false });
   assert.equal((await close(post(talk), noMail, kit())).status, 200);
+  assert.match(noMail.wrote[0], /no mail binding$/);
+  // A refusal by the mail service is noted, with its words.
+  const refused = env();
+  refused.EMAIL = { send: async () => { throw new Error("destination address is not verified"); } };
+  assert.equal((await close(post(talk), refused, kit())).status, 200);
+  assert.match(refused.wrote[0], /^Failed, .*: destination address is not verified$/);
   const away = env({ fail: true });
   await close(post(talk), away, kit());
   assert.equal(away.sent.length, 1);

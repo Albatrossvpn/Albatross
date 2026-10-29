@@ -74,8 +74,8 @@ Create a Turnstile widget in Cloudflare, put its site key in `wrangler.toml` (`T
 
 The websites carry a chat button (`public/support.js`, copied to `site/public/`). An AI assistant answers visitors in Persian or English from the pages' own words (`src/support.js`), and when a chat ends a summary of it goes to the owner by email. It needs no account beyond Cloudflare's:
 
-- **Workers AI** (the `AI` binding) writes the answers; its free daily allowance is plenty for a small service, and the service stops answering at 900 questions a day (150 summaries) and says so.
-- **Email** goes out through the `EMAIL` binding (`[[send_email]]`), from the contact address, to an address Cloudflare **Email Routing** has verified (Email → Email Routing → Destination addresses). Set that address in the admin panel's Settings ("Mail the support chat's summaries to"), or in `SUPPORT_NOTIFY_TO`. Empty: no mail is sent.
+- **Workers AI** (the `AI` binding, `@cf/google/gemma-4-26b-a4b-it`) writes the answers. An answer costs about 30 of the 10,000 free neurons a day, so roughly 300 answers a day are free; past that, the Free plan refuses (visitors are told to try again later and the summary still goes out) and the Paid plan bills about a cent per thirty answers. The service itself stops at 900 answers and 150 summaries a day.
+- **Email** goes out through the `EMAIL` binding (`[[send_email]]`), from the contact address, to an address Cloudflare **Email Routing** has verified (Email → Email Routing → Destination addresses). Set that address in the admin panel's Settings ("Mail the support chat's summaries to"), or in `SUPPORT_NOTIFY_TO`. Empty: no mail is sent. The same Settings dialog shows what the last try came to (Sent, or Failed with the mail service's words).
 - Nothing of a chat is stored on the service; the browser keeps it for the tab only. The privacy page says so.
 
 ## Running locally

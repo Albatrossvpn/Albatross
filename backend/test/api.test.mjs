@@ -648,6 +648,16 @@ test("support close: the summary address is the administrator's to set, a conver
   assert.equal(first.body.ok, true);
   const again = await call("POST", "support/close", { body: talk, ip: "203.0.113.9" });
   assert.equal(again.body.duplicate, true);
+  // The administrator is told what became of the mail (locally the mail service is a stand-in that takes it), and cannot write that line.
+  let status = "";
+  for (let i = 0; i < 40 && !status; i++) {
+    status = (await call("GET", "admin/settings", { token: admin })).body.support_mail_status;
+    if (!status) await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.match(status, /^(Sent|Not sent|Failed), \d{4}-\d\d-\d\d \d\d:\d\d UTC/);
+  const forged = await call("PUT", "admin/settings", { token: admin, body: { support_mail_status: "Sent, all fine" } });
+  assert.equal(forged.status, 200);
+  assert.equal(forged.body.support_mail_status, status);
   assert.equal((await call("PUT", "admin/settings", { token: admin, body: { support_notify_to: "" } })).status, 200);
 });
 

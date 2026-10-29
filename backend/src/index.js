@@ -24,6 +24,7 @@ const DEFAULTS = {
   download_windows: "",
   download_android: "",
   support_notify_to: "", // where the support chat's summaries are mailed
+  support_mail_status: "", // what the last try to mail one came to (written by the service, never by the panel)
 };
 
 class HttpError extends Error {
@@ -947,6 +948,8 @@ async function adminSaveSettings(request, env) {
       v = JSON.stringify(planFeatures(c));
     } else if (k.startsWith("download_")) {
       if (v && !/^https:\/\//.test(v)) throw new HttpError(400, "Download links must start with https://");
+    } else if (k === "support_mail_status") {
+      continue;
     } else if (k === "support_notify_to") {
       if (v && !/^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(v)) throw new HttpError(400, "That is not an email address.");
     } else if (!/^\d{1,16}$/.test(v)) throw new HttpError(400, `Bad value for ${k}.`);
