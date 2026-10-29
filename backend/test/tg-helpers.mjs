@@ -40,7 +40,8 @@ export function telegram(overrides = {}) {
   };
   globalThis.fetch = async (url, init) => {
     const [, token, method] = /\/bot([^/]+)\/(\w+)$/.exec(String(url));
-    const payload = JSON.parse(init.body);
+    // A call with a file (the bot's picture) is multipart: its parts are kept, a file as its name, size and type.
+    const payload = init.body instanceof FormData ? Object.fromEntries([...init.body.entries()].map(([k, v]) => [k, typeof v === "string" ? v : { file: v.name, bytes: v.size, type: v.type }])) : JSON.parse(init.body);
     calls.push({ method, token, ...payload });
     const o = overrides[method];
     const given = typeof o === "function" ? o(payload) : o;

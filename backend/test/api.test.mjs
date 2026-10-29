@@ -29,7 +29,8 @@ const tgServer = createServer((req, res) => {
   req.on("data", (d) => (body += d));
   req.on("end", () => {
     const [, token, method] = /^\/bot([^/]+)\/(\w+)$/.exec(req.url) || [];
-    const payload = body ? JSON.parse(body) : {};
+    // A call with a file (the bot's picture) is multipart: only that it came is noted.
+    const payload = body && !/^multipart\//.test(req.headers["content-type"] || "") ? JSON.parse(body) : body ? { multipart: true } : {};
     tgCalls.push({ token, method, ...payload });
     if (token === TG_TOKEN && method === "setWebhook") tgHook = payload.url;
     if (token === TG_TOKEN && method === "deleteWebhook") tgHook = "";

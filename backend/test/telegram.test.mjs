@@ -878,7 +878,42 @@ test("an English chat is English from end to end: nothing in it is in Persian sc
   assert.ok(!/[؀-ۿ]/.test(said));
 });
 
-// ---------- Where people came from ----------
+// ---------- The bot's picture, and where people came from ----------
+
+test("the bot gets its profile picture once for each bot, and a refusal is told", async () => {
+  const asked = [];
+  const assets = { fetch: async (request) => (asked.push(new URL(request.url).pathname), new Response(new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]), { headers: { "Content-Type": "image/jpeg" } })) };
+  const env = { DB: d1(), TOKEN_SECRET: SECRET, ASSETS: assets };
+  const api = telegram();
+  const quiet = { blocked: async () => false, count: async () => {} };
+  const linked = await connect(env, ADMIN_REQUEST(), TOKEN);
+  assert.equal(linked.warning, undefined);
+  const set = api.of("setMyProfilePhoto");
+  assert.equal(set.length, 1);
+  assert.deepEqual(JSON.parse(set[0].photo), { type: "static", photo: "attach://picture" });
+  assert.deepEqual(set[0].picture, { file: "bot.jpg", bytes: 6, type: "image/jpeg" });
+  assert.deepEqual(asked, ["/bot.jpg"]);
+  // Saved again, and the schedule every minute: the picture is not sent again.
+  await connect(env, ADMIN_REQUEST(), TOKEN);
+  await sweep(env, quiet);
+  await sweep(env, quiet);
+  assert.equal(api.of("setMyProfilePhoto").length, 1);
+  // Another bot has none yet.
+  await connect(env, ADMIN_REQUEST(), `987654321:${"B".repeat(35)}`);
+  assert.equal(api.of("setMyProfilePhoto").length, 2);
+  // Telegram refuses it: told when the token is saved, and by the panel's check, which tries again.
+  const refusing = telegram({ setMyProfilePhoto: { ok: false, error_code: 400, description: "Bad Request: PHOTO_INVALID" }, getWebhookInfo: { ok: true, result: { url: HOOK_URL } } });
+  const other = { DB: d1(), TOKEN_SECRET: SECRET, ASSETS: assets };
+  const told = await connect(other, ADMIN_REQUEST(), TOKEN);
+  assert.match(told.warning, /did not take the bot's picture: Bad Request: PHOTO_INVALID\. "Check the bot" tries again\.$/);
+  assert.match(await check(other), /Telegram refused its picture: Bad Request: PHOTO_INVALID\.$/);
+  assert.equal(refusing.of("setMyProfilePhoto").length, 2);
+  // A build with no picture, or a service with no assets, sets none and says nothing.
+  const bare = telegram();
+  const none = await connect({ DB: d1(), TOKEN_SECRET: SECRET, ASSETS: { fetch: async () => new Response("<html>", { headers: { "Content-Type": "text/html" } }) } }, ADMIN_REQUEST(), TOKEN);
+  assert.equal(none.warning, undefined);
+  assert.equal(bare.of("setMyProfilePhoto").length, 0);
+});
 
 test("a link that names its source counts a new person once a day, and /stats lists the links of the week", async () => {
   const w = await world({ lang: false });
