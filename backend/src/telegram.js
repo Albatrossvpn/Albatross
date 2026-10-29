@@ -15,8 +15,9 @@
 // The bot also sells data with Telegram Stars (the last section; what a
 // payment does to an account is in sales.js).
 import { DAY, TIERS, b64u, checkUsername, safeEqual, tag, tierOf } from "./lib.js";
+import { DEFAULT, PACKS, has, pack } from "./i18n/index.js";
 import * as sales from "./sales.js";
-import { CANNED, allowed, cleanMessages, mailOwner, oneLine, reply, stamp, today } from "./support.js";
+import { allowed, cleanMessages, mailOwner, oneLine, reply, stamp, today } from "./support.js";
 import * as view from "./telegram-content.js";
 
 export const SWEEP_CRON = "* * * * *";
@@ -39,21 +40,14 @@ const now = () => Math.floor(Date.now() / 1000);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (what) => (e) => console.error(`telegram ${what}:`, e && e.stack ? e.stack : e);
 
-const COMMANDS = [
-  { command: "start", description: "Start, and the main menu" },
-  { command: "menu", description: "Show the main menu" },
-  { command: "human", description: "Talk to our team (opens a ticket)" },
-  { command: "close", description: "Close your ticket, or end this chat" },
-  { command: "password", description: "A new password for an account you bought here" },
-  { command: "help", description: "How this bot works" },
-];
-// While data is on sale the menu also has what Telegram requires of a bot that sells.
-const STORE_COMMANDS = [
-  { command: "buy", description: "Buy data with Telegram Stars" },
-  { command: "terms", description: "Terms of buying data" },
-  { command: "paysupport", description: "Help with a payment" },
-];
-const commandsFor = (selling) => (selling ? [...COMMANDS.slice(0, 3), ...STORE_COMMANDS, ...COMMANDS.slice(3)] : COMMANDS);
+// The people's menu of commands, in the order they see it. While data is on
+// sale it also has what Telegram requires of a bot that sells.
+const COMMANDS = ["start", "menu", "human", "buy", "terms", "paysupport", "close", "password", "language", "help"];
+const STORE_COMMANDS = new Set(["buy", "terms", "paysupport"]);
+const commandsFor = (code, selling) => {
+  const { t } = view.screens(code);
+  return COMMANDS.filter((command) => selling || !STORE_COMMANDS.has(command)).map((command) => ({ command, description: t(`cmd_${command}`) }));
+};
 const TEAM_COMMANDS = [
   { command: "tickets", description: "The open tickets" },
   { command: "stats", description: "Today's numbers" },
@@ -67,10 +61,12 @@ const TEAM_COMMANDS = [
 ];
 // What people see of the bot before they write: its menu of commands, a
 // description (shown in an empty chat) and an "about" line (its profile, and
-// the links people share).
-const ABOUT = "Albatross VPN support. Get help installing, connecting and managing your account, and buy data with Telegram Stars. An AI assistant answers at once, and our team follows up on tickets. albatrossvpn.online";
-const SHORT = "Albatross VPN support and data. albatrossvpn.online";
+// the links people share), in each language the bot has (the pack's own
+// words); a person whose Telegram speaks a language it does not have sees the
+// English ones.
 const TEXTS_RETRY = 10 * 60; // seconds a refused attempt to set them waits
+const LANG_KEPT = 365 * DAY; // a language a person picked is remembered this long
+const SETTING_BATCH = 4; // languages whose texts are read and set at once
 
 // ---------- Settings and the Bot API ----------
 
@@ -86,7 +82,7 @@ async function config(env) {
 const setting = async (env, key) => ((await env.DB.prepare("SELECT value FROM settings WHERE key = ?1").bind(key).first()) || {}).value || "";
 const save = (env, key, value) => env.DB.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2").bind(key, value).run();
 const drop = (env, ...keys) => env.DB.batch(keys.map((k) => env.DB.prepare("DELETE FROM settings WHERE key = ?1").bind(k)));
-const forgetChats = (env) => env.DB.batch(["tg_users", "tg_messages", "tg_tickets", "tg_relay"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+const forgetChats = (env) => env.DB.batch(["tg_users", "tg_messages", "tg_tickets", "tg_relay", "tg_langs"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
 
 /** Text that fits in a message once made safe for Telegram's HTML; a cut is marked with an ellipsis and never splits a character. */
 function fit(text, max = 3900) {
@@ -147,27 +143,46 @@ function bot(env, token) {
 
 const sameCommands = (got, want) => Array.isArray(got) && got.length === want.length && got.every((c, i) => c.command === want[i].command && c.description === want[i].description);
 
-/** Makes the bot's menu and texts what this service wants: reads them, writes only what differs, and answers what Telegram refused (one phrase each, none when all is as wanted). */
-async function applyTexts(tg, team, commands) {
-  const [menu, about, short, mine] = await Promise.all([
-    tg.call("getMyCommands"),
-    tg.call("getMyDescription"),
-    tg.call("getMyShortDescription"),
-    team ? tg.call("getMyCommands", { scope: { type: "chat", chat_id: team } }) : null,
-  ]);
-  const todo = [
-    [menu.ok && sameCommands(menu.result, commands), "menu", () => tg.call("setMyCommands", { commands })],
-    [about.ok && (about.result || {}).description === ABOUT, "description", () => tg.call("setMyDescription", { description: ABOUT })],
-    [short.ok && (short.result || {}).short_description === SHORT, "about line", () => tg.call("setMyShortDescription", { short_description: SHORT })],
-    ...(team ? [[mine.ok && sameCommands(mine.result, TEAM_COMMANDS), "team menu", () => tg.call("setMyCommands", { commands: TEAM_COMMANDS, scope: { type: "chat", chat_id: team } })]] : []),
-  ];
-  const refused = [];
-  for (const [fine, what, set] of todo) {
-    if (fine) continue;
-    const res = await set();
-    if (!res.ok) refused.push(`${what}: ${oneLine(res.description, 100)}`);
+/** The menu, description and about line the bot should have in each language: English for everyone without a language of their own (no language code) first, then each other language under its code. */
+const wantedTexts = (selling) =>
+  [pack(DEFAULT), ...PACKS.filter((p) => p.code !== DEFAULT)].map((p) => ({ lc: p.code === DEFAULT ? "" : p.code, commands: commandsFor(p.code, selling), about: p.s.about, short: p.s.about_short }));
+
+/** What Telegram refused, as phrases: one reason for many languages is one phrase that names the first few; at most three phrases. */
+function refusals(refused) {
+  const groups = new Map();
+  for (const r of refused) {
+    const key = `${r.what}\n${r.why}`;
+    if (!groups.has(key)) groups.set(key, { what: r.what, why: r.why, langs: [] });
+    groups.get(key).langs.push(r.lc);
   }
-  return refused;
+  return [...groups.values()].slice(0, 3).map(({ what, why, langs }) => {
+    if (langs.length === 1 && !langs[0]) return `${what}: ${why}`;
+    const names = langs.map((lc) => lc || "default");
+    return `${what} (${names.length > 3 ? `${names.slice(0, 3).join(", ")} and ${names.length - 3} more` : names.join(", ")}): ${why}`;
+  });
+}
+
+/** Makes the bot's menu and texts what this service wants: reads them, writes only what differs, and answers what Telegram refused (one phrase each, none when all is as wanted). */
+async function applyTexts(tg, team, wanted) {
+  const refused = [];
+  const settle = async (fine, what, lc, set) => {
+    if (fine) return;
+    const res = await set();
+    if (!res.ok) refused.push({ what, lc, why: oneLine(res.description, 100) });
+  };
+  const language = async ({ lc, commands, about, short }) => {
+    const l = lc ? { language_code: lc } : {};
+    const [menu, description, line] = await Promise.all([tg.call("getMyCommands", l), tg.call("getMyDescription", l), tg.call("getMyShortDescription", l)]);
+    await settle(menu.ok && sameCommands(menu.result, commands), "menu", lc, () => tg.call("setMyCommands", { commands, ...l }));
+    await settle(description.ok && (description.result || {}).description === about, "description", lc, () => tg.call("setMyDescription", { description: about, ...l }));
+    await settle(line.ok && (line.result || {}).short_description === short, "about line", lc, () => tg.call("setMyShortDescription", { short_description: short, ...l }));
+  };
+  for (let i = 0; i < wanted.length; i += SETTING_BATCH) await Promise.all(wanted.slice(i, i + SETTING_BATCH).map(language));
+  if (team) {
+    const mine = await tg.call("getMyCommands", { scope: { type: "chat", chat_id: team } });
+    await settle(mine.ok && sameCommands(mine.result, TEAM_COMMANDS), "team menu", "", () => tg.call("setMyCommands", { commands: TEAM_COMMANDS, scope: { type: "chat", chat_id: team } }));
+  }
+  return refusals(refused);
 }
 
 /**
@@ -192,9 +207,9 @@ async function versioned(env, key, version, force, work) {
 
 /** The menu and texts (the menu has the store's commands while data is on sale). Answers `{ ok, note }`: what Telegram refused. */
 async function refreshTexts(env, tg, team, force = false) {
-  const commands = commandsFor((await sales.config(env)).enabled);
-  const version = await tag("albatross telegram texts", JSON.stringify([commands, TEAM_COMMANDS, ABOUT, SHORT]));
-  return versioned(env, "telegram_texts", version, force, () => applyTexts(tg, team, commands));
+  const wanted = wantedTexts((await sales.config(env)).enabled);
+  const version = await tag("albatross telegram texts", JSON.stringify([wanted, TEAM_COMMANDS]));
+  return versioned(env, "telegram_texts", version, force, () => applyTexts(tg, team, wanted));
 }
 
 const hookVersion = (url) => tag("albatross telegram hook", JSON.stringify([HOOK, url]));
@@ -309,7 +324,7 @@ export async function webhook(request, env, kit, ctx) {
     update = null;
   }
   if (!update || typeof update !== "object" || !Number.isSafeInteger(update.update_id)) return new Response("Bad request.", { status: 400 });
-  const run = { env, kit, tg: bot(env, c.token), team: c.team, name: c.name };
+  const run = { env, kit, tg: bot(env, c.token), team: c.team, name: c.name, tags: new Map(), langs: new Map() };
   const work = handle(run, update).catch((e) => failed(run, update, e));
   if (ctx && ctx.waitUntil) ctx.waitUntil(work);
   else await work;
@@ -329,12 +344,13 @@ async function failed(c, update, e) {
     if (charge && !known) {
       const res = await c.tg.call("refundStarPayment", { user_id: m.from.id, telegram_payment_charge_id: charge });
       await tellTeam(c, 0, `⚠️ A payment of ⭐${Number(paid.total_amount) || 0} could not be processed (${view.esc(oneLine(e && e.message ? e.message : String(e), 100))}) and ${res.ok ? "was refunded" : "could NOT be refunded"}. Charge <code>${view.esc(charge)}</code>.`, undefined, false).catch(() => {});
-      if (res.ok) await c.tg.send(m.chat.id, view.DELIVERY_FAILED);
+      if (res.ok) await c.tg.send(m.chat.id, (await viewOf(c, m.from.id)).deliveryFailed());
     }
     return;
   }
-  if (q) await c.tg.answer(q.id, "Something went wrong. Please try again.");
-  else if (m && m.chat && m.chat.type === "private" && m.from && !m.from.is_bot) await c.tg.send(m.chat.id, view.WENT_WRONG);
+  if (q && q.message && q.message.chat) await c.tg.answer(q.id, (await viewOf(c, q.message.chat.id)).t("toast_error"));
+  else if (q) await c.tg.answer(q.id, view.screens().t("toast_error"));
+  else if (m && m.chat && m.chat.type === "private" && m.from && !m.from.is_bot) await c.tg.send(m.chat.id, (await viewOf(c, m.chat.id)).WENT_WRONG);
 }
 
 /** Who gets what: the team's chat, the people in private chats, nobody else. */
@@ -370,8 +386,42 @@ function parseCommand(text, botName) {
 
 const bump = (env, key, n = 1) => env.DB.prepare("INSERT INTO tg_stats (day, key, n) VALUES (?1, ?2, ?3) ON CONFLICT (day, key) DO UPDATE SET n = n + ?3").bind(today(), key, n).run();
 
-/** What the rate limits remember of a person: a keyed hash of the id. */
-const idTag = (c, chat) => tag(c.env.TOKEN_SECRET, `telegram:${chat}`);
+/** What the rate limits and the language remember of a person: a keyed hash of the id. */
+async function idTag(c, chat) {
+  if (!c.tags.has(chat)) c.tags.set(chat, await tag(c.env.TOKEN_SECRET, `telegram:${chat}`));
+  return c.tags.get(chat);
+}
+
+// ---------- The language of a person ----------
+//
+// A person picks a language when they first write (a picker in all of them),
+// and the bot keeps it for a year under the keyed hash of their id, apart from
+// their chat: a chat is forgotten half an hour after its last message, and the
+// person should not have to pick again. Until they pick, a person whose
+// ticket the team is answering is spoken to in English.
+
+/** The language a person picked; "" when they have not (or the bot no longer has it). */
+async function langOf(c, chat) {
+  if (!c.langs.has(chat)) {
+    let code = "";
+    try {
+      const row = await c.env.DB.prepare("SELECT lang FROM tg_langs WHERE tag = ?1 AND updated > ?2").bind(await idTag(c, chat), now() - LANG_KEPT).first();
+      if (row && has(row.lang)) code = row.lang;
+    } catch (e) {
+      log("language")(e);
+    }
+    c.langs.set(chat, code);
+  }
+  return c.langs.get(chat);
+}
+
+/** The screens in a person's language (English until they pick one). */
+const viewOf = async (c, chat) => view.screens((await langOf(c, chat)) || DEFAULT);
+
+async function setLang(c, chat, code) {
+  await c.env.DB.prepare("INSERT INTO tg_langs (tag, lang, updated) VALUES (?1, ?2, ?3) ON CONFLICT (tag) DO UPDATE SET lang = ?2, updated = ?3").bind(await idTag(c, chat), code, now()).run();
+  c.langs.set(chat, code);
+}
 
 /** A notice of one kind at most once an hour to one person, however much they send. */
 async function noticeOnce(c, t, kind, chat, text, markup) {
@@ -387,7 +437,7 @@ async function pace(c, t, chat, button) {
     ? [{ key: `tg:b:h:${t}`, max: 120, window: 3600 }]
     : [{ key: `tg:m:h:${t}`, max: 30, window: 3600 }, { key: `tg:m:d:${t}`, max: 120, window: DAY }];
   if (await allowed(c.env, c.kit, rules)) return true;
-  if (!button) await noticeOnce(c, t, "pace", chat, view.SLOW_DOWN);
+  if (!button) await noticeOnce(c, t, "pace", chat, (await viewOf(c, chat)).SLOW_DOWN);
   return false;
 }
 
@@ -448,48 +498,76 @@ async function onUser(c, update, m) {
   if (!user || user.blocked) return;
   const text = typeof m.text === "string" ? m.text.trim() : "";
   const command = parseCommand(text, ""); // in a private chat every command is for this bot
-  if (command) return onCommand(c, user, command.name, command.arg);
+  // Nobody is spoken to before they pick a language, except a person whose ticket the team is already answering. A link into the bot (/start buy) is remembered through the choice.
+  const waiting = user.mode === "ticket" && user.ticket_id > 0;
+  if (!(await langOf(c, chat)) && !waiting) return askLanguage(c, user, m.from.language_code, command && command.name === "start" ? command.arg.toLowerCase() : "");
+  if (command) return onCommand(c, user, command.name, command.arg, m.from.language_code);
   if (user.mode === "topup" && text) return onAccountName(c, user, text);
-  if (user.mode === "ticket" && user.ticket_id > 0) return toTeam(c, user, m);
-  if (!text) return tg.send(chat, view.CAN_ONLY_READ.text, view.CAN_ONLY_READ.markup);
+  if (waiting) return toTeam(c, user, m);
+  if (!text) {
+    const v = await viewOf(c, chat);
+    return tg.send(chat, v.CAN_ONLY_READ.text, v.CAN_ONLY_READ.markup);
+  }
   return ask(c, user, text);
 }
 
-async function onCommand(c, user, command, arg) {
+/** The language picker, for a person who has not picked one (or asked to change it). */
+function askLanguage(c, user, hint, topic = "", edit = null) {
+  const s = view.languagePicker(topic, hint);
+  return edit ? edit(s) : c.tg.send(user.chat_id, s.text, s.markup);
+}
+
+/** The topic of a link into the bot (t.me/<bot>?start=buy) or of a language choice made after one: a screen, or what it starts. */
+async function startTopic(c, user, topic, put) {
+  const v = await viewOf(c, user.chat_id);
+  if (topic === "human" || topic === "team") return openTicket(c, user);
+  if (topic === "buy") return showStore(c, user, put);
+  const shop = await shopOf(c.env);
+  const screens = { connect: () => v.connectPicker(), install: () => v.installPicker(), plans: () => v.plans(shop), account: () => v.ACCOUNT_INFO, downloads: () => v.DOWNLOADS };
+  return put(Object.hasOwn(screens, topic) ? screens[topic]() : v.menu(user.name, !!shop));
+}
+
+/** A language button: the choice is kept, and the picker becomes the menu (or the topic the person came for). */
+async function onLanguageButton(c, user, code, topic, put) {
+  if (!has(code)) return;
+  await setLang(c, user.chat_id, code);
+  // A topic that starts something new in the chat (a ticket) leaves the picker as the menu.
+  if (topic === "human" || topic === "team") await put((await viewOf(c, user.chat_id)).menu(user.name, !!(await shopOf(c.env))));
+  return startTopic(c, user, topic, put);
+}
+
+async function onCommand(c, user, command, arg, hint = "") {
   const { env, tg } = c;
   const chat = user.chat_id;
+  const v = await viewOf(c, chat);
   const show = (s) => tg.send(chat, s.text, s.markup);
   // A command ends the wait for an account's username.
   if (user.mode === "topup") await setMode(env, chat, "");
   switch (command) {
-    case "start": {
+    case "start":
       if (user.ticket_id <= 0) await setMode(env, chat, "");
-      const topic = arg.toLowerCase();
-      if (topic === "human" || topic === "team") return openTicket(c, user);
-      if (topic === "buy") return showStore(c, user);
-      const shop = await shopOf(env);
-      const screens = { connect: view.connectPicker(), install: view.installPicker(), plans: view.plans(shop), account: view.ACCOUNT_INFO, downloads: view.DOWNLOADS };
-      return show(Object.hasOwn(screens, topic) ? screens[topic] : view.menu(user.name, !!shop));
-    }
+      return startTopic(c, user, arg.toLowerCase(), show);
     case "menu":
-      return show(view.menu(user.name, !!(await shopOf(env))));
+      return show(v.menu(user.name, !!(await shopOf(env))));
+    case "language":
+      return askLanguage(c, user, hint);
     case "buy":
       return showStore(c, user);
     case "terms":
-      return show(view.terms((await sales.config(env)).days));
+      return show(v.terms((await sales.config(env)).days));
     case "paysupport":
-      return show(view.PAYSUPPORT);
+      return show(v.PAYSUPPORT);
     case "password":
       return forgotPassword(c, user);
     case "help":
-      return show(view.help());
+      return show(v.help(!!(await shopOf(env))));
     case "human":
       return openTicket(c, user);
     case "close":
     case "end":
       return user.ticket_id > 0 ? closeTicket(c, user.ticket_id, "user") : endChat(c, user, true);
     default:
-      return tg.send(chat, `I do not know that command.\n\n${view.help().text}`, view.help().markup);
+      return show(v.unknownCommand(!!(await shopOf(env))));
   }
 }
 
@@ -497,9 +575,10 @@ async function onCommand(c, user, command, arg) {
 async function ask(c, user, text) {
   const { env, tg } = c;
   const chat = user.chat_id;
+  const v = await viewOf(c, chat);
   // All the answers of Telegram in a day have their own budget, apart from the websites'.
   if (!(await allowed(env, c.kit, [{ key: `tg:chat:all:${today()}`, max: 600, window: DAY }]))) {
-    return noticeOnce(c, await idTag(c, chat), "busy", chat, view.esc(CANNED.busy), view.TRY_AGAIN);
+    return noticeOnce(c, await idTag(c, chat), "busy", chat, v.busy().text, v.busy().markup);
   }
   if (!(await env.DB.prepare("SELECT 1 AS found FROM tg_messages WHERE chat_id = ?1 LIMIT 1").bind(chat).first())) await bump(env, "chats");
   await remember(env, chat, "user", text);
@@ -511,16 +590,17 @@ async function ask(c, user, text) {
     'When the visitor needs a person, tell them to tap "Talk to our team" under your answer (or send /human), and end with the marker.',
     ...((await shopOf(env)) ? ["Data can be bought in this bot with Telegram Stars: the menu's \"Buy data\" button (or /buy) shows the packages, their prices and the plan each earns, and the account and password are sent in the chat right after paying. You do not know the prices: send the person there. The plan comes with the data: Bronze under 10 GB, Silver from 10 GB, Gold from 100 GB; VIP (no data limit) is given by the team."] : []),
     ...(user.mode === "problem" && user.device ? [`They are on ${user.device} and the standard checklist did not help: if they have not said, ask for the exact message they see, the network (Wi-Fi or mobile data) and the app version.`] : []),
+    ...(v.code === DEFAULT ? [] : [v.t("ctx_language", { language: v.ai })]),
   ].join("\n");
-  const answer = messages && messages.length && messages[messages.length - 1].role === "user" ? await reply(env, messages, context, AI_TIMEOUT) : null;
+  const answer = messages && messages.length && messages[messages.length - 1].role === "user" ? await reply(env, messages, context, AI_TIMEOUT, v.ai) : null;
   if (!answer || !answer.text) {
-    await tg.send(chat, view.esc(CANNED.failed), view.TRY_AGAIN);
+    await tg.send(chat, v.failed().text, v.failed().markup);
     return;
   }
   await remember(env, chat, "assistant", answer.text);
   if (user.mode === "problem") await setMode(env, chat, "");
   await bump(env, "answers");
-  await tg.send(chat, fit(answer.text), view.feedback(answer.handoff));
+  await tg.send(chat, fit(answer.text), v.feedback(answer.handoff));
 }
 
 // ---------- Tickets ----------
@@ -528,9 +608,11 @@ async function ask(c, user, text) {
 const ticketOf = (env, id) => env.DB.prepare("SELECT * FROM tg_tickets WHERE id = ?1").bind(id).first();
 
 /** The team's chat is told of a ticket with who it is, what was said, and what it can do. */
-function card(ticket, user, rows, fresh) {
+function card(ticket, user, rows, fresh, lang = "") {
   const last = rows.slice(-6).map((r) => `<b>${r.role === "user" ? "Visitor" : r.role === "team" ? "Team" : "Assistant"}:</b> ${fit(oneLine(r.content, 300), 400)}`).join("\n");
-  return `🎫 <b>Ticket #${ticket}</b>${fresh ? " - new" : ""}\n👤 ${view.esc(who(user))} - id <code>${user.chat_id}</code>\n\n${last || "<i>No message yet. They were asked to describe the problem.</i>"}\n\n<i>Reply to this message to answer.</i>`;
+  // The team answers in the person's language: the card says which it is.
+  const speaks = lang && lang !== DEFAULT ? ` - 🌐 ${view.esc(pack(lang).name)}` : "";
+  return `🎫 <b>Ticket #${ticket}</b>${fresh ? " - new" : ""}\n👤 ${view.esc(who(user))} - id <code>${user.chat_id}</code>${speaks}\n\n${last || "<i>No message yet. They were asked to describe the problem.</i>"}\n\n<i>Reply to this message to answer.</i>`;
 }
 
 const teamKeys = (ticket, chat) => ({ inline_keyboard: [[{ text: "✅ Close", callback_data: `o:c:${ticket}` }, { text: "🚫 Block", callback_data: `o:b:${chat}` }, { text: "📜 Full chat", callback_data: `o:f:${ticket}` }]] });
@@ -563,18 +645,19 @@ async function tellTeam(c, ticket, text, markup) {
 async function openTicket(c, user) {
   const { env, tg } = c;
   const chat = user.chat_id;
+  const v = await viewOf(c, chat);
   const have = user.ticket_id > 0 ? await ticketOf(env, user.ticket_id) : null;
-  if (have && have.status === "open") return tg.send(chat, view.ticketOpen(have.id).text, view.ticketOpen(have.id).markup);
+  if (have && have.status === "open") return tg.send(chat, v.ticketOpen(have.id).text, v.ticketOpen(have.id).markup);
   const rows = await conversation(env, chat);
   const t = await idTag(c, chat);
   // Nobody reads tickets in Telegram until a chat is paired: the owner gets the chat by mail, and the person is told how things stand.
   if (!c.team) {
     tg.typing(chat);
     const mailed = rows.some((r) => r.role === "user") && (await mailAllowed(c, t)) ? await mailChat(c, user, rows, { human: true }) : false;
-    return tg.send(chat, view.noTeam(mailed).text, view.noTeam(mailed).markup);
+    return tg.send(chat, v.noTeam(mailed).text, v.noTeam(mailed).markup);
   }
-  if (await c.kit.blocked(env, `tg:ticket:${t}`, 5, DAY)) return tg.send(chat, view.TICKET_LIMIT);
-  if (await c.kit.blocked(env, `tg:tickets:all:${today()}`, 60, DAY)) return tg.send(chat, view.TEAM_BUSY);
+  if (await c.kit.blocked(env, `tg:ticket:${t}`, 5, DAY)) return tg.send(chat, v.TICKET_LIMIT);
+  if (await c.kit.blocked(env, `tg:tickets:all:${today()}`, 60, DAY)) return tg.send(chat, v.TEAM_BUSY);
   // The place is taken first, so two presses at once open one ticket. A claim that was never finished (the marker is minus the time it was made) is let go of after a while.
   const began = now();
   const claimed = await env.DB.prepare(
@@ -594,13 +677,13 @@ async function openTicket(c, user) {
   }
   await c.kit.count(env, `tg:ticket:${t}`, DAY);
   await c.kit.count(env, `tg:tickets:all:${today()}`, DAY);
-  const opened = view.ticketOpened(id, rows.length > 0);
+  const opened = v.ticketOpened(id, rows.length > 0);
   await tg.send(chat, opened.text, opened.markup);
   await bump(env, "tickets");
-  const told = await tellTeam(c, id, card(id, user, rows, true), teamKeys(id, chat));
+  const told = await tellTeam(c, id, card(id, user, rows, true, await langOf(c, chat)), teamKeys(id, chat));
   const mailed = await mailChat(c, user, rows, { human: true, ticket: id });
   // Neither the team's chat nor the mail took it: the person must not think someone knows.
-  if (!(told && told.ok) && !mailed) await tg.send(chat, view.TEAM_UNREACHABLE);
+  if (!(told && told.ok) && !mailed) await tg.send(chat, v.TEAM_UNREACHABLE);
 }
 
 /** A person writes while their ticket is open: the team gets it, with who it is from. */
@@ -613,7 +696,7 @@ async function toTeam(c, user, m) {
     // The ticket was closed behind this chat's back: it goes on as an ordinary chat.
     await env.DB.prepare("UPDATE tg_users SET mode = '', ticket_id = 0 WHERE chat_id = ?1 AND ticket_id = ?2").bind(chat, ticket).run();
     const text = typeof m.text === "string" ? m.text.trim() : "";
-    return text ? ask(c, { ...user, mode: "", ticket_id: 0 }, text) : tg.send(chat, view.CAN_ONLY_READ.text, view.CAN_ONLY_READ.markup);
+    return text ? ask(c, { ...user, mode: "", ticket_id: 0 }, text) : tg.send(chat, (await viewOf(c, chat)).CAN_ONLY_READ.text, (await viewOf(c, chat)).CAN_ONLY_READ.markup);
   }
   await remember(env, chat, "user", words(m));
   if (!c.team) return;
@@ -639,7 +722,7 @@ async function toTeam(c, user, m) {
   // The team's chat did not take it (the bot was removed, the chat is gone): the owner gets the words by mail, and the person is told, once an hour.
   const t = await idTag(c, chat);
   if (await mailAllowed(c, t)) await mailChat(c, user, [{ role: "user", content: words(m) }], { human: true, ticket });
-  await noticeOnce(c, t, "team", chat, view.TEAM_UNREACHABLE);
+  await noticeOnce(c, t, "team", chat, (await viewOf(c, chat)).TEAM_UNREACHABLE);
 }
 
 /** Closes a ticket: the person's chat is forgotten and the ticket keeps nothing of them. `tell: false` closes it without a word to the person (a blocked one). */
@@ -659,7 +742,8 @@ async function closeTicket(c, id, by, { tell = true } = {}) {
   ]);
   await bump(env, "closed");
   if (tell && person) {
-    const said = by === "team" ? view.ticketClosedByTeam(id) : by === "idle" ? view.ticketClosedIdle(id) : view.ticketClosedByUser(id);
+    const v = await viewOf(c, person);
+    const said = by === "team" ? v.ticketClosedByTeam(id) : by === "idle" ? v.ticketClosedIdle(id) : v.ticketClosedByUser(id);
     await tg.send(person, said.text, said.markup);
   }
   if (by !== "team") await tellTeam(c, id, `✅ <b>Ticket #${id}</b> was closed ${by === "user" ? `by ${view.esc(who(user || {}))}` : "after three quiet days"}.`);
@@ -673,7 +757,8 @@ async function endChat(c, user, told = false) {
   const { env, tg } = c;
   const chat = user.chat_id;
   const rows = await conversation(env, chat, MAX_ROWS);
-  if (told && !rows.length) return tg.send(chat, view.NOTHING_TO_END.text, view.NOTHING_TO_END.markup);
+  const v = await viewOf(c, chat);
+  if (told && !rows.length) return tg.send(chat, v.NOTHING_TO_END.text, v.NOTHING_TO_END.markup);
   const said = rows.some((r) => r.role === "user" && r.content.length >= 3);
   let mailed = false;
   if (said && (await mailAllowed(c, await idTag(c, chat)))) mailed = await mailChat(c, user, rows);
@@ -683,7 +768,7 @@ async function endChat(c, user, told = false) {
     // The person stays known only while they might write again: a chat that wrote in the meantime stays.
     env.DB.prepare("DELETE FROM tg_users WHERE chat_id = ?1 AND updated = ?2 AND mode != 'ticket' AND blocked = 0").bind(chat, user.updated),
   ]);
-  if (told) await tg.send(chat, view.ended(mailed).text, view.ended(mailed).markup);
+  if (told) await tg.send(chat, v.ended(mailed).text, v.ended(mailed).markup);
 }
 
 /** Every minute: a few chats that went quiet are summarized and forgotten, tickets nobody writes to are closed, old rows go. */
@@ -691,7 +776,7 @@ export async function sweep(env, kit) {
   const began = Date.now();
   const { token, name, team, url } = await config(env);
   if (!token) return;
-  const c = { env, tg: bot(env, token), team, name, kit };
+  const c = { env, tg: bot(env, token), team, name, kit, tags: new Map(), langs: new Map() };
   const t = now();
   const over = () => Date.now() - began > SWEEP_BUDGET;
   await refreshHook(env, c.tg, url).catch(log("hook"));
@@ -700,7 +785,7 @@ export async function sweep(env, kit) {
   const stuck = await env.DB.prepare("SELECT id FROM stars_payments WHERE status = 'paid' AND updated < ?1 LIMIT 5").bind(t - 180).all();
   for (const row of stuck.results) {
     if (over()) break;
-    await giveBack(c, row.id, view.DELIVERY_FAILED).catch(log("sweep"));
+    await giveBack(c, row.id, "delivery").catch(log("sweep"));
   }
   await sales.purge(env, t).catch(log("sweep"));
   const quiet = await env.DB.prepare("SELECT * FROM tg_users WHERE mode != 'ticket' AND blocked = 0 AND updated < ?1 ORDER BY updated LIMIT ?2").bind(t - IDLE, SWEEP_MAX).all();
@@ -717,6 +802,7 @@ export async function sweep(env, kit) {
   await env.DB.batch([
     env.DB.prepare("DELETE FROM tg_relay WHERE at < ?1").bind(t - 14 * DAY),
     env.DB.prepare("DELETE FROM tg_stats WHERE day < ?1").bind(new Date((t - 90 * DAY) * 1000).toISOString().slice(0, 10)),
+    env.DB.prepare("DELETE FROM tg_langs WHERE updated < ?1").bind(t - LANG_KEPT),
   ]);
 }
 
@@ -732,7 +818,7 @@ async function onCallback(c, update) {
   if (msg.chat.type !== "private" || !q.from || q.from.is_bot) return tg.answer(q.id);
   const chat = msg.chat.id;
   const t = await idTag(c, chat);
-  if (!(await pace(c, t, chat, true))) return tg.answer(q.id, "Slow down a little.");
+  if (!(await pace(c, t, chat, true))) return tg.answer(q.id, (await viewOf(c, chat)).t("toast_slow"));
   const user = await touch(env, chat, q.from, update.update_id);
   if (!user || user.blocked) return tg.answer(q.id);
   const [kind, arg, extra] = data.split(":");
@@ -748,33 +834,44 @@ async function onCallback(c, update) {
     if (!res.ok && !/not modified/i.test(res.description || "")) await tg.send(chat, s.text, s.markup);
   };
   const show = (s) => tg.send(chat, s.text, s.markup);
+  // The language is chosen here, or asked for before anything else (an old menu's button from before the person picked one).
+  if (kind === "l") {
+    await tg.answer(q.id);
+    return onLanguageButton(c, user, arg, extra || "", edit);
+  }
+  const waiting = user.mode === "ticket" && user.ticket_id > 0;
+  if (kind === "lg" || (!(await langOf(c, chat)) && !waiting)) {
+    await tg.answer(q.id);
+    return askLanguage(c, user, q.from.language_code, "", edit);
+  }
+  const v = await viewOf(c, chat);
   switch (kind) {
     case "menu":
       await tg.answer(q.id);
-      return edit(view.menu(user.name, !!(await shopOf(env))));
+      return edit(v.menu(user.name, !!(await shopOf(env))));
     case "mn":
       await tg.answer(q.id);
-      return show(view.menu(user.name, !!(await shopOf(env))));
+      return show(v.menu(user.name, !!(await shopOf(env))));
     case "c":
       await tg.answer(q.id);
-      return edit(arg ? view.connectGuide(arg) : view.connectPicker());
+      return edit(arg ? v.connectGuide(arg) : v.connectPicker());
     case "cn":
       await tg.answer(q.id);
-      return show(view.connectPicker());
+      return show(v.connectPicker());
     case "ok":
-      await tg.answer(q.id, "Great!");
+      await tg.answer(q.id, v.t("toast_great"));
       await bump(env, "fixed");
-      return edit(view.FIXED);
+      return edit(v.FIXED);
     case "no":
       await tg.answer(q.id);
       if (Object.hasOwn(view.DEVICES, arg) && user.ticket_id <= 0) await setMode(env, chat, "problem", view.DEVICES[arg].name);
-      return edit(view.stillBroken());
+      return edit(v.stillBroken());
     case "i":
       await tg.answer(q.id);
-      return edit(arg ? view.installGuide(arg) : view.installPicker());
+      return edit(arg ? v.installGuide(arg) : v.installPicker());
     case "p":
       await tg.answer(q.id);
-      return edit(view.plans(await shopOf(env)));
+      return edit(v.plans(await shopOf(env)));
     case "s":
     case "sn":
     case "sr":
@@ -788,10 +885,10 @@ async function onCallback(c, update) {
       return onPasswordButton(c, user, kind, extraOf(data), edit, show);
     case "a":
       await tg.answer(q.id);
-      return edit(view.ACCOUNT_INFO);
+      return edit(v.ACCOUNT_INFO);
     case "d":
       await tg.answer(q.id);
-      return edit(view.DOWNLOADS);
+      return edit(v.DOWNLOADS);
     case "h":
       await tg.answer(q.id);
       return openTicket(c, user);
@@ -801,20 +898,20 @@ async function onCallback(c, update) {
       const ticket = id ? await ticketOf(env, id) : null;
       // Only a person's own open ticket: an old button never closes a newer one, nor somebody else's.
       if (ticket && ticket.status === "open" && ticket.chat_id === chat) return closeTicket(c, id, "user");
-      return show(view.TICKET_GONE);
+      return show(v.TICKET_GONE);
     }
     case "r": {
       const n = Number(arg);
-      await tg.answer(q.id, "Thank you!");
+      await tg.answer(q.id, v.t("toast_thanks"));
       if (!Number.isInteger(n) || n < 1 || n > 5) return;
       await bump(env, `rate${n}`);
-      return edit(view.rated(n));
+      return edit(v.rated(n));
     }
     case "fb": {
       const up = arg === "u";
       await bump(env, up ? "up" : "down");
-      await tg.answer(q.id, up ? "Thank you!" : "Sorry about that.");
-      return tg.keys(chat, msg.message_id, up ? view.thanks(extra === "1") : view.SORRY);
+      await tg.answer(q.id, v.t(up ? "toast_thanks" : "toast_sorry"));
+      return tg.keys(chat, msg.message_id, up ? v.thanks(extra === "1") : v.SORRY);
     }
     default:
       return tg.answer(q.id);
@@ -877,7 +974,8 @@ async function answerPerson(c, m, id) {
     await tg.send(m.chat.id, `Ticket #${id} is closed. The person can open a new one with /human.`);
     return;
   }
-  const res = typeof m.text === "string" ? await tg.send(t.chat_id, view.teamSays(fit(m.text, 3800)), view.ticketKeys(id)) : await tg.copy(t.chat_id, m.chat.id, m.message_id, { reply_markup: view.ticketKeys(id) });
+  const v = await viewOf(c, t.chat_id);
+  const res = typeof m.text === "string" ? await tg.send(t.chat_id, v.teamSays(fit(m.text, 3800)), v.ticketKeys(id)) : await tg.copy(t.chat_id, m.chat.id, m.message_id, { reply_markup: v.ticketKeys(id) });
   if (!res.ok) {
     await tg.send(m.chat.id, `⚠️ Could not deliver: ${view.esc(oneLine(res.description, 120))}`);
     return;
@@ -972,10 +1070,10 @@ async function shopOf(env) {
   return cfg.enabled ? { cfg, catalog: sales.catalog(cfg), days: cfg.days } : null;
 }
 
-async function showStore(c, user) {
+async function showStore(c, user, put = (s) => c.tg.send(user.chat_id, s.text, s.markup)) {
+  const v = await viewOf(c, user.chat_id);
   const shop = await shopOf(c.env);
-  const s = shop ? view.store(shop.catalog, shop.days) : view.STORE_OFF;
-  return c.tg.send(user.chat_id, s.text, s.markup);
+  return put(shop ? v.store(shop.catalog, shop.days) : v.STORE_OFF);
 }
 
 /** Orders a person may make: ten an hour, three hundred a day in all. */
@@ -990,23 +1088,24 @@ async function makeOrder(c, user, shop, p, kind, target = "") {
 async function onStoreButton(c, user, kind, arg, edit, show) {
   const { env, tg } = c;
   const chat = user.chat_id;
+  const v = await viewOf(c, chat);
   const shop = await shopOf(env);
-  if (!shop) return edit(view.STORE_OFF);
+  if (!shop) return edit(v.STORE_OFF);
   const p = arg && kind !== "sp" ? shop.catalog.find((x) => x.gb === Number(arg)) : null;
   switch (kind) {
     case "s":
-      return edit(p ? view.storeChoice(p, shop.days) : view.store(shop.catalog, shop.days));
+      return edit(p ? v.storeChoice(p, shop.days) : v.store(shop.catalog, shop.days));
     case "st":
-      return show(view.terms(shop.days));
+      return show(v.terms(shop.days));
     case "sn": {
-      if (!p) return edit(view.store(shop.catalog, shop.days));
-      if (!(await mayOrder(c, await idTag(c, chat)))) return tg.send(chat, view.SLOW_DOWN);
-      return edit(view.checkout(await makeOrder(c, user, shop, p, "new"), p, shop.days));
+      if (!p) return edit(v.store(shop.catalog, shop.days));
+      if (!(await mayOrder(c, await idTag(c, chat)))) return tg.send(chat, v.SLOW_DOWN);
+      return edit(v.checkout(await makeOrder(c, user, shop, p, "new"), p, shop.days));
     }
     case "sr":
-      if (!p) return edit(view.store(shop.catalog, shop.days));
+      if (!p) return edit(v.store(shop.catalog, shop.days));
       await setMode(env, chat, "topup", String(p.gb));
-      return edit(view.askAccount(p));
+      return edit(v.askAccount(p));
     default: // "sp": the person agreed, and the invoice is sent
       return sendInvoice(c, user, Number(arg));
   }
@@ -1016,65 +1115,70 @@ async function onStoreButton(c, user, kind, arg, edit, show) {
 async function onAccountName(c, user, text) {
   const { env, tg } = c;
   const chat = user.chat_id;
+  const v = await viewOf(c, chat);
   const send = (s) => tg.send(chat, s.text, s.markup);
   const shop = await shopOf(env);
   const p = shop && shop.catalog.find((x) => x.gb === Number(user.device));
   if (!p) {
     await setMode(env, chat, "");
-    return send(shop ? view.store(shop.catalog, shop.days) : view.STORE_OFF);
+    return send(shop ? v.store(shop.catalog, shop.days) : v.STORE_OFF);
   }
   const name = text.trim().toLowerCase();
-  if (!checkUsername(name)) return send(view.NOT_A_USERNAME);
+  if (!checkUsername(name)) return send(v.NOT_A_USERNAME);
   const t = await idTag(c, chat);
   // Whether a username exists is told to whoever asks, a few times an hour: nobody can list the accounts.
-  if (!(await allowed(env, c.kit, [{ key: `tg:lookup:${t}`, max: 10, window: 3600 }, { key: `tg:lookups:all:${today()}`, max: 500, window: DAY }]))) return send(view.TOO_MANY_LOOKUPS);
+  if (!(await allowed(env, c.kit, [{ key: `tg:lookup:${t}`, max: 10, window: 3600 }, { key: `tg:lookups:all:${today()}`, max: 500, window: DAY }]))) return send(v.TOO_MANY_LOOKUPS);
   const account = await sales.accountFor(env, name);
-  if (!account) return send(view.NO_SUCH_ACCOUNT);
-  if (!account.fits) return send(view.CANNOT_RECHARGE);
-  if (!(await mayOrder(c, t))) return tg.send(chat, view.SLOW_DOWN);
+  if (!account) return send(v.NO_SUCH_ACCOUNT);
+  if (!account.fits) return send(v.CANNOT_RECHARGE);
+  if (!(await mayOrder(c, t))) return tg.send(chat, v.SLOW_DOWN);
   await setMode(env, chat, "");
-  return send(view.checkout(await makeOrder(c, user, shop, p, "topup", account.username), p, shop.days));
+  return send(v.checkout(await makeOrder(c, user, shop, p, "topup", account.username), p, shop.days));
 }
 
 /** The order's invoice, in Stars (no provider and no key: Telegram's own currency, XTR). */
 async function sendInvoice(c, user, orderId) {
   const { env, tg } = c;
   const chat = user.chat_id;
+  const v = await viewOf(c, chat);
   const order = await sales.orderOf(env, orderId);
-  if (!order || order.chat_id !== chat || order.status !== "new") return tg.send(chat, view.ORDER_GONE.text, view.ORDER_GONE.markup);
-  if (order.kind !== "test" && !(await shopOf(env))) return tg.send(chat, view.STORE_OFF.text, view.STORE_OFF.markup);
+  if (!order || order.chat_id !== chat || order.status !== "new") return tg.send(chat, v.ORDER_GONE.text, v.ORDER_GONE.markup);
+  if (order.kind !== "test" && !(await shopOf(env))) return tg.send(chat, v.STORE_OFF.text, v.STORE_OFF.markup);
+  // The team's own test is in English; a buyer's invoice is in their language.
   const test = order.kind === "test";
-  const valid = order.days > 0 ? `valid ${order.days} days` : "no end date";
+  const words = test ? { title: "Test payment", description: "A test payment of 1 Star, to see that buying works. It can be given back.", label: "Test" } : v.invoice(order);
   const res = await tg.call("sendInvoice", {
     chat_id: chat,
-    title: test ? "Test payment" : `${order.gb} GB of data`,
-    description: (test ? "A test payment of 1 Star, to see that buying works. It can be given back." : `Albatross VPN data: ${order.gb} GB, ${valid}. ${order.kind === "topup" ? `Added to the account ${order.target}.` : "A new account."}`).slice(0, 255),
+    title: words.title.slice(0, 32),
+    description: words.description.slice(0, 255),
     payload: `o${order.id}`,
     provider_token: "",
     currency: "XTR",
-    prices: [{ label: test ? "Test" : `${order.gb} GB`, amount: order.stars }],
+    prices: [{ label: words.label.slice(0, 32), amount: order.stars }],
   });
-  if (!res.ok) await tg.send(chat, `I could not send the invoice: ${view.esc(oneLine(res.description, 120))}. Please try again, or tell our team.`);
+  if (!res.ok) await tg.send(chat, v.invoiceFailed(oneLine(res.description, 120)));
 }
 
 /** Telegram asks, once the person pressed Pay, whether the order can be fulfilled: answered within its ten seconds. */
 async function onCheckout(c, update) {
   const { env, tg } = c;
   const q = update.pre_checkout_query;
-  const answer = (ok, why = "") => tg.call("answerPreCheckoutQuery", { pre_checkout_query_id: q.id, ok, ...(ok ? {} : { error_message: why }) });
+  const v = q.from ? await viewOf(c, q.from.id) : view.screens();
+  // `why` is one of the pc_ strings: the reason, in the buyer's language, that Telegram shows them.
+  const answer = (ok, why = "") => tg.call("answerPreCheckoutQuery", { pre_checkout_query_id: q.id, ok, ...(ok ? {} : { error_message: v.declined(why) }) });
   const found = /^o(\d+)$/.exec(String(q.invoice_payload || ""));
   const order = found ? await sales.orderOf(env, Number(found[1])) : null;
-  if (!order || !q.from || order.chat_id !== q.from.id || q.currency !== "XTR" || q.total_amount !== order.stars) return answer(false, "This invoice is not valid. Pick a package again with /buy.");
+  if (!order || !q.from || order.chat_id !== q.from.id || q.currency !== "XTR" || q.total_amount !== order.stars) return answer(false, "invalid");
   const blockedRow = await env.DB.prepare("SELECT blocked FROM tg_users WHERE chat_id = ?1").bind(q.from.id).first();
-  if (blockedRow && blockedRow.blocked) return answer(false, "You cannot buy here.");
-  if (order.kind !== "test" && !(await shopOf(env))) return answer(false, "Selling is paused. Please try again later.");
-  if (now() - order.created > 3600) return answer(false, "This invoice has expired. Pick a package again with /buy.");
+  if (blockedRow && blockedRow.blocked) return answer(false, "blocked");
+  if (order.kind !== "test" && !(await shopOf(env))) return answer(false, "paused");
+  if (now() - order.created > 3600) return answer(false, "expired");
   if (order.kind === "topup") {
     const account = await sales.accountFor(env, order.target);
-    if (!account || !account.fits) return answer(false, "That account cannot be recharged any more. Ask our team.");
+    if (!account || !account.fits) return answer(false, "account");
   }
   // One payment per order: a second invoice of the same order, or a second press, is turned away.
-  if (!(await sales.claimOrder(env, order.id, now()))) return answer(false, "This invoice was already paid, or is being paid. Pick a package again with /buy.");
+  if (!(await sales.claimOrder(env, order.id, now()))) return answer(false, "used");
   return answer(true);
 }
 
@@ -1100,7 +1204,7 @@ async function onPaid(c, m) {
     out = await sales.deliver(env, order, rec.id);
   } catch (e) {
     log("delivery")(e && e.message ? e.message : e);
-    return giveBack(c, rec.id, view.DELIVERY_FAILED);
+    return giveBack(c, rec.id, "delivery");
   }
   await bump(env, "sales");
   await bump(env, "stars", order.stars);
@@ -1109,16 +1213,17 @@ async function onPaid(c, m) {
     return;
   }
   const plan = TIERS[tierOf(out.tier)];
+  const v = await viewOf(c, payer);
   const receipt = out.kind === "new"
-    ? view.receiptNew({ id: rec.id, gb: order.gb, stars: order.stars, username: out.username, password: out.password, plan: plan.name, devices: plan.devices, expires: out.expires_at })
-    : view.receiptTopup({ id: rec.id, gb: order.gb, stars: order.stars, username: out.username, quota_bytes: out.quota_bytes, plan: plan.name, devices: plan.devices, expires: out.expires_at });
+    ? v.receiptNew({ id: rec.id, gb: order.gb, stars: order.stars, username: out.username, password: out.password, plan: plan.name, devices: plan.devices, expires: out.expires_at })
+    : v.receiptTopup({ id: rec.id, gb: order.gb, stars: order.stars, username: out.username, quota_bytes: out.quota_bytes, plan: plan.name, devices: plan.devices, expires: out.expires_at });
   let sent = await tg.send(payer, receipt.text, receipt.markup);
   if (!sent.ok) sent = await tg.send(payer, receipt.text, receipt.markup);
   const who = `<code>${view.esc(out.username)}</code> (${plan.name})`;
   await tellTeam(c, 0, `💰 <b>Sale P${rec.id}</b> - ${order.gb} GB for ⭐${order.stars} - ${out.kind === "new" ? "new account" : "recharge of"} ${who}${sent.ok ? "" : `\n⚠️ The receipt could NOT be sent (${view.esc(oneLine(sent.description, 100))}): reset the account's password in the panel and tell the buyer (id <code>${payer}</code>).`}`, undefined, false);
 }
 
-/** Gives a payment back (Telegram's refund), switches off what it gave, and tells the buyer and the team. False when it could not. */
+/** Gives a payment back (Telegram's refund), switches off what it gave, and tells the buyer (in their language) and the team. `why` is "delivery" (it could not be delivered) or "team". False when it could not. */
 async function giveBack(c, id, why) {
   const { env, tg } = c;
   const pay = await sales.paymentOf(env, id);
@@ -1132,9 +1237,9 @@ async function giveBack(c, id, why) {
   await env.DB.prepare("UPDATE stars_payments SET status = 'refunded', updated = ?2 WHERE id = ?1").bind(id, now()).run();
   await sales.reverse(env, pay);
   await bump(env, "refunds");
-  const said = view.GAVE_BACK(id, pay.stars, why);
+  const said = (await viewOf(c, pay.chat_id)).gaveBack(id, pay.stars, why);
   await tg.send(pay.chat_id, said.text, said.markup);
-  if (why !== view.BY_TEAM) await tellTeam(c, 0, `↩ <b>Payment P${id}</b> (⭐${pay.stars}) was refunded: ${view.esc(why)}`, undefined, false);
+  if (why !== "team") await tellTeam(c, 0, `↩ <b>Payment P${id}</b> (⭐${pay.stars}) was refunded: something went wrong while delivering the data.`, undefined, false);
   return true;
 }
 
@@ -1157,7 +1262,7 @@ async function refundByTeam(c, arg) {
   const pay = await sales.paymentOf(env, id);
   if (!pay) return tg.send(c.team, `There is no payment P${id}.`);
   if (pay.status === "refunded") return tg.send(c.team, `P${id} was already refunded.`);
-  const done = await giveBack(c, id, view.BY_TEAM);
+  const done = await giveBack(c, id, "team");
   if (done) await tg.send(c.team, `↩ P${id} refunded (⭐${pay.stars}).${pay.username ? ` ${pay.kind === "new" ? "The account" : "The data on"} <code>${view.esc(pay.username)}</code> ${pay.kind === "new" ? "is switched off" : "was taken off again"}.` : ""}`);
 }
 
@@ -1186,24 +1291,26 @@ async function testStars(c, person) {
 // out and the new password is shown once, in this chat.
 
 async function forgotPassword(c, user) {
+  const v = await viewOf(c, user.chat_id);
   const names = await sales.ownedAccounts(c.env, user.chat_id);
-  const s = !names.length ? view.NO_OWN_ACCOUNT : names.length === 1 ? view.confirmReset(names[0]) : view.pickAccount(names);
+  const s = !names.length ? v.NO_OWN_ACCOUNT : names.length === 1 ? v.confirmReset(names[0]) : v.pickAccount(names);
   return c.tg.send(user.chat_id, s.text, s.markup);
 }
 
 async function onPasswordButton(c, user, kind, name, edit, show) {
   const { env, tg } = c;
   const chat = user.chat_id;
+  const v = await viewOf(c, chat);
   const names = await sales.ownedAccounts(env, chat);
   if (kind === "pw") {
-    if (!name || name === "pw") return edit(!names.length ? view.NO_OWN_ACCOUNT : names.length === 1 ? view.confirmReset(names[0]) : view.pickAccount(names));
-    return edit(names.includes(name) ? view.confirmReset(name) : view.NO_OWN_ACCOUNT);
+    if (!name || name === "pw") return edit(!names.length ? v.NO_OWN_ACCOUNT : names.length === 1 ? v.confirmReset(names[0]) : v.pickAccount(names));
+    return edit(names.includes(name) ? v.confirmReset(name) : v.NO_OWN_ACCOUNT);
   }
   // "py": done, if the account is still this person's and not too often.
-  if (!names.includes(name)) return edit(view.NO_OWN_ACCOUNT);
-  if (!(await allowed(env, c.kit, [{ key: `tg:reset:${await idTag(c, chat)}`, max: 3, window: DAY }]))) return show(view.TOO_MANY_RESETS);
+  if (!names.includes(name)) return edit(v.NO_OWN_ACCOUNT);
+  if (!(await allowed(env, c.kit, [{ key: `tg:reset:${await idTag(c, chat)}`, max: 3, window: DAY }]))) return show(v.TOO_MANY_RESETS);
   const password = await sales.resetPassword(env, chat, name);
-  if (!password) return edit(view.NO_OWN_ACCOUNT);
+  if (!password) return edit(v.NO_OWN_ACCOUNT);
   await bump(env, "passwords");
-  return edit(view.newPassword(name, password));
+  return edit(v.newPassword(name, password));
 }

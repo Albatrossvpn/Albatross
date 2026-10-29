@@ -735,6 +735,7 @@ test("telegram: the webhook answers only Telegram, a person gets the menu, the t
   const post = (update, secret = hook.secret_token) => fetch(BASE + "/api/v1/telegram", { method: "POST", headers: { "Content-Type": "application/json", ...(secret ? { "X-Telegram-Bot-Api-Secret-Token": secret } : {}) }, body: JSON.stringify(update) });
   let id = 5000;
   const said = (chat, text, extra = {}) => ({ update_id: ++id, message: { message_id: id, from: { id: chat, first_name: "Sara", username: "sara_tg" }, chat: { id: chat, type: "private" }, text, ...extra } });
+  const pressed = (chat, data) => ({ update_id: ++id, callback_query: { id: `cb${id}`, from: { id: chat, first_name: "Sara", username: "sara_tg" }, data, message: { message_id: 77, chat: { id: chat, type: "private" } } } });
   assert.equal((await post(said(42, "/start"), "")).status, 401);
   assert.equal((await post(said(42, "/start"), "x".repeat(43))).status, 401);
   assert.equal((await post({ hello: "world" })).status, 400);
@@ -748,8 +749,21 @@ test("telegram: the webhook answers only Telegram, a person gets the menu, the t
     }
     return undefined;
   };
-  const menu = await sent(42);
-  assert.ok(menu && menu.text.includes("Albatross Support") && menu.reply_markup.inline_keyboard.flat().length === 6, JSON.stringify(menu));
+  // A person is asked for a language first, in all of them; the choice turns the picker into the menu.
+  const picker = await sent(42);
+  assert.ok(picker && picker.text.startsWith("🌐 <b>Choose your language</b>") && picker.reply_markup.inline_keyboard.flat().some((b) => b.callback_data === "l:en"), JSON.stringify(picker));
+  assert.equal((await post(pressed(42, "l:en"))).status, 200);
+  const edited = async (chat, tries = 40) => {
+    for (let i = 0; i < tries; i++) {
+      const m = tgCalls.filter((c) => c.method === "editMessageText" && c.chat_id === chat).pop();
+      if (m) return m;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return undefined;
+  };
+  const menu = await edited(42);
+  assert.ok(menu && menu.text.includes("Albatross Support") && menu.reply_markup.inline_keyboard.flat().length === 7, JSON.stringify(menu));
+  assert.equal(sql("SELECT COUNT(*) AS n FROM tg_langs")[0].n, 1, "the choice is kept");
   // Pairing: the wrong code is refused, the right one makes this chat the team's.
   await post(said(900, "/pair NOTTHECODE"));
   assert.match((await sent(900)).text, /not right/);
@@ -768,6 +782,8 @@ test("telegram: the webhook answers only Telegram, a person gets the menu, the t
   // A chat that went quiet is ended by the every-minute schedule; a ticket's chat stays.
   await post(said(43, "/start"));
   await sent(43);
+  await post(pressed(43, "l:en"));
+  await edited(43);
   await post(said(43, "How do I install on Windows?"));
   await new Promise((r) => setTimeout(r, 1500));
   sql("UPDATE tg_users SET updated = 1000");

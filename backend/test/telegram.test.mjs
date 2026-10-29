@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 import { d1 } from "./d1.mjs";
+import { PACKS } from "../src/i18n/index.js";
 import { check, connect, disconnect, heal, repair, sweep, webhook } from "../src/telegram.js";
 import { ADMIN_REQUEST, HOOK_URL, SARA, SECRET, TEAM, TOKEN, datas, labels, media, nextMessage, nextUpdate, press, real, secretOf, telegram, text, world } from "./tg-helpers.mjs";
 
@@ -33,7 +34,7 @@ test("connecting sets the webhook with the derived secret, one connection, the m
   assert.match(hook.secret_token, /^[A-Za-z0-9_-]{1,256}$/);
   assert.deepEqual(hook.allowed_updates, ["message", "callback_query", "pre_checkout_query"], "payments are asked about too");
   assert.equal(hook.max_connections, 1, "updates arrive one after the other");
-  assert.deepEqual(of("setMyCommands")[0].commands.map((c) => c.command), ["start", "menu", "human", "close", "password", "help"]);
+  assert.deepEqual(of("setMyCommands")[0].commands.map((c) => c.command), ["start", "menu", "human", "close", "password", "language", "help"]);
   assert.ok(of("setMyDescription")[0].description.includes("Albatross"));
   assert.equal(await w.setting("telegram_bot_username"), "AlbatrossSupportBot");
   assert.equal(await w.setting("telegram_webhook_url"), "https://accounts.albatrossvpn.online/api/v1/telegram");
@@ -92,7 +93,7 @@ test("every hour a webhook that is gone is set again and one that is there is le
   telegram({ getWebhookInfo: { ok: true, result: { url, last_error_date: 1760000000, last_error_message: "Wrong response from the webhook: 500 Internal Server Error" } } });
   assert.match(await check(w.env), /Last error: Wrong response from the webhook: 500/);
   telegram({ getWebhookInfo: { ok: true, result: { url } }, setMyDescription: { ok: false, error_code: 400, description: "Bad Request: nope" } });
-  assert.match(await check(w.env), /Telegram refused its description: Bad Request: nope\.$/);
+  assert.match(await check(w.env), /Telegram refused its description \(default, \w\w, \w\w and \d+ more\): Bad Request: nope\.$/, "one reason for every language is one phrase");
   telegram({ getWebhookInfo: { ok: true, result: { url: "" } } });
   assert.match(await check(w.env), /webhook is not set/);
   await disconnect(w.env);
@@ -104,9 +105,9 @@ test("the bot's menu and texts are set when connecting, and what Telegram refuse
   const api = telegram({ setMyDescription: { ok: false, error_code: 400, description: "Bad Request: DESCRIPTION_TOO_LONG" } });
   const linked = await connect(env, ADMIN_REQUEST(), TOKEN);
   assert.equal(linked.username, "AlbatrossSupportBot");
-  assert.match(linked.warning, /did not take the bot's description: Bad Request: DESCRIPTION_TOO_LONG\. "Check the bot" tries again\.$/);
-  assert.equal(api.of("setMyShortDescription").length, 1, "what Telegram does take is set all the same");
-  assert.deepEqual(api.shown.menus.get('"all"').map((c) => c.command), ["start", "menu", "human", "close", "password", "help"]);
+  assert.match(linked.warning, /did not take the bot's description \(default, \w\w, \w\w and \d+ more\): Bad Request: DESCRIPTION_TOO_LONG\. "Check the bot" tries again\.$/);
+  assert.equal(api.of("setMyShortDescription").length, PACKS.length, "what Telegram does take is set all the same, for every language");
+  assert.deepEqual(api.shown.menus.get('"all"').map((c) => c.command), ["start", "menu", "human", "close", "password", "language", "help"]);
   assert.equal(JSON.parse((await env.DB.prepare("SELECT value FROM settings WHERE key = 'telegram_texts'").first()).value).ok, false);
   // All taken: no warning, and a second connecting writes nothing that is already right.
   const good = telegram();
@@ -127,49 +128,50 @@ test("the schedule sets the menu and texts when they are not what the service wa
   await w.env.DB.prepare("UPDATE settings SET value = '{}' WHERE key = 'telegram_texts'").run();
   const lost = telegram();
   await sweep(w.env, w.kit);
-  assert.equal(lost.of("setMyDescription").length, 1);
-  assert.equal(lost.of("setMyShortDescription").length, 1);
-  assert.deepEqual(lost.of("setMyCommands").map((c) => c.scope), [undefined, { type: "chat", chat_id: TEAM }], "the menu, and the team's own");
+  assert.equal(lost.of("setMyDescription").length, PACKS.length, "one for each language");
+  assert.equal(lost.of("setMyShortDescription").length, PACKS.length);
+  assert.deepEqual(lost.of("setMyCommands").filter((c) => c.scope).map((c) => c.scope), [{ type: "chat", chat_id: TEAM }], "the team's own menu");
+  assert.equal(lost.of("setMyCommands").filter((c) => !c.scope).length, PACKS.length, "and a menu for each language");
   await sweep(w.env, w.kit);
-  assert.equal(lost.of("setMyDescription").length, 1, "set: not looked at again");
+  assert.equal(lost.of("setMyDescription").length, PACKS.length, "set: not looked at again");
   // Telegram refuses: one try, then ten minutes of quiet, then another.
   await w.env.DB.prepare("UPDATE settings SET value = '{}' WHERE key = 'telegram_texts'").run();
   const refusing = telegram({ setMyShortDescription: { ok: false, error_code: 429, description: "Too Many Requests: retry after 600" } });
   await sweep(w.env, w.kit);
   await sweep(w.env, w.kit);
-  assert.equal(refusing.of("setMyShortDescription").length, 1, "a refused try waits");
+  assert.equal(refusing.of("setMyShortDescription").length, PACKS.length, "a refused try waits");
   const record = JSON.parse(await w.setting("telegram_texts"));
   assert.equal(record.ok, false);
-  assert.match(record.note, /about line: Too Many Requests/);
+  assert.match(record.note, /about line \(default, .*\): Too Many Requests/);
   record.at -= 11 * 60;
   await w.env.DB.prepare("UPDATE settings SET value = ?1 WHERE key = 'telegram_texts'").bind(JSON.stringify(record)).run();
   await sweep(w.env, w.kit);
-  assert.equal(refusing.of("setMyShortDescription").length, 2);
+  assert.equal(refusing.of("setMyShortDescription").length, 2 * PACKS.length);
 });
 
 test("every hour the menu and texts are looked at, and written only where Telegram shows something else", async () => {
   const w = await world();
   const bare = telegram({ getWebhookInfo: { ok: true, result: { url: HOOK_URL } } });
   await heal(w.env);
-  assert.equal(bare.of("setMyDescription").length, 1);
+  assert.equal(bare.of("setMyDescription").length, PACKS.length);
   assert.ok(bare.of("setMyCommands").some((c) => c.scope && c.scope.chat_id === TEAM), "the team's menu too");
   await heal(w.env);
-  assert.equal(bare.of("setMyDescription").length, 1, "right now: left alone");
-  assert.equal(bare.of("setMyCommands").length, 2);
+  assert.equal(bare.of("setMyDescription").length, PACKS.length, "right now: left alone");
+  assert.equal(bare.of("setMyCommands").length, PACKS.length + 1);
   bare.shown.description = "something somebody typed in BotFather";
   await heal(w.env);
-  assert.equal(bare.of("setMyDescription").length, 2, "a text that was changed behind the service's back is put right");
+  assert.equal(bare.of("setMyDescription").length, PACKS.length + 1, "a text that was changed behind the service's back is put right");
 });
 
 // ---------- A person: the menu and the guides ----------
 
-test("/start shows the main menu with its six buttons, and a link from the website opens the right guide", async () => {
+test("/start shows the main menu with its six topics and the language button, and a link from the website opens the right guide", async () => {
   const w = await world();
   await w.send(text(SARA, "/start"));
   const menu = w.lastText(SARA);
   assert.ok(menu.text.includes("Albatross Support") && menu.text.includes("Hi Sara!"));
   assert.equal(menu.parse_mode, "HTML");
-  assert.deepEqual(labels(menu.reply_markup), ["🔌 I can't connect", "📲 Install the app", "💎 Plans & upgrading", "👤 Account & data", "⬇️ Downloads", "🧑‍💼 Talk to our team"]);
+  assert.deepEqual(labels(menu.reply_markup), ["🔌 I can't connect", "📲 Install the app", "💎 Plans & upgrading", "👤 Account & data", "⬇️ Downloads", "🧑‍💼 Talk to our team", "🌐 Language"]);
   await w.send(text(SARA, "/start@AlbatrossSupportBot connect"));
   assert.ok(w.lastText(SARA).text.includes("Which device are you on?"));
   await w.send(text(SARA, "/start plans"));
@@ -856,7 +858,7 @@ test("disconnecting removes the webhook, the token and every chat", async () => 
   assert.equal((await w.send(text(SARA, "hi"))).status, 404);
 });
 
-test("nothing the bot says is Persian", async () => {
+test("an English chat is English from end to end: nothing in it is in Persian script", async () => {
   const w = await world();
   await w.send(text(SARA, "/start"));
   for (const d of ["c", "c:win", "c:and", "c:ios", "c:mac", "no:win", "i", "i:win", "i:and", "i:ios", "i:mac", "p", "a", "d", "menu", "mn", "cn", "ok:win"]) await w.send(press(SARA, d));

@@ -3,6 +3,7 @@
 // (d1.mjs, the real SQL), and the updates people and the team send.
 import assert from "node:assert/strict";
 import { d1 } from "./d1.mjs";
+import { tag } from "../src/lib.js";
 import { connect, webhook } from "../src/telegram.js";
 
 export const HOOK_URL = "https://accounts.albatrossvpn.online/api/v1/telegram";
@@ -24,16 +25,18 @@ export async function secretOf(tokenSecret) {
 export function telegram(overrides = {}) {
   const calls = [];
   let next = 500;
-  // What the bot's menu and texts are, as a person would see them.
-  const shown = { menus: new Map(), description: "", about: "" };
-  const scoped = (p) => JSON.stringify(p.scope || "all");
+  // What the bot's menu and texts are, as a person would see them: the default (no language code), and under a language code what was set for it (`menus` is keyed by scope, then "|code").
+  const shown = { menus: new Map(), description: "", about: "", local: new Map() };
+  const scoped = (p) => JSON.stringify(p.scope || "all") + (p.language_code ? `|${p.language_code}` : "");
+  const here = (p) => (p.language_code ? shown.local.get(p.language_code) || {} : { description: shown.description, about: shown.about });
   const remembered = {
     getMyCommands: (p) => ({ ok: true, result: shown.menus.get(scoped(p)) || [] }),
     setMyCommands: (p) => (shown.menus.set(scoped(p), p.commands), { ok: true, result: true }),
-    getMyDescription: () => ({ ok: true, result: { description: shown.description } }),
-    setMyDescription: (p) => ((shown.description = p.description), { ok: true, result: true }),
-    getMyShortDescription: () => ({ ok: true, result: { short_description: shown.about } }),
-    setMyShortDescription: (p) => ((shown.about = p.short_description), { ok: true, result: true }),
+    // Telegram answers the default text for a language that has none of its own.
+    getMyDescription: (p) => ({ ok: true, result: { description: here(p).description ?? shown.description } }),
+    setMyDescription: (p) => (p.language_code ? shown.local.set(p.language_code, { ...here(p), description: p.description }) : (shown.description = p.description), { ok: true, result: true }),
+    getMyShortDescription: (p) => ({ ok: true, result: { short_description: here(p).about ?? shown.about } }),
+    setMyShortDescription: (p) => (p.language_code ? shown.local.set(p.language_code, { ...here(p), about: p.short_description }) : (shown.about = p.short_description), { ok: true, result: true }),
   };
   globalThis.fetch = async (url, init) => {
     const [, token, method] = /\/bot([^/]+)\/(\w+)$/.exec(String(url));
@@ -59,8 +62,8 @@ export const text = (chat, words, extra = {}) => ({ update_id: ++uid, message: {
 export const media = (chat, extra) => ({ update_id: ++uid, message: { message_id: ++mid, from: { id: chat, first_name: "Sara", username: "sara_tg" }, chat: { id: chat, type: "private" }, ...extra } });
 export const press = (chat, data, message_id = 55) => ({ update_id: ++uid, callback_query: { id: `cb${uid}`, from: { id: chat, first_name: "Sara", username: "sara_tg" }, data, message: { message_id, chat: { id: chat, type: "private" } } } });
 
-/** A service with a connected bot, a paired team chat (unless `team` is false), a model that answers `answer`, and a mailbox (unless `mail` is false). */
-export async function world({ answer = "Update the app first.", team = true, mail = true } = {}) {
+/** A service with a connected bot, a paired team chat (unless `team` is false), a model that answers `answer`, and a mailbox (unless `mail` is false). Everyone who writes has picked `lang` already (English unless a test says other; false: nobody has, and the bot asks). */
+export async function world({ answer = "Update the app first.", team = true, mail = true, lang = "en" } = {}) {
   const api = telegram();
   const env = { DB: d1(), TOKEN_SECRET: SECRET, CONTACT_EMAIL: "support@albatrossvpn.online", sent: [], asked: [], answer, aiDown: false };
   env.AI = { run: async (model, input) => { env.asked.push(input); if (env.aiDown) throw new Error("the model is away"); return { response: env.answer }; } };
@@ -81,7 +84,18 @@ export async function world({ answer = "Update the app first.", team = true, mai
   };
   const w = {
     env, api, kit,
+    /** `chat` has picked the language `code` (the bot's own record of it). */
+    async speak(chat, code) {
+      await env.DB.prepare("INSERT INTO tg_langs (tag, lang, updated) VALUES (?1, ?2, ?3) ON CONFLICT (tag) DO UPDATE SET lang = ?2, updated = ?3").bind(await tag(SECRET, `telegram:${chat}`), code, Math.floor(Date.now() / 1000)).run();
+    },
+    async langOf(chat) {
+      const row = await env.DB.prepare("SELECT lang FROM tg_langs WHERE tag = ?1").bind(await tag(SECRET, `telegram:${chat}`)).first();
+      return row ? row.lang : "";
+    },
     async send(update, headers = {}) {
+      // A person who writes for the first time has picked the language of the test, as most tests are not about the picker.
+      const from = lang && !/^\/pair\b/.test((update.message || {}).text || "") && ((update.message || update.callback_query || update.pre_checkout_query || {}).from || {}).id;
+      if (from && !(await w.langOf(from))) await w.speak(from, lang);
       const res = await webhook(new Request("https://accounts.albatrossvpn.online/api/v1/telegram", { method: "POST", headers: { "X-Telegram-Bot-Api-Secret-Token": await secretOf(SECRET), ...headers }, body: JSON.stringify(update) }), env, kit, undefined);
       return res;
     },

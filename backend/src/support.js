@@ -68,11 +68,11 @@ PRIVACY
 Sign-up needs only a username and a password. The account service receives the username, the password at sign-in, and counts of bytes and seconds. Traffic is encrypted from the device to the server. This chat is read by an AI model and a summary goes to the team by email: users should not write passwords or personal data in it.
 `.trim();
 
-export function systemPrompt(context = "") {
+export function systemPrompt(context = "", language = "English") {
   return `You are the support assistant on the websites of Albatross, a VPN service. A visitor is asking you for help.
 
 How to answer:
-- Answer in English only, whatever language the visitor writes in, and never comment on their language or ask them to change it: just help. Use short, simple sentences and common words: many visitors read English as a second language.
+- Answer in ${language} only, whatever language the visitor writes in, and never comment on their language or ask them to change it: just help. Use short, simple sentences and common words${language === "English" ? ": many visitors read English as a second language" : ""}.
 - Be brief and practical: a few sentences, or a short numbered list of steps. At most one or two questions at a time.
 - Use only the KNOWLEDGE below. Never invent features, prices, links, times, limits or promises. If something is not in the knowledge, say you are not sure.
 - You cannot see accounts, usage, payments or servers, and you cannot change anything. Never say you checked or fixed something.
@@ -201,11 +201,11 @@ export function withCors(request, response) {
   return response;
 }
 
-/** The assistant's next answer to a conversation: its text and whether it hands over to the team; null when the model is not there. */
-export async function reply(env, messages, context = "", timeout = AI_TIMEOUT) {
+/** The assistant's next answer to a conversation, in `language` (named in English): its text and whether it hands over to the team; null when the model is not there. */
+export async function reply(env, messages, context = "", timeout = AI_TIMEOUT, language = "English") {
   let out = "";
   try {
-    out = await ask(env, systemPrompt(context), messages, 600, timeout);
+    out = await ask(env, systemPrompt(context, language), messages, 600, timeout);
   } catch (e) {
     console.warn("support chat:", e && e.message ? e.message : e);
   }

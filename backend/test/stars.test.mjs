@@ -69,7 +69,7 @@ const credentials = (w, chat) => {
 test("selling is off until it is turned on: no Buy button, the store says so, the menu has no store commands", async () => {
   const w = await shop({ on: false });
   await w.send(text(SARA, "/start"));
-  assert.equal(labels(w.lastText(SARA).reply_markup).length, 6);
+  assert.equal(labels(w.lastText(SARA).reply_markup).length, 7, "six topics and the language");
   assert.ok(!labels(w.lastText(SARA).reply_markup).includes("⭐ Buy data"));
   await w.send(text(SARA, "/buy"));
   assert.ok(w.lastText(SARA).text.startsWith("Buying data in this chat is not available right now"));
@@ -87,11 +87,11 @@ test("selling is off until it is turned on: no Buy button, the store says so, th
 test("with selling on, the packages cost what 10,000 toman a GB at 270,000 toman a dollar and 13 dollars per 1,000 Stars make, and the menu, the plans and the commands show them", async () => {
   const w = await shop();
   await w.send(text(SARA, "/start"));
-  assert.deepEqual(labels(w.lastText(SARA).reply_markup), ["🔌 I can't connect", "📲 Install the app", "💎 Plans & upgrading", "👤 Account & data", "⭐ Buy data", "⬇️ Downloads", "🧑‍💼 Talk to our team"]);
+  assert.deepEqual(labels(w.lastText(SARA).reply_markup), ["🔌 I can't connect", "📲 Install the app", "💎 Plans & upgrading", "👤 Account & data", "⭐ Buy data", "⬇️ Downloads", "🧑‍💼 Talk to our team", "🌐 Language"]);
   await w.send(press(SARA, "s"));
   const store = w.api.of("editMessageText").pop();
   assert.deepEqual(labels(store.reply_markup).slice(0, 5), ["5 GB · ⭐15", "10 GB · ⭐29", "25 GB · ⭐72", "50 GB · ⭐143", "100 GB · ⭐285"]);
-  assert.ok(store.text.includes("<b>10 GB</b> - ⭐29 - Silver, 2 devices") && store.text.includes("<b>100 GB</b> - ⭐285 - Gold, 4 devices") && store.text.includes("<b>5 GB</b> - ⭐15 - Bronze, 1 device"));
+  assert.ok(store.text.includes("<b>10 GB</b> - ⭐29 - Silver, devices: 2") && store.text.includes("<b>100 GB</b> - ⭐285 - Gold, devices: 4") && store.text.includes("<b>5 GB</b> - ⭐15 - Bronze, devices: 1"));
   assert.ok(store.text.includes("valid 30 days"));
   // The plans screen says what each plan has and how it is earned, and sells.
   await w.send(press(SARA, "p"));
@@ -100,7 +100,7 @@ test("with selling on, the packages cost what 10,000 toman a GB at 270,000 toman
   assert.ok(labels(plans.reply_markup).includes("⭐ Buy data"));
   // The menu of commands has what Telegram asks of a bot that sells.
   await sweep(w.env, w.kit);
-  assert.deepEqual(w.api.shown.menus.get('"all"').map((c) => c.command), ["start", "menu", "human", "buy", "terms", "paysupport", "close", "password", "help"]);
+  assert.deepEqual(w.api.shown.menus.get('"all"').map((c) => c.command), ["start", "menu", "human", "buy", "terms", "paysupport", "close", "password", "language", "help"]);
   // A new rate makes new prices.
   await w.env.DB.prepare("INSERT INTO settings (key, value) VALUES ('stars_usd_toman', '540000')").run();
   await w.send(press(SARA, "s"));
@@ -142,7 +142,7 @@ test("a new account: the person picks, agrees, pays, and the account and its pas
   assert.ok(got, "the account and its password were sent");
   assert.match(got.username, /^tg\d{7}$/);
   assert.match(got.password, /^[A-Za-z0-9]{14}$/);
-  assert.ok(got.text.includes("Payment <b>P1</b>: 10 GB for ⭐29") && got.text.includes("Silver, 2 devices") && got.text.includes("Save the password now"));
+  assert.ok(got.text.includes("Payment <b>P1</b>: 10 GB for ⭐29") && got.text.includes("Silver, devices: 2") && got.text.includes("Save the password now"));
   // The account is what was bought, and the password opens it.
   const user = await accountOf(w, got.username);
   assert.equal(user.quota_bytes, 10 * GB);
