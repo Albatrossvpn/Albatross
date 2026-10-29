@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, before } from "node:test";
@@ -13,6 +14,27 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const ADMIN = { username: "root", password: "admin-pass-for-tests" };
 const dir = mkdtempSync(join(tmpdir(), "albatross-api-"));
 let proc;
+
+// Telegram's Bot API, stood in for: the Worker is told to call this server instead (TELEGRAM_API).
+const TG_PORT = PORT + 1;
+const TG_TOKEN = "123456789:" + "A".repeat(35);
+const tgCalls = [];
+let tgNext = 900;
+const tgServer = createServer((req, res) => {
+  let body = "";
+  req.on("data", (d) => (body += d));
+  req.on("end", () => {
+    const [, token, method] = /^\/bot([^/]+)\/(\w+)$/.exec(req.url) || [];
+    const payload = body ? JSON.parse(body) : {};
+    tgCalls.push({ token, method, ...payload });
+    const answer = token !== TG_TOKEN ? { ok: false, error_code: 401, description: "Unauthorized" }
+      : method === "getMe" ? { ok: true, result: { username: "MockSupportBot" } }
+      : method === "sendMessage" || method === "copyMessage" ? { ok: true, result: { message_id: tgNext++ } }
+      : { ok: true, result: true };
+    res.writeHead(answer.ok ? 200 : answer.error_code, { "Content-Type": "application/json" });
+    res.end(JSON.stringify(answer));
+  });
+});
 
 // `ip` stands in for the client's address: the local Worker keeps a
 // CF-Connecting-IP header it is given.
@@ -43,9 +65,10 @@ before(async () => {
   assert.equal(k.status, 0, k.stdout + k.stderr);
   // A server left over from an earlier run would answer with its old data.
   assert.equal(await fetch(BASE + "/api/v1/public").then(() => true, () => false), false, `something already listens on port ${PORT}`);
-  proc = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--persist-to", dir,
+  await new Promise((resolve) => tgServer.listen(TG_PORT, "127.0.0.1", resolve));
+  proc = spawn("npx", ["wrangler", "dev", "--local", "--port", String(PORT), "--persist-to", dir, "--test-scheduled",
     "--var", "TOKEN_SECRET:" + "t".repeat(40), "--var", "ADMIN_USER:" + ADMIN.username, "--var", "ADMIN_PASSWORD:" + ADMIN.password,
-    "--var", "COMPANY_NAME:Example Co"], { stdio: ["ignore", "pipe", "pipe"], detached: true });
+    "--var", "COMPANY_NAME:Example Co", "--var", "TELEGRAM_API:http://127.0.0.1:" + TG_PORT], { stdio: ["ignore", "pipe", "pipe"], detached: true });
   let log = "";
   proc.stdout.on("data", (d) => (log += d));
   proc.stderr.on("data", (d) => (log += d));
@@ -59,6 +82,7 @@ before(async () => {
 });
 
 after(() => {
+  tgServer.close();
   // wrangler starts workerd as a child: stop the whole group.
   if (proc) try { process.kill(-proc.pid, "SIGTERM"); } catch {}
   setTimeout(() => { rmSync(dir, { recursive: true, force: true }); process.exit(); }, 500).unref();
@@ -659,6 +683,97 @@ test("support close: the summary address is the administrator's to set, a conver
   assert.equal(forged.status, 200);
   assert.equal(forged.body.support_mail_status, status);
   assert.equal((await call("PUT", "admin/settings", { token: admin, body: { support_notify_to: "" } })).status, 200);
+});
+
+// A local D1 statement run through wrangler, for what a test cannot do through the API (moving time).
+function sql(command) {
+  const r = spawnSync("npx", ["wrangler", "d1", "execute", "DB", "--local", "--persist-to", dir, "--json", "--command", command], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  return JSON.parse(r.stdout)[0].results;
+}
+
+test("telegram: the administrator connects a bot with its token; Telegram's refusal and a malformed token are told", async () => {
+  const put = (b) => call("PUT", "admin/settings", { token: admin, body: b });
+  assert.equal((await put({ telegram_bot_token: "not a token" })).status, 400);
+  const refused = await put({ telegram_bot_token: "987654321:" + "B".repeat(35) });
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /did not accept this token: Unauthorized/);
+  const ok = await put({ telegram_bot_token: TG_TOKEN });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.telegram_bot_username, "MockSupportBot");
+  assert.match(ok.body.telegram_pair_code, /^[A-HJ-NP-Z2-9]{8}$/, "the panel shows the code that pairs the team's chat");
+  assert.equal(ok.body.telegram_bot_token, undefined, "the token is never given back");
+  const hook = tgCalls.filter((c) => c.method === "setWebhook").pop();
+  assert.match(hook.url, /^https?:\/\/[^/]+\/api\/v1\/telegram$/, "Telegram is told this service's own address");
+  assert.match(hook.secret_token, /^[A-Za-z0-9_-]{43}$/);
+  assert.ok(tgCalls.some((c) => c.method === "setMyCommands" && c.commands.some((m) => m.command === "human")));
+  // The websites learn the bot's name, and the account page's support link leads to it.
+  const info = await call("GET", "support/info", { headers: { Origin: "https://albatrossvpn.online" } });
+  assert.deepEqual(info.body, { telegram: "MockSupportBot" });
+  assert.equal(info.headers.get("access-control-allow-origin"), "https://albatrossvpn.online");
+  assert.equal((await call("GET", "public")).body.support_url, "https://t.me/MockSupportBot");
+  // The panel cannot write what the service writes.
+  const forged = await put({ telegram_bot_username: "Evil", telegram_owner_chat: "1" });
+  assert.equal(forged.body.telegram_bot_username, "MockSupportBot");
+  assert.equal(forged.body.telegram_owner_chat, "");
+});
+
+test("telegram: the webhook answers only Telegram, a person gets the menu, the team is paired with the code, and a quiet chat is summarized by the schedule", async () => {
+  const hook = tgCalls.filter((c) => c.method === "setWebhook").pop();
+  const settings = (await call("GET", "admin/settings", { token: admin })).body;
+  const post = (update, secret = hook.secret_token) => fetch(BASE + "/api/v1/telegram", { method: "POST", headers: { "Content-Type": "application/json", ...(secret ? { "X-Telegram-Bot-Api-Secret-Token": secret } : {}) }, body: JSON.stringify(update) });
+  let id = 5000;
+  const said = (chat, text, extra = {}) => ({ update_id: ++id, message: { message_id: id, from: { id: chat, first_name: "Sara", username: "sara_tg" }, chat: { id: chat, type: "private" }, text, ...extra } });
+  assert.equal((await post(said(42, "/start"), "")).status, 401);
+  assert.equal((await post(said(42, "/start"), "x".repeat(43))).status, 401);
+  assert.equal((await post({ hello: "world" })).status, 400);
+  tgCalls.length = 0;
+  assert.equal((await post(said(42, "/start"))).status, 200);
+  const sent = async (chat, tries = 40) => {
+    for (let i = 0; i < tries; i++) {
+      const m = tgCalls.filter((c) => c.method === "sendMessage" && c.chat_id === chat).pop();
+      if (m) return m;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return undefined;
+  };
+  const menu = await sent(42);
+  assert.ok(menu && menu.text.includes("Albatross Support") && menu.reply_markup.inline_keyboard.flat().length === 6, JSON.stringify(menu));
+  // Pairing: the wrong code is refused, the right one makes this chat the team's.
+  await post(said(900, "/pair NOTTHECODE"));
+  assert.match((await sent(900)).text, /not right/);
+  tgCalls.length = 0;
+  await post(said(900, `/pair ${settings.telegram_pair_code}`));
+  assert.match((await sent(900)).text, /Paired/);
+  const paired = (await call("GET", "admin/settings", { token: admin })).body;
+  assert.equal(paired.telegram_owner_chat, "900");
+  assert.equal(paired.telegram_pair_code, "", "a code works once");
+  // A person opens a ticket: the team's chat gets it.
+  tgCalls.length = 0;
+  await post(said(42, "/human"));
+  const card = await sent(900);
+  assert.ok(card.text.includes("Ticket #1001") && card.reply_markup.inline_keyboard[0].length === 3, JSON.stringify(card));
+  assert.deepEqual(sql("SELECT mode, ticket_id FROM tg_users WHERE chat_id = 42"), [{ mode: "ticket", ticket_id: 1001 }]);
+  // A chat that went quiet is ended by the ten-minute schedule; a ticket's chat stays.
+  await post(said(43, "/start"));
+  await sent(43);
+  await post(said(43, "How do I install on Windows?"));
+  await new Promise((r) => setTimeout(r, 1500));
+  sql("UPDATE tg_users SET updated = 1000");
+  const run = await fetch(BASE + "/__scheduled?cron=" + encodeURIComponent("*/10 * * * *"));
+  assert.equal(run.status, 200);
+  for (let i = 0; i < 50 && sql("SELECT chat_id FROM tg_users WHERE chat_id = 43").length; i++) await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(sql("SELECT chat_id FROM tg_users WHERE chat_id = 43"), [], "the quiet chat was ended and forgotten");
+  assert.equal(sql("SELECT mode FROM tg_users WHERE chat_id = 42")[0].mode, "ticket");
+  // Disconnecting forgets the bot and the chats; the webhook then answers nothing.
+  tgCalls.length = 0;
+  const off = await call("PUT", "admin/settings", { token: admin, body: { telegram_bot_token: "" } });
+  assert.equal(off.status, 200);
+  assert.equal(off.body.telegram_bot_username, "");
+  assert.ok(tgCalls.some((c) => c.method === "deleteWebhook"));
+  assert.equal((await post(said(42, "/start"))).status, 404);
+  assert.deepEqual(sql("SELECT chat_id FROM tg_users"), []);
+  assert.deepEqual((await call("GET", "support/info")).body, { telegram: "" });
 });
 
 test("too many failed administrator logins lock the sign-in for a while", async () => {

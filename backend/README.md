@@ -72,11 +72,23 @@ Create a Turnstile widget in Cloudflare, put its site key in `wrangler.toml` (`T
 
 ### The support chat
 
-The websites carry a chat button (`public/support.js`, copied to `site/public/`). An AI assistant answers visitors in Persian or English from the pages' own words (`src/support.js`), and when a chat ends a summary of it goes to the owner by email. It needs no account beyond Cloudflare's:
+The websites carry a chat button (`public/support.js`, copied to `site/public/`). An AI assistant answers visitors in English from the pages' own words (`src/support.js`), and when a chat ends a summary of it goes to the owner by email. It needs no account beyond Cloudflare's:
 
 - **Workers AI** (the `AI` binding, `@cf/google/gemma-4-26b-a4b-it`) writes the answers. An answer costs about 30 of the 10,000 free neurons a day, so roughly 300 answers a day are free; past that, the Free plan refuses (visitors are told to try again later and the summary still goes out) and the Paid plan bills about a cent per thirty answers. The service itself stops at 900 answers and 150 summaries a day.
 - **Email** goes out through the `EMAIL` binding (`[[send_email]]`), from the contact address, to an address Cloudflare **Email Routing** has verified (Email → Email Routing → Destination addresses). Set that address in the admin panel's Settings ("Mail the support chat's summaries to"), or in `SUPPORT_NOTIFY_TO`. Empty: no mail is sent. The same Settings dialog shows what the last try came to (Sent, or Failed with the mail service's words).
 - Nothing of a chat is stored on the service; the browser keeps it for the tab only. The privacy page says so.
+
+### The Telegram support bot
+
+The same assistant, in Telegram (`src/telegram.js`, its words in `src/telegram-content.js`): a menu with guides for a connection that fails, installing, plans, the account and the downloads; the assistant for everything else, with thumbs under each answer; and a team behind it, as tickets. Set it up in three steps:
+
+1. In Telegram, open **@BotFather**, send `/newbot`, pick a name and a username ending in `bot`, and copy the token.
+2. In the administration panel, Settings → Telegram support bot, paste the token and Save. The service checks it, sets the webhook (`POST /api/v1/telegram`, with a secret derived from `TOKEN_SECRET`, so nothing else is stored), the menu and the bot's description. The token is kept in the database and never shown again.
+3. The panel shows `/pair CODE`. Send it to the bot from the Telegram account (or the group) that should receive tickets. The code works once; "New pairing code" makes another.
+
+A person who taps "Talk to our team" (or sends `/human`) opens a numbered ticket: the owner is mailed the summary, and the paired chat gets a card with the conversation. **Reply to a ticket's message to answer the person**; photos, files and voice notes work in both directions. `/tickets` lists the open ones, `/stats` the day's numbers, `/close 1042` (or `/close` as a reply) closes one, `/block 123456` and `/unblock` deal with abuse. The account page's "Message support" link and the websites' chat lead to the bot once it is connected.
+
+What is kept: a chat's messages until half an hour after the last one, then its summary is mailed and they are deleted (a schedule every ten minutes does it); a ticket's messages until it is closed, and a ticket nobody writes to for three days is closed. A person who has not written is not kept. Each person may send 40 messages an hour and open 5 tickets a day; answers share the website chat's daily limit.
 
 ## Running locally
 

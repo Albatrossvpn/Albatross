@@ -145,6 +145,10 @@
   form.appendChild(box);
   form.appendChild(sendBtn);
   var note = el("div", "sp-note");
+  var tgLink = el("a", "sp-tg");
+  tgLink.target = "_blank";
+  tgLink.rel = "noopener";
+  tgLink.hidden = true;
 
   panel.appendChild(head);
   panel.appendChild(log_);
@@ -152,6 +156,7 @@
   panel.appendChild(team);
   panel.appendChild(form);
   panel.appendChild(note);
+  panel.appendChild(tgLink);
   panel.hidden = true;
   root.appendChild(fab);
   root.appendChild(panel);
@@ -279,11 +284,28 @@
     endBtn.hidden = !state.messages.length;
   }
 
+  // The Telegram bot, once the service has one: asked once per page, shown under the chat.
+  var telegram = "";
+  var asked = false;
+  function offerTelegram() {
+    if (asked) return;
+    asked = true;
+    fetch(API + "/api/v1/support/info", { credentials: "omit" }).then(function (r) { return r.json(); }).then(function (j) {
+      if (j && /^[A-Za-z0-9_]{5,32}$/.test(j.telegram || "")) {
+        telegram = j.telegram;
+        tgLink.href = "https://t.me/" + telegram + "?start=website";
+        tgLink.textContent = "Prefer Telegram? Chat with @" + telegram;
+        tgLink.hidden = false;
+      }
+    }).catch(function () {});
+  }
+
   function setOpen(on) {
     root.classList.toggle("sp-open", on);
     panel.hidden = !on;
     fab.setAttribute("aria-expanded", String(on));
     if (on) {
+      offerTelegram();
       draw();
       setTimeout(function () { box.focus(); }, 50);
     } else {

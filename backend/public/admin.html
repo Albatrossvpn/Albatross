@@ -134,6 +134,11 @@
     <label class="field"><span>Android download link</span><input id="t-and" type="url" placeholder="https://"></label>
     <label class="field"><span>Mail the support chat's summaries to</span><input id="t-support" type="email" placeholder="you@example.com" autocomplete="off"></label>
     <p class="muted small">The website's support assistant answers visitors, and when a chat ends a summary of it goes to this address. Empty: no mail is sent. <span id="t-support-status"></span></p>
+    <h3 class="mt">Telegram support bot</h3>
+    <p class="muted small">In Telegram, open <b>@BotFather</b>, send <code>/newbot</code>, pick a name and a username that ends in <code>bot</code>, and paste the token it gives you here. The bot answers in English with a menu, guides and an assistant, and hands people to you as tickets.</p>
+    <label class="field"><span>Bot token</span><input id="t-tg" type="password" placeholder="123456789:AAH…" autocomplete="off" spellcheck="false"></label>
+    <p class="muted small" id="t-tg-status"></p>
+    <div class="actions" id="t-tg-actions"><button type="button" class="btn small" id="t-tg-pair">New pairing code</button><button type="button" class="btn small danger" id="t-tg-off">Disconnect the bot</button></div>
     <div class="error" id="t-error" role="alert"></div>
     <div class="actions"><button type="button" class="btn" id="t-cancel">Close</button><button class="btn primary">Save</button></div>
   </form>

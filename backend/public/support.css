@@ -159,6 +159,8 @@
 .sp-send svg { width: 20px; height: 20px; }
 .sp-note { margin: 0; padding: 0 16px 10px; background: #fff; font-size: 11.5px; line-height: 1.45; color: var(--sp-muted); text-align: center; }
 
+.sp-tg { display: block; padding: 0 16px 14px; background: #fff; font-size: 12.5px; font-weight: 700; color: var(--sp-blue-ink); text-align: center; text-decoration: underline; text-underline-offset: 2px; }
+
 @media (max-width: 520px) {
   .sp-root { right: 12px; bottom: 12px; }
   .sp-fab { height: 54px; padding: 0 18px 0 14px; }

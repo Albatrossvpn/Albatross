@@ -66,11 +66,11 @@ PRIVACY
 Sign-up needs only a username and a password. The account service receives the username, the password at sign-in, and counts of bytes and seconds. Traffic is encrypted from the device to the server. This chat is read by an AI model and a summary goes to the team by email: users should not write passwords or personal data in it.
 `.trim();
 
-export function systemPrompt() {
+export function systemPrompt(context = "") {
   return `You are the support assistant on the websites of Albatross, a VPN service. A visitor is asking you for help.
 
 How to answer:
-- Answer in English only, whatever language the visitor writes in. Use short, simple sentences and common words: many visitors read English as a second language.
+- Answer in English only, whatever language the visitor writes in, and never comment on their language or ask them to change it: just help. Use short, simple sentences and common words: many visitors read English as a second language.
 - Be brief and practical: a few sentences, or a short numbered list of steps. At most one or two questions at a time.
 - Use only the KNOWLEDGE below. Never invent features, prices, links, times, limits or promises. If something is not in the knowledge, say you are not sure.
 - You cannot see accounts, usage, payments or servers, and you cannot change anything. Never say you checked or fixed something.
@@ -81,7 +81,7 @@ How to answer:
 - Plain text only: no markdown headings, no tables, no code blocks. A line starting with "- " or "1." is fine for steps.
 
 KNOWLEDGE
-${KNOWLEDGE}`;
+${KNOWLEDGE}${context ? `\n\nCONTEXT\n${context}` : ""}`;
 }
 
 const SUMMARY_PROMPT = `You write short internal notes for the owner of Albatross VPN about one support conversation between a visitor and the support assistant. Write in English, plain text, at most 9 lines:
@@ -93,7 +93,7 @@ Status: RESOLVED or NEEDS FOLLOW-UP (NEEDS FOLLOW-UP if the visitor still has th
 Next step: one short suggestion for the owner.
 Use only what is in the conversation. Do not invent anything.`;
 
-const CANNED = {
+export const CANNED = {
   busy: "I am getting a lot of messages right now and cannot answer. Try again in a few minutes, or email support@albatrossvpn.online.",
   failed: "I could not answer just now. Please try again. If it keeps happening, a summary of this chat goes to our team, or you can email support@albatrossvpn.online.",
 };
@@ -171,13 +171,13 @@ async function readJson(request) {
 }
 
 /** The rules a request must pass, each a count within a window; the first spent one refuses. */
-async function allowed(env, kit, rules) {
+export async function allowed(env, kit, rules) {
   for (const r of rules) if (await kit.blocked(env, r.key, r.max, r.window)) return false;
   for (const r of rules) await kit.count(env, r.key, r.window);
   return true;
 }
 
-const today = () => new Date().toISOString().slice(0, 10);
+export const today = () => new Date().toISOString().slice(0, 10);
 
 /** The CORS headers the websites need to read an answer. */
 export function withCors(request, response) {
@@ -194,6 +194,18 @@ export function withCors(request, response) {
   return response;
 }
 
+/** The assistant's next answer to a conversation: its text and whether it hands over to the team; null when the model is not there. */
+export async function reply(env, messages, context = "", timeout = AI_TIMEOUT) {
+  let out = "";
+  try {
+    out = await ask(env, systemPrompt(context), messages, 600, timeout);
+  } catch (e) {
+    console.warn("support chat:", e && e.message ? e.message : e);
+  }
+  if (!out) return null;
+  return splitHandoff(out);
+}
+
 /** POST /support/chat: the visitor's conversation so far; the assistant's next answer. */
 export async function chat(request, env, kit) {
   const b = await readJson(request);
@@ -206,15 +218,9 @@ export async function chat(request, env, kit) {
     { key: `support:chat:all:${today()}`, max: 900, window: DAY },
   ]);
   if (!ok) return kit.json({ reply: CANNED.busy, handoff: true, limited: true }, 429);
-  let reply = "";
-  try {
-    reply = await ask(env, systemPrompt(), messages, 600);
-  } catch (e) {
-    console.warn("support chat:", e && e.message ? e.message : e);
-  }
-  if (!reply) return kit.json({ reply: CANNED.failed, handoff: true, degraded: true });
-  const { text, handoff } = splitHandoff(reply);
-  return kit.json({ reply: text || CANNED.failed, handoff });
+  const answer = await reply(env, messages);
+  if (!answer) return kit.json({ reply: CANNED.failed, handoff: true, degraded: true });
+  return kit.json({ reply: answer.text || CANNED.failed, handoff: answer.handoff });
 }
 
 /** The device a visitor writes from, from the browser's own words. */
@@ -228,29 +234,36 @@ export function platformOf(ua) {
   return "unknown";
 }
 
-const transcript = (messages) => messages.map((m) => `${m.role === "user" ? "Visitor" : "Assistant"}: ${m.content}`).join("\n\n");
+const WHO = { user: "Visitor", assistant: "Assistant", team: "Team" };
+const transcript = (messages) => messages.map((m) => `${WHO[m.role] || "Visitor"}: ${m.content}`).join("\n\n");
 
 /** A summary for the owner when the model is not there to write one. */
 export function fallbackSummary(messages) {
   const first = (messages.find((m) => m.role === "user") || { content: "" }).content.replace(/\s+/g, " ").slice(0, 300);
   const asked = messages.filter((m) => m.role === "user").length;
+  if (!asked) return "Problem: the visitor has not described it yet.\nStatus: NEEDS FOLLOW-UP\nNext step: wait for their message.";
   return `Problem: ${first}\nThe visitor wrote ${asked} message${asked === 1 ? "" : "s"}; the full conversation is below.\nStatus: NEEDS FOLLOW-UP\nNext step: read the conversation.`;
 }
 
-const oneLine = (s, n) => String(s || "").replace(/\s+/g, " ").trim().slice(0, n);
+export const oneLine = (s, n) => String(s || "").replace(/\s+/g, " ").trim().slice(0, n);
 
 /** The mail to the owner: subject and plain text (never HTML: the visitor's words are not trusted). */
-export function composeEmail({ summary, messages, contact, meta }) {
-  const open = !/Status:\s*RESOLVED/i.test(summary) || !!contact;
+export function composeEmail({ summary, messages, contact, meta, human = false }) {
+  const open = human || !/Status:\s*RESOLVED/i.test(summary) || !!contact;
   const first = oneLine((messages.find((m) => m.role === "user") || { content: "" }).content, 60);
-  const subject = `[Albatross support] ${open ? "needs follow-up" : "resolved"}: ${first}`;
+  const telegram = meta.source === "telegram";
+  const kind = meta.ticket ? `ticket #${meta.ticket}` : open ? "needs follow-up" : "resolved";
+  const subject = `[Albatross ${telegram ? "Telegram" : "support"}] ${kind}: ${first}`;
+  const where = telegram
+    ? `Channel: Telegram   From: ${meta.telegram.name || "?"}${meta.telegram.username ? ` (@${meta.telegram.username})` : ""}, id ${meta.telegram.id}`
+    : `Device: ${meta.platform}   Country: ${meta.country || "?"}   Page: ${meta.page || "?"}`;
   const lines = [
     "SUMMARY",
     summary.trim(),
     "",
     `Contact left by the visitor: ${contact || "none"}`,
-    `Device: ${meta.platform}   Country: ${meta.country || "?"}   Page: ${meta.page || "?"}`,
-    meta.account ? `Signed in as: ${meta.account}` : "Not signed in",
+    where,
+    ...(telegram ? [] : [meta.account ? `Signed in as: ${meta.account}` : "Not signed in"]),
     `Time: ${meta.time}`,
     "",
     "CONVERSATION",
@@ -259,7 +272,7 @@ export function composeEmail({ summary, messages, contact, meta }) {
   return { subject, text: lines.join("\n") };
 }
 
-const isEmail = (s) => typeof s === "string" && /^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(s) && s.length <= 254;
+export const isEmail = (s) => typeof s === "string" && /^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(s) && s.length <= 254;
 
 /** Where the summaries go: the administrator's setting, else a variable. */
 async function ownerAddress(env) {
@@ -277,9 +290,10 @@ async function noteMail(env, text) {
   }
 }
 
-const stamp = () => new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC";
+export const stamp = () => new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC";
 
-async function mailSummary(env, { messages, contact, meta }) {
+/** Mails the owner a summary of a conversation (the website's or Telegram's); false when there is nowhere to send it. */
+export async function mailOwner(env, { messages, contact, meta, human = false }) {
   const to = await ownerAddress(env);
   if (!to || !env.EMAIL) {
     console.warn("support: no address or no mail binding; the summary is not sent");
@@ -289,11 +303,11 @@ async function mailSummary(env, { messages, contact, meta }) {
   await noteMail(env, `Sending, ${stamp()}`);
   let summary = "";
   try {
-    summary = await ask(env, SUMMARY_PROMPT, [{ role: "user", content: transcript(messages) }], 400, SUMMARY_TIMEOUT);
+    if (messages.length) summary = await ask(env, SUMMARY_PROMPT, [{ role: "user", content: transcript(messages) }], 400, SUMMARY_TIMEOUT);
   } catch (e) {
     console.warn("support summary:", e && e.message ? e.message : e);
   }
-  const { subject, text } = composeEmail({ summary: summary || fallbackSummary(messages), messages, contact, meta });
+  const { subject, text } = composeEmail({ summary: summary || fallbackSummary(messages), messages, contact, meta, human });
   const from = isEmail(env.CONTACT_EMAIL) ? env.CONTACT_EMAIL : "support@albatrossvpn.online";
   try {
     await env.EMAIL.send({ from: { email: from, name: "Albatross support bot" }, to, subject, text });
@@ -329,7 +343,7 @@ export async function close(request, env, kit, ctx) {
     account,
     time: stamp(),
   };
-  const work = mailSummary(env, { messages, contact, meta }).catch((e) => console.error("support mail:", e && e.stack ? e.stack : e));
+  const work = mailOwner(env, { messages, contact, meta }).catch((e) => console.error("support mail:", e && e.stack ? e.stack : e));
   if (ctx && ctx.waitUntil) ctx.waitUntil(work);
   else await work;
   return kit.json({ ok: true });

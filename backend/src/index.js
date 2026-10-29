@@ -8,6 +8,7 @@ import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
 import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
+import { SWEEP_CRON, connect as telegramConnect, disconnect as telegramDisconnect, repair as telegramRepair, sweep as telegramSweep, webhook as telegramWebhook } from "./telegram.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -25,6 +26,8 @@ const DEFAULTS = {
   download_android: "",
   support_notify_to: "", // where the support chat's summaries are mailed
   support_mail_status: "", // what the last try to mail one came to (written by the service, never by the panel)
+  telegram_bot_username: "", // the support bot's name, once its token is set (read-only here)
+  telegram_owner_chat: "", // the team's chat, once paired with /pair (read-only here)
 };
 
 class HttpError extends Error {
@@ -54,8 +57,10 @@ function randomUsernameSuffix() {
 
 export default {
   // Hourly: users' reports about servers, summed for the collector.
+  // Every ten minutes: the Telegram bot's chats that went quiet.
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(publishCrowdServers(env));
+    if (event.cron === SWEEP_CRON) ctx.waitUntil(telegramSweep(env, supportKit(env)));
+    else ctx.waitUntil(publishCrowdServers(env));
   },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -106,6 +111,8 @@ async function route(request, env, url, ctx) {
     case "POST stats": return crowdReport(request, env);
     case "POST admin/crowd/publish": return adminPublishCrowd(request, env);
     case "GET stats": return crowdSummary(request, env, url);
+    case "POST telegram": return telegramWebhook(request, env, supportKit(env), ctx);
+    case "GET support/info": return supportInfo(env);
     case "POST support/chat": return supportChat(request, env, supportKit(env));
     case "POST support/close": return supportClose(request, env, supportKit(env), ctx);
     case "OPTIONS support/chat":
@@ -195,6 +202,12 @@ async function count(env, key, window) {
 
 const forget = (env, key) => env.DB.prepare("DELETE FROM attempts WHERE key = ?1").bind(key).run();
 
+/** GET /support/info: what the websites' chat shows besides itself (the Telegram bot, once there is one). */
+async function supportInfo(env) {
+  const s = await settings(env);
+  return json({ telegram: s.telegram_bot_username || "" });
+}
+
 // What the support chat (support.js) takes from here: answers, rate limits,
 // and who is signed in, for the mail to the owner.
 const supportKit = (env) => ({
@@ -270,7 +283,7 @@ async function publicInfo(env) {
     contact: env.CONTACT_EMAIL || "",
     // Where VIP accounts reach support directly (a chat link), besides the
     // contact address.
-    support_url: env.SUPPORT_URL || "",
+    support_url: env.SUPPORT_URL || (s.telegram_bot_username ? `https://t.me/${s.telegram_bot_username}` : ""),
     signup_open: s.signup_open === "1",
     turnstile_sitekey: env.TURNSTILE_SITEKEY || "",
     downloads: { windows: s.download_windows, android: s.download_android },
@@ -917,15 +930,32 @@ async function adminDelete(request, env, id) {
   return json({ ok: true });
 }
 
+/** The settings, and the code that pairs the team's Telegram chat while there is a bot and no chat yet. */
+async function withPairing(env) {
+  const out = await settings(env);
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'telegram_pair_code'").first();
+  return { ...out, telegram_pair_code: out.telegram_bot_username && row ? row.value : "" };
+}
+
 async function adminSettings(request, env) {
   await authAdmin(request, env);
-  return json(await settings(env));
+  return json(await withPairing(env));
 }
 
 async function adminSaveSettings(request, env) {
   await authAdmin(request, env);
   const b = await body(request);
   const stmts = [];
+  // The Telegram bot: a token connects it (and says so if Telegram refuses it), an empty one disconnects it.
+  if (b.telegram_bot_token !== undefined) {
+    const token = String(b.telegram_bot_token).trim();
+    if (!token) await telegramDisconnect(env);
+    else {
+      const linked = await telegramConnect(env, request, token);
+      if (linked.error) throw new HttpError(400, linked.error);
+    }
+  }
+  if (b.telegram_pair_reset === true) await telegramRepair(env);
   for (const k of Object.keys(DEFAULTS)) {
     if (b[k] === undefined) continue;
     let v = String(b[k]).slice(0, 500);
@@ -948,7 +978,7 @@ async function adminSaveSettings(request, env) {
       v = JSON.stringify(planFeatures(c));
     } else if (k.startsWith("download_")) {
       if (v && !/^https:\/\//.test(v)) throw new HttpError(400, "Download links must start with https://");
-    } else if (k === "support_mail_status") {
+    } else if (k === "support_mail_status" || k === "telegram_bot_username" || k === "telegram_owner_chat") {
       continue;
     } else if (k === "support_notify_to") {
       if (v && !/^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(v)) throw new HttpError(400, "That is not an email address.");
@@ -957,7 +987,7 @@ async function adminSaveSettings(request, env) {
   }
   if (stmts.length) await env.DB.batch(stmts);
   plansCache = { at: 0, plans: null };
-  return json(await settings(env));
+  return json(await withPairing(env));
 }
 
 // ---------- Crowd learning ----------
