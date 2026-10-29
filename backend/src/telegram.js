@@ -122,19 +122,6 @@ function bot(env, token) {
     }
     return out;
   }
-  // A call that carries a file (multipart): the picture of the bot.
-  async function upload(method, form) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
-    try {
-      const res = await fetch(`${base}/bot${token}/${method}`, { method: "POST", body: form, signal: controller.signal });
-      return await res.json();
-    } catch (e) {
-      return { ok: false, description: e && e.name === "AbortError" ? "Telegram took too long to answer." : "Telegram could not be reached." };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
   const html = { parse_mode: "HTML", link_preview_options: { is_disabled: true } };
   async function send(chat, text, markup, extra = {}) {
     const body = { chat_id: chat, text, ...html, ...(markup ? { reply_markup: markup } : {}), ...extra };
@@ -145,7 +132,6 @@ function bot(env, token) {
   }
   return {
     call,
-    upload,
     send,
     edit: (chat, id, text, markup) => call("editMessageText", { chat_id: chat, message_id: id, text, ...html, ...(markup ? { reply_markup: markup } : {}) }),
     keys: (chat, id, markup) => call("editMessageReplyMarkup", { chat_id: chat, message_id: id, reply_markup: markup || { inline_keyboard: [] } }),
@@ -294,27 +280,6 @@ async function refreshHook(env, tg, url, force = false) {
   });
 }
 
-const PHOTO_VERSION = "1"; // raise it when public/bot.jpg changes: the picture is then set again
-
-/**
- * The bot's profile picture (public/bot.jpg: Telegram's ad platform wants a
- * bot it promotes to have one, and people trust a bot that has): set once for
- * each bot, and again when PHOTO_VERSION is raised. `force` sets it now.
- * Answers `{ ok, note }`.
- */
-async function refreshPhoto(env, tg, botId, force = false) {
-  if (!env.ASSETS) return { ok: true };
-  return versioned(env, "telegram_photo", `${PHOTO_VERSION}:${botId}`, force, async () => {
-    const res = await env.ASSETS.fetch(new Request("https://assets.local/bot.jpg"));
-    if (!res.ok || !/^image\//.test(res.headers.get("Content-Type") || "")) return []; // no picture comes with this build
-    const form = new FormData();
-    form.set("photo", JSON.stringify({ type: "static", photo: "attach://picture" }));
-    form.set("picture", new Blob([await res.arrayBuffer()], { type: "image/jpeg" }), "bot.jpg");
-    const out = await tg.upload("setMyProfilePhoto", form);
-    return out.ok ? [] : [`picture: ${oneLine(out.description, 100)}`];
-  });
-}
-
 /** The secret Telegram sends with every call, derived from the service's own so nothing else is stored. */
 async function hookSecret(env) {
   const key = await crypto.subtle.importKey("raw", enc.encode(env.TOKEN_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -347,21 +312,19 @@ export async function connect(env, request, token) {
   }
   // The menu and the texts people see before they write. The bot works without them, so a refusal does not stop it, but it is told; what the run's budget leaves undone follows within a minute.
   const texts = await refreshTexts(env, tg, 0);
-  const photo = await refreshPhoto(env, tg, token.split(":")[0]);
   const username = String(me.result.username || "");
   await save(env, "telegram_bot_token", token);
   await save(env, "telegram_bot_username", username);
   await save(env, "telegram_webhook_url", url);
   if (!(await setting(env, "telegram_owner_chat")) && !(await setting(env, "telegram_pair_code"))) await save(env, "telegram_pair_code", newCode());
-  const refused = [texts.note, photo.note].filter(Boolean).join("; ");
-  return { username, ...(refused ? { warning: `Telegram did not take the bot's ${refused}. "Check the bot" tries again.` } : {}) };
+  return { username, ...(texts.note ? { warning: `Telegram did not take the bot's ${texts.note}. "Check the bot" tries again.` } : {}) };
 }
 
 /** Disconnects the bot and forgets every chat. */
 export async function disconnect(env) {
   const { token } = await config(env);
   if (token) await bot(env, token).call("deleteWebhook", { drop_pending_updates: true });
-  await drop(env, ...KEYS, "telegram_pair_code", "telegram_texts", "telegram_hook", "telegram_photo");
+  await drop(env, ...KEYS, "telegram_pair_code", "telegram_texts", "telegram_hook");
   await forgetChats(env);
 }
 
@@ -384,9 +347,7 @@ export async function check(env) {
   const when = hook.last_error_date ? new Date(hook.last_error_date * 1000).toISOString().slice(0, 16).replace("T", " ") : "";
   const last = hook.last_error_message ? ` Last error: ${oneLine(hook.last_error_message, 120)} (${when} UTC).` : " No errors.";
   const texts = await refreshTexts(env, tg, team, "full");
-  const photo = await refreshPhoto(env, tg, token.split(":")[0], true);
-  const refusedPhoto = photo.ok ? "" : ` Telegram refused its ${photo.note}.`;
-  return `@${name} is reachable; its webhook is set and ${hook.pending_update_count || 0} update(s) are waiting.${last} ${texts.ok ? "Its menu and texts are set." : texts.more ? "Its menu and texts are still being set; the rest follows within a minute." : `Telegram refused its ${texts.note}.`}${refusedPhoto}`;
+  return `@${name} is reachable; its webhook is set and ${hook.pending_update_count || 0} update(s) are waiting.${last} ${texts.ok ? "Its menu and texts are set." : texts.more ? "Its menu and texts are still being set; the rest follows within a minute." : `Telegram refused its ${texts.note}.`}`;
 }
 
 /** Every hour: a webhook that is gone, or points elsewhere, is set again, and the menu and texts are looked at. */
@@ -897,7 +858,6 @@ export async function sweep(env, kit) {
   const over = () => Date.now() - began > SWEEP_BUDGET;
   await refreshHook(env, c.tg, url).catch(log("hook"));
   await refreshTexts(env, c.tg, team).catch(log("texts"));
-  await refreshPhoto(env, c.tg, token.split(":")[0]).catch(log("photo"));
   // Stars Telegram took that were not delivered within minutes are given back.
   const stuck = await env.DB.prepare("SELECT id FROM stars_payments WHERE status = 'paid' AND updated < ?1 LIMIT 5").bind(t - 180).all();
   for (const row of stuck.results) {
