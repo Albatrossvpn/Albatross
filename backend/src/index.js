@@ -5,6 +5,7 @@ import {
   versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, tierForQuota, tierOf, verify, verifyPassword,
 } from "./lib.js";
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
+import { singBoxConfig, wantsSingBox } from "./singbox.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
 
 const SESSION = 30 * DAY; // an app or browser session
@@ -581,6 +582,14 @@ async function subscription(request, url, env) {
   const [entries, updated, edge] = await Promise.all([subPool(env), listUpdated(env), edgeFor(env, a)]);
   const sub = buildSub(entries, choice, env.SITE_NAME || "Albatross", edge, updated);
   const h = subHeaders(sub.title, a);
+  if (wantsSingBox(request, url)) {
+    // The sing-box apps load a whole config, not a list of links.
+    const config = await singBoxConfig(sub.servers);
+    if (!config) return new Response("No server in this list runs on sing-box right now. Try again in a few minutes.", { status: 503 });
+    h.set("Content-Type", "application/json; charset=utf-8");
+    h.set("Content-Disposition", h.get("Content-Disposition").replace(/\.txt"$/, '.json"'));
+    return new Response(request.method === "HEAD" ? null : JSON.stringify(config), { status: 200, headers: h });
+  }
   return new Response(request.method === "HEAD" ? null : sub.body, { status: 200, headers: h });
 }
 

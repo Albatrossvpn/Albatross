@@ -144,15 +144,16 @@ export function build(entries, choice, brand, edge, updated = "") {
   } else {
     list = entries.filter((e) => e.country !== "IR");
   }
-  const links = [];
-  if (!choice || choice === "edge") for (const [i, l] of edge.entries()) links.push(rename(l, `${brand} Edge ${i + 1}`));
+  const servers = [];
+  if (!choice || choice === "edge") for (const [i, l] of edge.entries()) servers.push({ link: l, name: `${brand} Edge ${i + 1}` });
   for (const [i, e] of list.entries()) {
     const where = e.country ? `${flag(e.country)} ${COUNTRIES[e.country] || e.country}` : "Server";
-    links.push(rename(e.link, `${brand} ${where} ${i + 1} · ${protoOf(e.link)}`));
+    servers.push({ link: e.link, name: `${brand} ${where} ${i + 1} · ${protoOf(e.link)}` });
   }
+  const links = servers.map((s) => rename(s.link, s.name));
   // The title carries the list's time, so a refresh visibly brings a newer list.
   const when = stamp(updated);
-  return { title: `${brand} ${label}${when ? " · " + when : ""}`, body: b64(links.join("\n") + "\n"), count: links.length };
+  return { title: `${brand} ${label}${when ? " · " + when : ""}`, body: b64(links.join("\n") + "\n"), count: links.length, servers };
 }
 
 /** The protocol a link's scheme names, as the apps show it. */
