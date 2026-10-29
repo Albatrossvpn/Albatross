@@ -713,7 +713,7 @@ test("telegram: the administrator connects a bot with its token; Telegram's refu
   assert.equal(ok.body.telegram_bot_token, undefined, "the token is never given back");
   assert.equal(ok.body.telegram_webhook_url, undefined, "nor is what the service keeps for itself");
   const checked = await put({ telegram_check: true });
-  assert.match(checked.body.telegram_check, /^@MockSupportBot is reachable; its webhook is set and 0 update\(s\) are waiting\. No errors\.$/);
+  assert.match(checked.body.telegram_check, /^@MockSupportBot is reachable; its webhook is set and 0 update\(s\) are waiting\. No errors\. Its menu and texts are set\.$/);
   const hook = tgCalls.filter((c) => c.method === "setWebhook").pop();
   assert.match(hook.url, /^https?:\/\/[^/]+\/api\/v1\/telegram$/, "Telegram is told this service's own address");
   assert.match(hook.secret_token, /^[A-Za-z0-9_-]{43}$/);

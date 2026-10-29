@@ -6,6 +6,8 @@ import test, { afterEach } from "node:test";
 import { d1 } from "./d1.mjs";
 import { check, connect, disconnect, heal, repair, sweep, webhook } from "../src/telegram.js";
 
+const HOOK_URL = "https://accounts.albatrossvpn.online/api/v1/telegram";
+
 const TOKEN = "123456789:" + "A".repeat(35);
 const SECRET = "s".repeat(40);
 const TEAM = 777;
@@ -24,16 +26,27 @@ async function secretOf(tokenSecret) {
 function telegram(overrides = {}) {
   const calls = [];
   let next = 500;
+  // What the bot's menu and texts are, as a person would see them.
+  const shown = { menus: new Map(), description: "", about: "" };
+  const scoped = (p) => JSON.stringify(p.scope || "all");
+  const remembered = {
+    getMyCommands: (p) => ({ ok: true, result: shown.menus.get(scoped(p)) || [] }),
+    setMyCommands: (p) => (shown.menus.set(scoped(p), p.commands), { ok: true, result: true }),
+    getMyDescription: () => ({ ok: true, result: { description: shown.description } }),
+    setMyDescription: (p) => ((shown.description = p.description), { ok: true, result: true }),
+    getMyShortDescription: () => ({ ok: true, result: { short_description: shown.about } }),
+    setMyShortDescription: (p) => ((shown.about = p.short_description), { ok: true, result: true }),
+  };
   globalThis.fetch = async (url, init) => {
     const [, token, method] = /\/bot([^/]+)\/(\w+)$/.exec(String(url));
     const payload = JSON.parse(init.body);
     calls.push({ method, token, ...payload });
     const o = overrides[method];
     const given = typeof o === "function" ? o(payload) : o;
-    const body = given ?? (method === "getMe" ? { ok: true, result: { username: "AlbatrossSupportBot" } } : method === "sendMessage" || method === "copyMessage" ? { ok: true, result: { message_id: next++ } } : { ok: true, result: true });
+    const body = given ?? (remembered[method] ? remembered[method](payload) : method === "getMe" ? { ok: true, result: { username: "AlbatrossSupportBot" } } : method === "sendMessage" || method === "copyMessage" ? { ok: true, result: { message_id: next++ } } : { ok: true, result: true });
     return new Response(JSON.stringify(body), { status: body.ok ? 200 : body.error_code || 400 });
   };
-  return { calls, of: (method) => calls.filter((c) => c.method === method) };
+  return { calls, shown, of: (method) => calls.filter((c) => c.method === method) };
 }
 
 const labels = (markup) => (markup ? markup.inline_keyboard.flat().map((b) => b.text) : []);
@@ -165,13 +178,77 @@ test("every hour a webhook that is gone is set again and one that is there is le
   const fine = telegram({ getWebhookInfo: { ok: true, result: { url, pending_update_count: 3 } } });
   await heal(w.env);
   assert.equal(fine.of("setWebhook").length, 0);
-  assert.equal(await check(w.env), "@AlbatrossSupportBot is reachable; its webhook is set and 3 update(s) are waiting. No errors.");
+  assert.equal(await check(w.env), "@AlbatrossSupportBot is reachable; its webhook is set and 3 update(s) are waiting. No errors. Its menu and texts are set.");
   telegram({ getWebhookInfo: { ok: true, result: { url, last_error_date: 1760000000, last_error_message: "Wrong response from the webhook: 500 Internal Server Error" } } });
   assert.match(await check(w.env), /Last error: Wrong response from the webhook: 500/);
+  telegram({ getWebhookInfo: { ok: true, result: { url } }, setMyDescription: { ok: false, error_code: 400, description: "Bad Request: nope" } });
+  assert.match(await check(w.env), /Telegram refused its description: Bad Request: nope\.$/);
   telegram({ getWebhookInfo: { ok: true, result: { url: "" } } });
   assert.match(await check(w.env), /webhook is not set/);
   await disconnect(w.env);
   assert.equal(await check(w.env), "The bot is not connected.");
+});
+
+test("the bot's menu and texts are set when connecting, and what Telegram refuses is told instead of hidden", async () => {
+  const env = { DB: d1(), TOKEN_SECRET: SECRET };
+  const api = telegram({ setMyDescription: { ok: false, error_code: 400, description: "Bad Request: DESCRIPTION_TOO_LONG" } });
+  const linked = await connect(env, ADMIN_REQUEST(), TOKEN);
+  assert.equal(linked.username, "AlbatrossSupportBot");
+  assert.match(linked.warning, /did not take the bot's description: Bad Request: DESCRIPTION_TOO_LONG\. "Check the bot" tries again\.$/);
+  assert.equal(api.of("setMyShortDescription").length, 1, "what Telegram does take is set all the same");
+  assert.deepEqual(api.shown.menus.get('"all"').map((c) => c.command), ["start", "menu", "human", "close", "help"]);
+  assert.equal(JSON.parse((await env.DB.prepare("SELECT value FROM settings WHERE key = 'telegram_texts'").first()).value).ok, false);
+  // All taken: no warning, and a second connecting writes nothing that is already right.
+  const good = telegram();
+  const again = await connect({ DB: d1(), TOKEN_SECRET: SECRET }, ADMIN_REQUEST(), TOKEN);
+  assert.equal(again.warning, undefined);
+  assert.ok(good.shown.description.startsWith("Albatross VPN support.") && good.shown.about.startsWith("Albatross VPN support:"));
+  const writes = good.calls.filter((c) => c.method.startsWith("setMy")).length;
+  await connect({ DB: d1(), TOKEN_SECRET: SECRET }, ADMIN_REQUEST(), TOKEN);
+  assert.equal(good.calls.filter((c) => c.method.startsWith("setMy")).length, writes, "a bot whose texts are right is not written to again");
+});
+
+test("the schedule sets the menu and texts when they are not what the service wants, and a refused try waits ten minutes", async () => {
+  const w = await world();
+  w.api.calls.length = 0;
+  await sweep(w.env, w.kit);
+  assert.equal(w.api.calls.length, 0, "all is as wanted: a run asks Telegram nothing");
+  // A version of the service that wants other texts (as after a deploy): the next run sets them.
+  await w.env.DB.prepare("UPDATE settings SET value = '{}' WHERE key = 'telegram_texts'").run();
+  const lost = telegram();
+  await sweep(w.env, w.kit);
+  assert.equal(lost.of("setMyDescription").length, 1);
+  assert.equal(lost.of("setMyShortDescription").length, 1);
+  assert.deepEqual(lost.of("setMyCommands").map((c) => c.scope), [undefined, { type: "chat", chat_id: TEAM }], "the menu, and the team's own");
+  await sweep(w.env, w.kit);
+  assert.equal(lost.of("setMyDescription").length, 1, "set: not looked at again");
+  // Telegram refuses: one try, then ten minutes of quiet, then another.
+  await w.env.DB.prepare("UPDATE settings SET value = '{}' WHERE key = 'telegram_texts'").run();
+  const refusing = telegram({ setMyShortDescription: { ok: false, error_code: 429, description: "Too Many Requests: retry after 600" } });
+  await sweep(w.env, w.kit);
+  await sweep(w.env, w.kit);
+  assert.equal(refusing.of("setMyShortDescription").length, 1, "a refused try waits");
+  const record = JSON.parse(await w.setting("telegram_texts"));
+  assert.equal(record.ok, false);
+  assert.match(record.note, /about line: Too Many Requests/);
+  record.at -= 11 * 60;
+  await w.env.DB.prepare("UPDATE settings SET value = ?1 WHERE key = 'telegram_texts'").bind(JSON.stringify(record)).run();
+  await sweep(w.env, w.kit);
+  assert.equal(refusing.of("setMyShortDescription").length, 2);
+});
+
+test("every hour the menu and texts are looked at, and written only where Telegram shows something else", async () => {
+  const w = await world();
+  const bare = telegram({ getWebhookInfo: { ok: true, result: { url: HOOK_URL } } });
+  await heal(w.env);
+  assert.equal(bare.of("setMyDescription").length, 1);
+  assert.ok(bare.of("setMyCommands").some((c) => c.scope && c.scope.chat_id === TEAM), "the team's menu too");
+  await heal(w.env);
+  assert.equal(bare.of("setMyDescription").length, 1, "right now: left alone");
+  assert.equal(bare.of("setMyCommands").length, 2);
+  bare.shown.description = "something somebody typed in BotFather";
+  await heal(w.env);
+  assert.equal(bare.of("setMyDescription").length, 2, "a text that was changed behind the service's back is put right");
 });
 
 // ---------- A person: the menu and the guides ----------

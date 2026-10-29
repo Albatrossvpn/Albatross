@@ -976,19 +976,21 @@ async function adminSaveSettings(request, env) {
     stmts.push(env.DB.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2").bind(k, v));
   }
   // Everything else is valid: now the Telegram bot. A token connects it (and says so if Telegram refuses it, before anything is saved), an empty one disconnects it.
+  let warning = "";
   if (b.telegram_bot_token !== undefined) {
     const token = String(b.telegram_bot_token).trim();
     if (!token) await telegramDisconnect(env);
     else {
       const linked = await telegramConnect(env, request, token);
       if (linked.error) throw new HttpError(400, linked.error);
+      warning = linked.warning || "";
     }
   }
   if (b.telegram_pair_reset === true) await telegramRepair(env);
   const checked = b.telegram_check === true ? await telegramCheck(env) : "";
   if (stmts.length) await env.DB.batch(stmts);
   plansCache = { at: 0, plans: null };
-  return json({ ...(await withPairing(env)), ...(checked ? { telegram_check: checked } : {}) });
+  return json({ ...(await withPairing(env)), ...(checked ? { telegram_check: checked } : {}), ...(warning ? { telegram_warning: warning } : {}) });
 }
 
 // ---------- Crowd learning ----------

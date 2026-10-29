@@ -50,8 +50,12 @@ const TEAM_COMMANDS = [
   { command: "unblock", description: "Let a user back" },
   { command: "help", description: "The team's commands" },
 ];
+// What people see of the bot before they write: its menu of commands, a
+// description (shown in an empty chat) and an "about" line (its profile, and
+// the links people share).
 const ABOUT = "Albatross VPN support. Get help installing, connecting and managing your account. An AI assistant answers at once, and our team follows up on tickets.";
 const SHORT = "Albatross VPN support: instant answers, and a team behind them.";
+const TEXTS_RETRY = 10 * 60; // seconds a refused attempt to set them waits
 
 // ---------- Settings and the Bot API ----------
 
@@ -126,6 +130,51 @@ function bot(env, token) {
   };
 }
 
+const sameCommands = (got, want) => Array.isArray(got) && got.length === want.length && got.every((c, i) => c.command === want[i].command && c.description === want[i].description);
+
+/** Makes the bot's menu and texts what this service wants: reads them, writes only what differs, and answers what Telegram refused (one phrase each, none when all is as wanted). */
+async function applyTexts(tg, team) {
+  const [menu, about, short, mine] = await Promise.all([
+    tg.call("getMyCommands"),
+    tg.call("getMyDescription"),
+    tg.call("getMyShortDescription"),
+    team ? tg.call("getMyCommands", { scope: { type: "chat", chat_id: team } }) : null,
+  ]);
+  const todo = [
+    [menu.ok && sameCommands(menu.result, COMMANDS), "menu", () => tg.call("setMyCommands", { commands: COMMANDS })],
+    [about.ok && (about.result || {}).description === ABOUT, "description", () => tg.call("setMyDescription", { description: ABOUT })],
+    [short.ok && (short.result || {}).short_description === SHORT, "about line", () => tg.call("setMyShortDescription", { short_description: SHORT })],
+    ...(team ? [[mine.ok && sameCommands(mine.result, TEAM_COMMANDS), "team menu", () => tg.call("setMyCommands", { commands: TEAM_COMMANDS, scope: { type: "chat", chat_id: team } })]] : []),
+  ];
+  const refused = [];
+  for (const [fine, what, set] of todo) {
+    if (fine) continue;
+    const res = await set();
+    if (!res.ok) refused.push(`${what}: ${oneLine(res.description, 100)}`);
+  }
+  return refused;
+}
+
+/**
+ * The menu and texts, set when this version of the service wants others than
+ * the last time or the last try did not take; a refused try waits ten
+ * minutes. `force` looks anyway. Answers `{ ok, note }`: what Telegram refused.
+ */
+async function refreshTexts(env, tg, team, force = false) {
+  const version = await tag("albatross telegram texts", JSON.stringify([COMMANDS, TEAM_COMMANDS, ABOUT, SHORT]));
+  let last = {};
+  try {
+    last = JSON.parse(await setting(env, "telegram_texts")) || {};
+  } catch {
+    last = {};
+  }
+  if (!force && last.v === version && (last.ok || now() - last.at < TEXTS_RETRY)) return last;
+  const refused = await applyTexts(tg, team);
+  const out = { v: version, at: now(), ok: refused.length === 0, note: refused.join("; ") };
+  await save(env, "telegram_texts", JSON.stringify(out));
+  return out;
+}
+
 /** The secret Telegram sends with every call, derived from the service's own so nothing else is stored. */
 async function hookSecret(env) {
   const key = await crypto.subtle.importKey("raw", enc.encode(env.TOKEN_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -138,7 +187,7 @@ const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const newCode = () => Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => ALPHABET[b % ALPHABET.length]).join("");
 const normalCode = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
-/** Connects a bot: checks the token, sets the webhook and the menu. Answers `{ username }` or `{ error }`. */
+/** Connects a bot: checks the token, sets the webhook and the menu. Answers `{ username }` (with a `warning` when Telegram refused its menu or texts) or `{ error }`. */
 export async function connect(env, request, token) {
   token = String(token || "").trim();
   if (!TOKEN.test(token)) return { error: "That does not look like a bot token. Copy it from @BotFather; it looks like 123456789:AAH-..." };
@@ -155,21 +204,21 @@ export async function connect(env, request, token) {
     await forgetChats(env);
     await drop(env, "telegram_owner_chat", "telegram_pair_code");
   }
-  // The menu and the texts people see before they write; failing to set them does not stop the bot.
-  await Promise.all([tg.call("setMyCommands", { commands: COMMANDS }), tg.call("setMyDescription", { description: ABOUT }), tg.call("setMyShortDescription", { short_description: SHORT })]);
+  // The menu and the texts people see before they write. The bot works without them, so a refusal does not stop it, but it is told.
+  const texts = await refreshTexts(env, tg, 0, true);
   const username = String(me.result.username || "");
   await save(env, "telegram_bot_token", token);
   await save(env, "telegram_bot_username", username);
   await save(env, "telegram_webhook_url", url);
   if (!(await setting(env, "telegram_owner_chat")) && !(await setting(env, "telegram_pair_code"))) await save(env, "telegram_pair_code", newCode());
-  return { username };
+  return { username, ...(texts.ok ? {} : { warning: `Telegram did not take the bot's ${texts.note}. "Check the bot" tries again.` }) };
 }
 
 /** Disconnects the bot and forgets every chat. */
 export async function disconnect(env) {
   const { token } = await config(env);
   if (token) await bot(env, token).call("deleteWebhook", { drop_pending_updates: true });
-  await drop(env, ...KEYS, "telegram_pair_code");
+  await drop(env, ...KEYS, "telegram_pair_code", "telegram_texts");
   await forgetChats(env);
 }
 
@@ -180,28 +229,34 @@ export async function repair(env) {
   return code;
 }
 
-/** What Telegram says about the webhook, in a sentence, for the panel's "Check the bot". */
+/** What Telegram says about the webhook, in a sentence, and the state of the bot's menu and texts (set again if they are not as wanted), for the panel's "Check the bot". */
 export async function check(env) {
-  const { token, name } = await config(env);
+  const { token, name, team } = await config(env);
   if (!token) return "The bot is not connected.";
-  const info = await bot(env, token).call("getWebhookInfo");
+  const tg = bot(env, token);
+  const info = await tg.call("getWebhookInfo");
   if (!info.ok) return `Telegram did not answer: ${oneLine(info.description, 120)}`;
   const hook = info.result || {};
   if (!hook.url) return `@${name} is reachable, but its webhook is not set. Save the token again.`;
   const when = hook.last_error_date ? new Date(hook.last_error_date * 1000).toISOString().slice(0, 16).replace("T", " ") : "";
   const last = hook.last_error_message ? ` Last error: ${oneLine(hook.last_error_message, 120)} (${when} UTC).` : " No errors.";
-  return `@${name} is reachable; its webhook is set and ${hook.pending_update_count || 0} update(s) are waiting.${last}`;
+  const texts = await refreshTexts(env, tg, team, true);
+  return `@${name} is reachable; its webhook is set and ${hook.pending_update_count || 0} update(s) are waiting.${last} ${texts.ok ? "Its menu and texts are set." : `Telegram refused its ${texts.note}.`}`;
 }
 
-/** Every hour: a webhook that is gone, or points elsewhere, is set again. */
+/** Every hour: a webhook that is gone, or points elsewhere, is set again, and the menu and texts are looked at. */
 export async function heal(env) {
-  const { token, url } = await config(env);
-  if (!token || !url) return;
+  const { token, url, team } = await config(env);
+  if (!token) return;
   const tg = bot(env, token);
-  const info = await tg.call("getWebhookInfo");
-  if (!info.ok || (info.result && info.result.url === url)) return;
-  const res = await tg.call("setWebhook", { url, secret_token: await hookSecret(env), ...HOOK });
-  console.warn("telegram: the webhook was not set; it was set again:", res.ok ? "ok" : oneLine(res.description, 100));
+  if (url) {
+    const info = await tg.call("getWebhookInfo");
+    if (info.ok && !(info.result && info.result.url === url)) {
+      const res = await tg.call("setWebhook", { url, secret_token: await hookSecret(env), ...HOOK });
+      console.warn("telegram: the webhook was not set; it was set again:", res.ok ? "ok" : oneLine(res.description, 100));
+    }
+  }
+  await refreshTexts(env, tg, team, true);
 }
 
 // ---------- The webhook ----------
@@ -575,6 +630,7 @@ export async function sweep(env, kit) {
   const c = { env, tg: bot(env, token), team, name, kit };
   const t = now();
   const over = () => Date.now() - began > SWEEP_BUDGET;
+  await refreshTexts(env, c.tg, team).catch(log("texts"));
   const quiet = await env.DB.prepare("SELECT * FROM tg_users WHERE mode != 'ticket' AND blocked = 0 AND updated < ?1 ORDER BY updated LIMIT ?2").bind(t - IDLE, SWEEP_MAX).all();
   for (const user of quiet.results) {
     if (over()) break;

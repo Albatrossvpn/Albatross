@@ -333,7 +333,13 @@ $("#settings-form").addEventListener("submit", async (e) => {
   }), $("#t-error"));
   if (!r) return;
   // A bot that was just connected stays on screen: its pairing code is the next step.
-  if (connecting) { showTelegram(r); toast("Saved. The bot is connected."); return; }
+  if (connecting) {
+    showTelegram(r);
+    // Telegram may refuse the bot's menu or texts: the bot works, and the panel says what to do.
+    if (r.telegram_warning) $("#t-tg-status").append(` ${r.telegram_warning}`);
+    toast("Saved. The bot is connected.");
+    return;
+  }
   $("#settings-dialog").close();
   toast("Saved.");
 });
