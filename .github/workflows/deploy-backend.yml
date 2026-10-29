@@ -52,7 +52,9 @@ jobs:
           SITE_NAME: ${{ vars.SITE_NAME }}
           COMPANY_NAME: ${{ vars.COMPANY_NAME }}
           COMPANY_ADDRESS: ${{ vars.COMPANY_ADDRESS }}
-          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL }}
+          # Cloudflare Email Routing forwards this address to the owner's inbox;
+          # the CONTACT_EMAIL variable overrides it.
+          CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL || 'support@albatrossvpn.online' }}
           SUPPORT_URL: ${{ vars.SUPPORT_URL }}
         run: |
           args=()

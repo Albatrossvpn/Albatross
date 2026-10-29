@@ -45,7 +45,7 @@ The Worker answers only on its custom domain (`routes` in `wrangler.toml`), neve
 | Variables | |
 |---|---|
 | `SITE_DOMAIN` | the domain to serve, e.g. `vpn.example.com` |
-| `SITE_NAME`, `COMPANY_NAME`, `COMPANY_ADDRESS`, `CONTACT_EMAIL` | shown on the site and in its footer; leave out what you do not want shown |
+| `SITE_NAME`, `COMPANY_NAME`, `COMPANY_ADDRESS`, `CONTACT_EMAIL` | shown on the site and in its footer; leave out what you do not want shown (`CONTACT_EMAIL` is support@albatrossvpn.online unless the variable says otherwise) |
 | `ACCOUNT_URL` | the same address with `https://`; builds of the apps use it. Several addresses may be given, comma separated |
 
 Then run *Actions → Deploy accounts and website → Run workflow*. It creates the database on the first run, applies the migrations, deploys, and sets the secrets.
