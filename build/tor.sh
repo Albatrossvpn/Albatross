@@ -15,7 +15,14 @@ if [ -z "$ver" ]; then
 fi
 [ -n "$ver" ] || { echo "no Tor version found" >&2; exit 1; }
 file="tor-expert-bundle-$plat-$ver.tar.gz"
-[ -s "$dl/$file" ] || curl -fsSL --retry 4 --retry-delay 3 -o "$dl/$file" "$base/$ver/$file"
+# A version the download server no longer lists is still in the Tor
+# Project's archive.
+if [ ! -s "$dl/$file" ]; then
+  curl -fsSL --retry 4 --retry-delay 3 -o "$dl/$file" "$base/$ver/$file" || {
+    rm -f "$dl/$file"
+    curl -fsSL --retry 4 --retry-delay 3 -o "$dl/$file" "https://archive.torproject.org/tor-package-archive/torbrowser/$ver/$file"
+  }
+fi
 x="$(mktemp -d)"
 trap 'rm -rf "$x"' EXIT
 tar -xzf "$dl/$file" -C "$x"
