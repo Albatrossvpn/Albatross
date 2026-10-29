@@ -20,6 +20,7 @@ const TG_PORT = PORT + 1;
 const TG_TOKEN = "123456789:" + "A".repeat(35);
 const tgCalls = [];
 let tgNext = 900;
+let tgHook = "";
 const tgServer = createServer((req, res) => {
   let body = "";
   req.on("data", (d) => (body += d));
@@ -27,8 +28,11 @@ const tgServer = createServer((req, res) => {
     const [, token, method] = /^\/bot([^/]+)\/(\w+)$/.exec(req.url) || [];
     const payload = body ? JSON.parse(body) : {};
     tgCalls.push({ token, method, ...payload });
+    if (token === TG_TOKEN && method === "setWebhook") tgHook = payload.url;
+    if (token === TG_TOKEN && method === "deleteWebhook") tgHook = "";
     const answer = token !== TG_TOKEN ? { ok: false, error_code: 401, description: "Unauthorized" }
       : method === "getMe" ? { ok: true, result: { username: "MockSupportBot" } }
+      : method === "getWebhookInfo" ? { ok: true, result: { url: tgHook, pending_update_count: 0 } }
       : method === "sendMessage" || method === "copyMessage" ? { ok: true, result: { message_id: tgNext++ } }
       : { ok: true, result: true };
     res.writeHead(answer.ok ? 200 : answer.error_code, { "Content-Type": "application/json" });
@@ -698,11 +702,18 @@ test("telegram: the administrator connects a bot with its token; Telegram's refu
   const refused = await put({ telegram_bot_token: "987654321:" + "B".repeat(35) });
   assert.equal(refused.status, 400);
   assert.match(refused.body.error, /did not accept this token: Unauthorized/);
+  // A setting that is wrong stops everything: the bot is not connected on the side.
+  tgCalls.length = 0;
+  assert.equal((await put({ default_tier: "nonsense", telegram_bot_token: TG_TOKEN })).status, 400);
+  assert.equal(tgCalls.length, 0, "Telegram was not even asked");
   const ok = await put({ telegram_bot_token: TG_TOKEN });
   assert.equal(ok.status, 200);
   assert.equal(ok.body.telegram_bot_username, "MockSupportBot");
   assert.match(ok.body.telegram_pair_code, /^[A-HJ-NP-Z2-9]{8}$/, "the panel shows the code that pairs the team's chat");
   assert.equal(ok.body.telegram_bot_token, undefined, "the token is never given back");
+  assert.equal(ok.body.telegram_webhook_url, undefined, "nor is what the service keeps for itself");
+  const checked = await put({ telegram_check: true });
+  assert.match(checked.body.telegram_check, /^@MockSupportBot is reachable; its webhook is set and 0 update\(s\) are waiting\. No errors\.$/);
   const hook = tgCalls.filter((c) => c.method === "setWebhook").pop();
   assert.match(hook.url, /^https?:\/\/[^/]+\/api\/v1\/telegram$/, "Telegram is told this service's own address");
   assert.match(hook.secret_token, /^[A-Za-z0-9_-]{43}$/);
@@ -754,13 +765,13 @@ test("telegram: the webhook answers only Telegram, a person gets the menu, the t
   const card = await sent(900);
   assert.ok(card.text.includes("Ticket #1001") && card.reply_markup.inline_keyboard[0].length === 3, JSON.stringify(card));
   assert.deepEqual(sql("SELECT mode, ticket_id FROM tg_users WHERE chat_id = 42"), [{ mode: "ticket", ticket_id: 1001 }]);
-  // A chat that went quiet is ended by the ten-minute schedule; a ticket's chat stays.
+  // A chat that went quiet is ended by the every-minute schedule; a ticket's chat stays.
   await post(said(43, "/start"));
   await sent(43);
   await post(said(43, "How do I install on Windows?"));
   await new Promise((r) => setTimeout(r, 1500));
   sql("UPDATE tg_users SET updated = 1000");
-  const run = await fetch(BASE + "/__scheduled?cron=" + encodeURIComponent("*/10 * * * *"));
+  const run = await fetch(BASE + "/__scheduled?cron=" + encodeURIComponent("* * * * *"));
   assert.equal(run.status, 200);
   for (let i = 0; i < 50 && sql("SELECT chat_id FROM tg_users WHERE chat_id = 43").length; i++) await new Promise((r) => setTimeout(r, 200));
   assert.deepEqual(sql("SELECT chat_id FROM tg_users WHERE chat_id = 43"), [], "the quiet chat was ended and forgotten");

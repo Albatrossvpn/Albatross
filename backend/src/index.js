@@ -8,7 +8,7 @@ import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
 import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
-import { SWEEP_CRON, connect as telegramConnect, disconnect as telegramDisconnect, repair as telegramRepair, sweep as telegramSweep, webhook as telegramWebhook } from "./telegram.js";
+import { SWEEP_CRON, check as telegramCheck, connect as telegramConnect, disconnect as telegramDisconnect, heal as telegramHeal, repair as telegramRepair, sweep as telegramSweep, webhook as telegramWebhook } from "./telegram.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -56,11 +56,11 @@ function randomUsernameSuffix() {
 }
 
 export default {
-  // Hourly: users' reports about servers, summed for the collector.
-  // Every ten minutes: the Telegram bot's chats that went quiet.
+  // Every minute: the Telegram bot's chats that went quiet.
+  // Hourly: users' reports about servers, summed for the collector, and a look at the bot's webhook.
   async scheduled(event, env, ctx) {
     if (event.cron === SWEEP_CRON) ctx.waitUntil(telegramSweep(env, supportKit(env)));
-    else ctx.waitUntil(publishCrowdServers(env));
+    else ctx.waitUntil(Promise.allSettled([publishCrowdServers(env), telegramHeal(env)]));
   },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -946,16 +946,6 @@ async function adminSaveSettings(request, env) {
   await authAdmin(request, env);
   const b = await body(request);
   const stmts = [];
-  // The Telegram bot: a token connects it (and says so if Telegram refuses it), an empty one disconnects it.
-  if (b.telegram_bot_token !== undefined) {
-    const token = String(b.telegram_bot_token).trim();
-    if (!token) await telegramDisconnect(env);
-    else {
-      const linked = await telegramConnect(env, request, token);
-      if (linked.error) throw new HttpError(400, linked.error);
-    }
-  }
-  if (b.telegram_pair_reset === true) await telegramRepair(env);
   for (const k of Object.keys(DEFAULTS)) {
     if (b[k] === undefined) continue;
     let v = String(b[k]).slice(0, 500);
@@ -985,9 +975,20 @@ async function adminSaveSettings(request, env) {
     } else if (!/^\d{1,16}$/.test(v)) throw new HttpError(400, `Bad value for ${k}.`);
     stmts.push(env.DB.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2").bind(k, v));
   }
+  // Everything else is valid: now the Telegram bot. A token connects it (and says so if Telegram refuses it, before anything is saved), an empty one disconnects it.
+  if (b.telegram_bot_token !== undefined) {
+    const token = String(b.telegram_bot_token).trim();
+    if (!token) await telegramDisconnect(env);
+    else {
+      const linked = await telegramConnect(env, request, token);
+      if (linked.error) throw new HttpError(400, linked.error);
+    }
+  }
+  if (b.telegram_pair_reset === true) await telegramRepair(env);
+  const checked = b.telegram_check === true ? await telegramCheck(env) : "";
   if (stmts.length) await env.DB.batch(stmts);
   plansCache = { at: 0, plans: null };
-  return json(await withPairing(env));
+  return json({ ...(await withPairing(env)), ...(checked ? { telegram_check: checked } : {}) });
 }
 
 // ---------- Crowd learning ----------

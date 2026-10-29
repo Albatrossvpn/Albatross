@@ -285,23 +285,29 @@ function showTelegram(s) {
   const bot = s.telegram_bot_username;
   $("#t-tg").value = "";
   $("#t-tg-actions").classList.toggle("hidden", !bot);
-  $("#t-tg-pair").classList.toggle("hidden", !s.telegram_owner_chat);
   const status = $("#t-tg-status");
   status.textContent = "";
   if (!bot) { status.textContent = "Not connected."; return; }
   status.append(`Connected as @${bot}. `);
   if (s.telegram_owner_chat) status.append("Tickets arrive in your Telegram chat, and you answer by replying to them. ");
-  else if (s.telegram_pair_code) {
-    status.append("To receive tickets in Telegram, open the bot from the account or group that should get them and send ");
+  // A code, whenever there is one: to pair the first chat, or another one in its place.
+  if (s.telegram_pair_code) {
+    status.append(s.telegram_owner_chat ? "To move the tickets to another chat, send " : "To receive tickets in Telegram, open the bot from the account or group that should get them and send ");
     const code = document.createElement("code");
     code.textContent = `/pair ${s.telegram_pair_code}`;
-    status.append(code, ". The code works once.");
+    status.append(code, " there. The code works once.");
   }
 }
 $("#t-tg-off").addEventListener("click", async () => {
   if (!confirm("Disconnect the Telegram bot? Open tickets and chats are forgotten.")) return;
   const s = await guard(() => call("PUT", "settings", { telegram_bot_token: "" }), $("#t-error"));
   if (s) { showTelegram(s); toast("The bot is disconnected."); }
+});
+$("#t-tg-check").addEventListener("click", async () => {
+  const s = await guard(() => call("PUT", "settings", { telegram_check: true }), $("#t-error"));
+  if (!s) return;
+  showTelegram(s);
+  $("#t-tg-status").append(` ${s.telegram_check || ""}`);
 });
 $("#t-tg-pair").addEventListener("click", async () => {
   const s = await guard(() => call("PUT", "settings", { telegram_pair_reset: true }), $("#t-error"));

@@ -19,6 +19,8 @@ const AI_TIMEOUT = 30_000;
 // platform leaves (30 seconds for everything): the model gets half of it, and
 // a summary the model did not write in time is the plain one.
 const SUMMARY_TIMEOUT = 14_000;
+const SUMMARY_INPUT = 9000; // what the model reads of a long conversation: its start and its end
+const MAX_TRANSCRIPT = 100_000; // what the mail carries of one: all of it, up to this
 
 // Only the websites (and their mirror on GitHub Pages) may read the answers in
 // a browser; the account pages (same origin) need no header.
@@ -140,8 +142,13 @@ export function splitHandoff(text) {
   return { text: text.replace(/\[\[\s*HUMAN\s*\]\]/gi, "").trim().slice(0, 2000), handoff };
 }
 
-const withTimeout = (p, ms) =>
-  Promise.race([p, new Promise((_, reject) => setTimeout(() => reject(new Error("The model took too long.")), ms))]);
+function withTimeout(p, ms) {
+  let timer;
+  const late = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("The model took too long.")), ms);
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
+}
 
 async function ask(env, system, messages, maxTokens, timeout = AI_TIMEOUT) {
   if (!env.AI) throw new Error("No AI binding.");
@@ -237,6 +244,18 @@ export function platformOf(ua) {
 const WHO = { user: "Visitor", assistant: "Assistant", team: "Team" };
 const transcript = (messages) => messages.map((m) => `${WHO[m.role] || "Visitor"}: ${m.content}`).join("\n\n");
 
+/** A text cut to `max` by leaving out its middle (said so), never splitting a character. */
+function clipMiddle(text, max, headShare = 0.3) {
+  if (text.length <= max) return text;
+  let head = text.slice(0, Math.floor(max * headShare));
+  let tail = text.slice(text.length - (max - head.length));
+  if (/[\ud800-\udbff]$/.test(head)) head = head.slice(0, -1);
+  if (/^[\udc00-\udfff]/.test(tail)) tail = tail.slice(1);
+  return `${head}\n\n[... ${text.length - head.length - tail.length} characters from the middle are left out ...]\n\n${tail}`;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** A summary for the owner when the model is not there to write one. */
 export function fallbackSummary(messages) {
   const first = (messages.find((m) => m.role === "user") || { content: "" }).content.replace(/\s+/g, " ").slice(0, 300);
@@ -267,7 +286,7 @@ export function composeEmail({ summary, messages, contact, meta, human = false }
     `Time: ${meta.time}`,
     "",
     "CONVERSATION",
-    transcript(messages),
+    clipMiddle(transcript(messages), MAX_TRANSCRIPT),
   ];
   return { subject, text: lines.join("\n") };
 }
@@ -303,17 +322,27 @@ export async function mailOwner(env, { messages, contact, meta, human = false })
   await noteMail(env, `Sending, ${stamp()}`);
   let summary = "";
   try {
-    if (messages.length) summary = await ask(env, SUMMARY_PROMPT, [{ role: "user", content: transcript(messages) }], 400, SUMMARY_TIMEOUT);
+    if (messages.length) summary = await ask(env, SUMMARY_PROMPT, [{ role: "user", content: clipMiddle(transcript(messages), SUMMARY_INPUT) }], 400, SUMMARY_TIMEOUT);
   } catch (e) {
     console.warn("support summary:", e && e.message ? e.message : e);
   }
   const { subject, text } = composeEmail({ summary: summary || fallbackSummary(messages), messages, contact, meta, human });
   const from = isEmail(env.CONTACT_EMAIL) ? env.CONTACT_EMAIL : "support@albatrossvpn.online";
-  try {
-    await env.EMAIL.send({ from: { email: from, name: "Albatross support bot" }, to, subject, text });
-  } catch (e) {
-    await noteMail(env, `Failed, ${stamp()}: ${oneLine(e && e.message ? e.message : e, 200)}`);
-    throw e;
+  // One more try after a moment: a hiccup of the mail service is not the end of a summary.
+  let failure = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      await env.EMAIL.send({ from: { email: from, name: "Albatross support bot" }, to, subject, text });
+      failure = null;
+      break;
+    } catch (e) {
+      failure = e;
+      if (attempt === 0) await sleep(1500);
+    }
+  }
+  if (failure) {
+    await noteMail(env, `Failed, ${stamp()}: ${oneLine(failure && failure.message ? failure.message : failure, 200)}`);
+    throw failure;
   }
   await noteMail(env, `Sent, ${stamp()}`);
   return true;

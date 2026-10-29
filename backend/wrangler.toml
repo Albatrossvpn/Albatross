@@ -33,10 +33,11 @@ binding = "AI"
 name = "EMAIL"
 
 # Users' reports about servers are summed into list/servers/crowd.json
-# every hour, and the Telegram support bot ends the chats that went quiet
-# every ten minutes (both scheduled in src/index.js).
+# every hour (when the Telegram bot's webhook is checked too), and the
+# Telegram support bot ends the chats that went quiet every minute (both
+# scheduled in src/index.js).
 [triggers]
-crons = ["23 * * * *", "*/10 * * * *"]
+crons = ["23 * * * *", "* * * * *"]
 
 [[d1_databases]]
 binding = "DB"

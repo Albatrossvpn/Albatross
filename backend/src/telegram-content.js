@@ -22,7 +22,11 @@ export const DEVICES = {
   mac: { button: "💻 Mac", name: "a Mac" },
 };
 
+// A button on a screen of the menu changes that screen in place ("menu");
+// one under an answer or a closing note sends a new message ("mn", "cn"), so
+// that what is above it stays.
 const MENU_BUTTON = btn("⬅ Menu", "menu");
+const MENU_NEW = btn("📋 Menu", "mn");
 const TEAM_BUTTON = btn("🧑‍💼 Talk to our team", "h");
 
 /** The main menu. */
@@ -47,9 +51,9 @@ Type your question and I answer right away, or use the menu.
 /close - close your ticket, or end this chat
 /help - this message
 
-I am an AI assistant and can be wrong. Never send a password here. When a chat ends, a short summary goes to our team.`;
+I am an AI assistant and can be wrong. Never send a password here. A chat ends with /close or about half an hour after your last message: a short summary goes to our team, and the chat is deleted.`;
 
-export const help = () => ({ text: HELP, markup: keys([btn("📋 Menu", "menu")]) });
+export const help = () => ({ text: HELP, markup: keys([MENU_NEW]) });
 
 // ---------- A connection that fails ----------
 
@@ -86,26 +90,37 @@ const GUIDES = {
       "Close and reopen the connection app.",
     ],
   },
+  mac: {
+    title: "💻 Mac",
+    intro: "On a Mac the servers live in a connection app (V2Box, Streisand, Hiddify or sing-box).\n\n",
+    steps: [
+      "Open your <b>account page</b> in Safari and check the allowance is not used up or expired.",
+      "<b>Add the servers again</b> with the button on that page (all servers, one country, or the edge).",
+      "In the connection app, <b>refresh</b> the Albatross servers.",
+      "Check that date and time are set automatically (System Settings, General, Date &amp; Time).",
+      "Switch to another network (another Wi-Fi, or your phone's hotspot); on a filtered network it can take up to a minute.",
+      "Quit the connection app and open it again.",
+    ],
+  },
 };
-GUIDES.mac = { ...GUIDES.ios, title: "💻 Mac" };
 
 /** The checklist for one device, and whether it helped. */
 export function connectGuide(device) {
-  const g = GUIDES[device];
+  const g = Object.hasOwn(GUIDES, device) ? GUIDES[device] : null;
   if (!g) return connectPicker();
   const steps = g.steps.map((s, i) => `${i + 1}. ${s}`).join("\n");
-  const phone = device === "ios" || device === "mac";
+  const account = device === "ios" || device === "mac";
   return {
     text: `${g.title}: <b>it won't connect</b>\n\n${g.intro || "Try these in order:\n\n"}${steps}\n\nDid it work?`,
     markup: keys(
       [btn("✅ It works now", `ok:${device}`), btn("❌ Still not connecting", `no:${device}`)],
-      ...(phone ? [[link("🔗 Open account page", ACCOUNT)]] : []),
+      ...(account ? [[link("🔗 Open account page", ACCOUNT)]] : []),
       [btn("⬅ Other device", "c"), MENU_BUTTON],
     ),
   };
 }
 
-export const FIXED = { text: "🎉 <b>Great, you are all set!</b>\n\nIf anything else comes up, I am right here.", markup: keys([btn("📋 Menu", "menu")]) };
+export const FIXED = { text: "🎉 <b>Great, you are all set!</b>\n\nIf anything else comes up, I am right here.", markup: keys([MENU_NEW]) };
 
 /** After the checklist did not help: the next message is the problem, in words. */
 export function stillBroken() {
@@ -124,13 +139,6 @@ export function installPicker() {
   };
 }
 
-const IPHONE_STEPS = `There is no Albatross app in the App Store. Instead:
-
-1. In <b>Safari</b>, open your account page and sign in.
-2. Tap <b>Share, then Add to Home Screen</b>, so it opens like an app.
-3. Install a connection app from the App Store: <b>V2Box</b> or <b>Streisand</b> are free (Shadowrocket, Hiddify and sing-box work too).
-4. On the account page, tap the button that adds the servers: all of them, one country, or the edge. They appear under the Albatross name and refresh by themselves.`;
-
 export function installGuide(device) {
   const back = [btn("⬅ Other device", "i"), MENU_BUTTON];
   if (device === "win") {
@@ -145,9 +153,15 @@ export function installGuide(device) {
       markup: keys([link("⬇️ Download the APK", `${SITE}/#download`)], back),
     };
   }
-  if (device === "ios" || device === "mac") {
+  if (device === "ios") {
     return {
-      text: `${device === "ios" ? "🍎 <b>Install on iPhone or iPad</b>" : "💻 <b>Install on Mac</b>"}\n\n${IPHONE_STEPS}\n\niOS 15 or newer.`,
+      text: "🍎 <b>Install on iPhone or iPad</b>\n\nThere is no Albatross app in the App Store. Instead:\n\n1. In <b>Safari</b>, open your account page and sign in.\n2. Tap <b>Share, then Add to Home Screen</b>, so it opens like an app.\n3. Install a connection app from the App Store: <b>V2Box</b> or <b>Streisand</b> are free (Shadowrocket, Hiddify and sing-box work too).\n4. On the account page, tap the button that adds the servers: all of them, one country, or the edge. They appear under the Albatross name and refresh by themselves.\n\niOS 15 or newer.",
+      markup: keys([link("🔗 Open account page", ACCOUNT)], back),
+    };
+  }
+  if (device === "mac") {
+    return {
+      text: "💻 <b>Install on Mac</b>\n\nThere is no Albatross app for Mac yet. Instead:\n\n1. In <b>Safari</b>, open your account page and sign in.\n2. Install a connection app from the App Store: <b>V2Box</b> or <b>Streisand</b> are free (Hiddify and sing-box work too).\n3. On the account page, click the button that adds the servers: all of them, one country, or the edge. They appear under the Albatross name and refresh by themselves.\n\nThe connection app's page in the App Store says which macOS it needs.",
       markup: keys([link("🔗 Open account page", ACCOUNT)], back),
     };
   }
@@ -201,38 +215,63 @@ Every file on the download page has a SHA-256 fingerprint.`,
 
 // ---------- Answers, tickets ----------
 
-/** What sits under an answer of the assistant: whether it helped, and the way to a person. */
+/** What sits under an answer of the assistant: whether it helped, and the way to a person. The last part of the data says whether the answer handed over to the team. */
 export function feedback(handoff = false) {
-  return handoff ? keys([TEAM_BUTTON], [btn("👍 Helpful", "fb:u"), btn("👎 Not helpful", "fb:d")]) : keys([btn("👍 Helpful", "fb:u"), btn("👎 Not helpful", "fb:d")]);
+  const h = handoff ? ":1" : "";
+  const rate = [btn("👍 Helpful", `fb:u${h}`), btn("👎 Not helpful", `fb:d${h}`)];
+  return handoff ? keys([TEAM_BUTTON], rate) : keys(rate);
 }
 
+/** After a thumbs up: the way to a person stays where the answer pointed to it. */
+export const thanks = (handoff = false) => (handoff ? keys([TEAM_BUTTON], [MENU_NEW]) : keys([MENU_NEW]));
 /** After a thumbs down: what else can be done. */
-export const SORRY = keys([TEAM_BUTTON], [btn("🔌 Fix a connection", "c"), MENU_BUTTON]);
-export const THANKS = keys([btn("📋 Menu", "menu")]);
-export const TRY_AGAIN = keys([TEAM_BUTTON], [MENU_BUTTON]);
+export const SORRY = keys([TEAM_BUTTON], [btn("🔌 Fix a connection", "cn"), MENU_NEW]);
+export const THANKS = keys([MENU_NEW]);
+export const TRY_AGAIN = keys([TEAM_BUTTON], [MENU_NEW]);
 
 export const CAN_ONLY_READ = {
   text: "I can only read text here. Please describe the problem in words, or open a ticket if you want to send screenshots.",
   markup: keys([TEAM_BUTTON]),
 };
 
-export const ticketKeys = keys([btn("✅ My problem is solved", "tc")]);
+/** The button under a ticket's messages carries the ticket's number, so an old one never closes a newer ticket. */
+export const ticketKeys = (id) => keys([btn("✅ My problem is solved", `tc:${id}`)]);
 
 export function ticketOpened(id, hadChat) {
   return {
     text: `🎫 <b>Ticket #${id} opened</b>\n\nOur team has been notified${hadChat ? " and has your chat so far" : ""}. ${hadChat ? "Add anything that helps" : "Write your problem here"}: the exact message, your device and network. Screenshots are welcome.\n\nTheir reply will arrive in this chat.`,
-    markup: ticketKeys,
+    markup: ticketKeys(id),
   };
 }
 
-export const ticketOpen = (id) => ({ text: `You already have <b>ticket #${id}</b> open. Just write here and our team will see it.`, markup: ticketKeys });
-export const ticketClosedByUser = (id) => ({ text: `✅ Glad it is sorted! <b>Ticket #${id}</b> is closed.`, markup: THANKS });
-export const ticketClosedByTeam = (id) => ({ text: `✅ <b>Ticket #${id} is closed.</b> If something else comes up, just write to me or open the menu.`, markup: THANKS });
+const rating = keys([1, 2, 3, 4, 5].map((n) => btn(`${n}⭐`, `r:${n}`)), [MENU_NEW]);
+export const ticketOpen = (id) => ({ text: `You already have <b>ticket #${id}</b> open. Just write here and our team will see it.`, markup: ticketKeys(id) });
+export const ticketClosedByUser = (id) => ({ text: `✅ Glad it is sorted! <b>Ticket #${id}</b> is closed.\n\nHow was our help?`, markup: rating });
+export const ticketClosedByTeam = (id) => ({ text: `✅ <b>Ticket #${id} is closed.</b> If something else comes up, just write to me or open the menu.\n\nHow was our help?`, markup: rating });
 export const ticketClosedIdle = (id) => ({ text: `<b>Ticket #${id}</b> was closed after three quiet days. Write to me any time to start again.`, markup: THANKS });
-export const teamSays = (text) => `💬 <b>Albatross team</b>\n${esc(text)}`;
-export const ENDED = { text: "Thank you! A short summary of this chat has gone to our team. Write any time to start again.", markup: THANKS };
+export const rated = (n) => ({ text: `Thank you! You rated our help ${n} out of 5.`, markup: THANKS });
+export const TICKET_GONE = { text: "That ticket is already closed. Write to me any time to start again.", markup: THANKS };
+/** The team's words, already made safe for HTML (the bot cuts them to fit first). */
+export const teamSays = (html) => `💬 <b>Albatross team</b>\n${html}`;
+
+/** The end of a chat: its summary went to the team only if it did. */
+export const ended = (mailed) => ({
+  text: mailed ? "Thank you! A short summary of this chat has gone to our team, and the chat is deleted here. Write any time to start again." : "This chat is closed and deleted. Write any time to start again.",
+  markup: THANKS,
+});
 export const NOTHING_TO_END = { text: "There is nothing to close right now. Write your question, or open the menu.", markup: THANKS };
+
 export const SLOW_DOWN = `You are sending messages very fast. Please wait a little, or email ${MAIL}.`;
+export const WENT_WRONG = `Something went wrong on our side. Please try again in a moment, or email ${MAIL}.`;
+export const TICKET_LIMIT = `You have opened several tickets today, so I cannot open another one right now. Please try again tomorrow, or email ${MAIL}.`;
+export const TEAM_BUSY = `Our team has a lot of tickets right now, so I cannot open another one. Please email ${MAIL}, or try again in a while.`;
+export const TEAM_UNREACHABLE = `I could not reach our team's chat just now, so they may be slow to see your message. If it is urgent, email ${MAIL}.`;
+
+/** No team chat is paired: there is nobody to answer in Telegram, and the person is told so. */
+export const noTeam = (mailed) => ({
+  text: `Our team is not connected to this chat yet, so I cannot open a ticket here.${mailed ? "\n\nI sent them this chat by email, but they cannot answer in Telegram." : ""}\n\nFor an answer from a person, email <b>${MAIL}</b> and include your Albatross username.`,
+  markup: keys([MENU_NEW]),
+});
 
 // ---------- The team's side ----------
 

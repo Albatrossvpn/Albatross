@@ -6,25 +6,34 @@
 // the webhook; Telegram calls POST /api/v1/telegram with a secret the panel's
 // service derives from its own, so nothing else needs to be set up.
 //
-// What is kept: a chat's messages until half an hour after the last one, when
-// a summary is mailed to the owner and they are deleted; a ticket's messages
-// until it is closed.
-import { DAY, b64u, safeEqual } from "./lib.js";
+// What is kept: a chat's messages until about half an hour after the last one
+// (the schedule runs every minute), when a summary is mailed to the owner and
+// they are deleted; a ticket's messages until it is closed, and a closed
+// ticket keeps its number and nothing of the person. Rate limits remember a
+// keyed hash of a person's id, never the id.
+import { DAY, b64u, safeEqual, tag } from "./lib.js";
 import { CANNED, allowed, cleanMessages, mailOwner, oneLine, reply, stamp, today } from "./support.js";
 import * as view from "./telegram-content.js";
 
-export const SWEEP_CRON = "*/10 * * * *";
+export const SWEEP_CRON = "* * * * *";
 
 const IDLE = 30 * 60; // a chat with no new message for this long is over
 const TICKET_IDLE = 3 * DAY; // a ticket nobody writes to is closed
-const SWEEP_MAX = 8; // chats ended per run
+const SWEEP_MAX = 3; // chats ended per run: each may take a summary and a mail
+const SWEEP_BUDGET = 20_000; // milliseconds after which a run starts nothing new
+const CLAIM = 120; // seconds a ticket that is being opened holds its person's place
 const MAX_STORED = 3000; // one message
+const MAX_ROWS = 300; // messages of one chat that go into its summary mail
 const AI_TIMEOUT = 18_000; // the platform leaves 30 seconds after the response for all of it
 const TOKEN = /^\d{5,12}:[A-Za-z0-9_-]{30,64}$/;
 const FIRST_TICKET = 1000;
+// One connection: Telegram sends the next update only after the last was answered.
+const HOOK = { allowed_updates: ["message", "callback_query"], max_connections: 1 };
 
 const enc = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const log = (what) => (e) => console.error(`telegram ${what}:`, e && e.stack ? e.stack : e);
 
 const COMMANDS = [
   { command: "start", description: "Start, and the main menu" },
@@ -46,30 +55,36 @@ const SHORT = "Albatross VPN support: instant answers, and a team behind them.";
 
 // ---------- Settings and the Bot API ----------
 
-const KEYS = ["telegram_bot_token", "telegram_bot_username", "telegram_owner_chat"];
+const KEYS = ["telegram_bot_token", "telegram_bot_username", "telegram_owner_chat", "telegram_webhook_url"];
 
-/** The bot's token, name and the team's chat, in one read. */
+/** The bot's token, name, webhook address and the team's chat, in one read. */
 async function config(env) {
   const { results } = await env.DB.prepare(`SELECT key, value FROM settings WHERE key IN (${KEYS.map((_, i) => `?${i + 1}`).join(", ")})`).bind(...KEYS).all();
   const c = Object.fromEntries(results.map((r) => [r.key, r.value]));
-  return { token: c.telegram_bot_token || "", name: c.telegram_bot_username || "", team: Number(c.telegram_owner_chat) || 0 };
+  return { token: c.telegram_bot_token || "", name: c.telegram_bot_username || "", team: Number(c.telegram_owner_chat) || 0, url: c.telegram_webhook_url || "" };
 }
 
 const setting = async (env, key) => ((await env.DB.prepare("SELECT value FROM settings WHERE key = ?1").bind(key).first()) || {}).value || "";
 const save = (env, key, value) => env.DB.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2").bind(key, value).run();
 const drop = (env, ...keys) => env.DB.batch(keys.map((k) => env.DB.prepare("DELETE FROM settings WHERE key = ?1").bind(k)));
+const forgetChats = (env) => env.DB.batch(["tg_users", "tg_messages", "tg_tickets", "tg_relay"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
 
-/** Text that fits in a message once made safe for Telegram's HTML. */
+/** Text that fits in a message once made safe for Telegram's HTML; a cut is marked with an ellipsis and never splits a character. */
 function fit(text, max = 3900) {
   let t = String(text);
-  while (view.esc(t).length > max) t = t.slice(0, Math.floor(t.length * 0.8));
-  return view.esc(t);
+  let cut = false;
+  while (view.esc(t).length > (cut ? max - 1 : max)) {
+    t = t.slice(0, Math.floor(t.length * 0.9));
+    cut = true;
+  }
+  if (cut && /[\ud800-\udbff]$/.test(t)) t = t.slice(0, -1);
+  return view.esc(t) + (cut ? "…" : "");
 }
 
 /** The Bot API for one token. Every call answers `{ ok, result, description }` and never throws; the token is never in what is logged. */
 function bot(env, token) {
   const base = (env.TELEGRAM_API || "https://api.telegram.org").replace(/\/$/, "");
-  async function call(method, payload = {}) {
+  async function once(method, payload) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     try {
@@ -80,6 +95,16 @@ function bot(env, token) {
     } finally {
       clearTimeout(timer);
     }
+  }
+  async function call(method, payload = {}) {
+    const out = await once(method, payload);
+    // Telegram asks to wait when a chat gets too much at once: a short wait is kept, a long one is not.
+    const wait = out && out.error_code === 429 && out.parameters ? Number(out.parameters.retry_after) : 0;
+    if (wait > 0 && wait <= 5) {
+      await sleep(wait * 1000 + 100);
+      return once(method, payload);
+    }
+    return out;
   }
   const html = { parse_mode: "HTML", link_preview_options: { is_disabled: true } };
   async function send(chat, text, markup, extra = {}) {
@@ -120,19 +145,22 @@ export async function connect(env, request, token) {
   const tg = bot(env, token);
   const me = await tg.call("getMe");
   if (!me.ok) return { error: `Telegram did not accept this token: ${oneLine(me.description, 120)}` };
-  const hook = await tg.call("setWebhook", {
-    url: `${new URL(request.url).origin}/api/v1/telegram`,
-    secret_token: await hookSecret(env),
-    allowed_updates: ["message", "callback_query"],
-    drop_pending_updates: true,
-    max_connections: 20,
-  });
+  const url = `${new URL(request.url).origin}/api/v1/telegram`;
+  const hook = await tg.call("setWebhook", { url, secret_token: await hookSecret(env), ...HOOK, drop_pending_updates: true });
   if (!hook.ok) return { error: `Telegram could not set the webhook: ${oneLine(hook.description, 120)}` };
+  // Another bot than before: the old one stops sending here, and what belonged to it is forgotten, the paired team chat included.
+  const before = await config(env);
+  if (before.token && before.token.split(":")[0] !== token.split(":")[0]) {
+    await bot(env, before.token).call("deleteWebhook", { drop_pending_updates: true });
+    await forgetChats(env);
+    await drop(env, "telegram_owner_chat", "telegram_pair_code");
+  }
   // The menu and the texts people see before they write; failing to set them does not stop the bot.
   await Promise.all([tg.call("setMyCommands", { commands: COMMANDS }), tg.call("setMyDescription", { description: ABOUT }), tg.call("setMyShortDescription", { short_description: SHORT })]);
   const username = String(me.result.username || "");
   await save(env, "telegram_bot_token", token);
   await save(env, "telegram_bot_username", username);
+  await save(env, "telegram_webhook_url", url);
   if (!(await setting(env, "telegram_owner_chat")) && !(await setting(env, "telegram_pair_code"))) await save(env, "telegram_pair_code", newCode());
   return { username };
 }
@@ -141,8 +169,8 @@ export async function connect(env, request, token) {
 export async function disconnect(env) {
   const { token } = await config(env);
   if (token) await bot(env, token).call("deleteWebhook", { drop_pending_updates: true });
-  await drop(env, "telegram_bot_token", "telegram_bot_username", "telegram_owner_chat", "telegram_pair_code");
-  await env.DB.batch(["tg_users", "tg_messages", "tg_tickets", "tg_relay"].map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+  await drop(env, ...KEYS, "telegram_pair_code");
+  await forgetChats(env);
 }
 
 /** A new pairing code; the chat paired until now stays until another is paired. */
@@ -152,13 +180,38 @@ export async function repair(env) {
   return code;
 }
 
+/** What Telegram says about the webhook, in a sentence, for the panel's "Check the bot". */
+export async function check(env) {
+  const { token, name } = await config(env);
+  if (!token) return "The bot is not connected.";
+  const info = await bot(env, token).call("getWebhookInfo");
+  if (!info.ok) return `Telegram did not answer: ${oneLine(info.description, 120)}`;
+  const hook = info.result || {};
+  if (!hook.url) return `@${name} is reachable, but its webhook is not set. Save the token again.`;
+  const when = hook.last_error_date ? new Date(hook.last_error_date * 1000).toISOString().slice(0, 16).replace("T", " ") : "";
+  const last = hook.last_error_message ? ` Last error: ${oneLine(hook.last_error_message, 120)} (${when} UTC).` : " No errors.";
+  return `@${name} is reachable; its webhook is set and ${hook.pending_update_count || 0} update(s) are waiting.${last}`;
+}
+
+/** Every hour: a webhook that is gone, or points elsewhere, is set again. */
+export async function heal(env) {
+  const { token, url } = await config(env);
+  if (!token || !url) return;
+  const tg = bot(env, token);
+  const info = await tg.call("getWebhookInfo");
+  if (!info.ok || (info.result && info.result.url === url)) return;
+  const res = await tg.call("setWebhook", { url, secret_token: await hookSecret(env), ...HOOK });
+  console.warn("telegram: the webhook was not set; it was set again:", res.ok ? "ok" : oneLine(res.description, 100));
+}
+
 // ---------- The webhook ----------
 
 /** POST /telegram: an update from Telegram; answered at once, handled after. */
 export async function webhook(request, env, kit, ctx) {
+  // Whoever is not Telegram costs nothing more than this comparison.
+  if (!(await safeEqual(request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "", await hookSecret(env)))) return new Response("Not allowed.", { status: 401 });
   const c = await config(env);
   if (!c.token) return new Response("Not connected.", { status: 404 });
-  if (!(await safeEqual(request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "", await hookSecret(env)))) return new Response("Not allowed.", { status: 401 });
   let update;
   try {
     const text = await request.text();
@@ -167,53 +220,83 @@ export async function webhook(request, env, kit, ctx) {
     update = null;
   }
   if (!update || typeof update !== "object" || !Number.isSafeInteger(update.update_id)) return new Response("Bad request.", { status: 400 });
-  const work = handle({ env, kit, tg: bot(env, c.token), team: c.team, name: c.name }, update).catch((e) => console.error("telegram:", e && e.stack ? e.stack : e));
+  const run = { env, kit, tg: bot(env, c.token), team: c.team, name: c.name };
+  const work = handle(run, update).catch((e) => failed(run, update, e));
   if (ctx && ctx.waitUntil) ctx.waitUntil(work);
   else await work;
   return new Response("ok");
+}
+
+/** Something broke while handling an update: it is logged, and the person is told rather than left waiting. */
+async function failed(c, update, e) {
+  log("update")(e);
+  const q = update.callback_query;
+  const m = update.message;
+  if (q) await c.tg.answer(q.id, "Something went wrong. Please try again.");
+  else if (m && m.chat && m.chat.type === "private" && m.from && !m.from.is_bot) await c.tg.send(m.chat.id, view.WENT_WRONG);
 }
 
 /** Who gets what: the team's chat, the people in private chats, nobody else. */
 async function handle(c, update) {
   if (update.callback_query) return onCallback(c, update);
   const m = update.message;
-  if (!m || !m.chat || !m.from || m.from.is_bot) return;
+  if (!m || !m.chat) return;
+  // A group that became a supergroup has a new id: the team follows it.
+  if (m.migrate_to_chat_id) return c.team && m.chat.id === c.team ? moveTeam(c, m.migrate_to_chat_id) : undefined;
+  const person = !!m.from && !m.from.is_bot;
+  // An administrator who writes anonymously in a group is the group (Telegram's own "GroupAnonymousBot").
+  const anonymous = !!m.from && m.from.username === "GroupAnonymousBot" && m.chat.type !== "private";
+  if (!person && !anonymous) return;
   const text = typeof m.text === "string" ? m.text : "";
-  const pair = /^\/pair(?:@\w+)?(?:\s+(.*))?$/is.exec(text);
+  const pair = /^\/pair(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text);
   if (pair) return onPair(c, m, pair[1]);
   if (c.team && m.chat.id === c.team && (await onTeam(c, m))) return;
-  if (m.chat.type === "private") return onUser(c, update, m);
+  if (m.chat.type === "private" && person) return onUser(c, update, m);
+}
+
+/** A command, as `{ name, arg }`; null when the text is none, or is meant for another bot in the same group. */
+function parseCommand(text, botName) {
+  const m = /^\/([a-z_]+)(?:@(\w+))?(?:\s+([\s\S]*))?$/i.exec(text);
+  if (!m || (m[2] && botName && m[2].toLowerCase() !== botName.toLowerCase())) return null;
+  return { name: m[1].toLowerCase(), arg: (m[3] || "").trim() };
 }
 
 // ---------- Counting, limits, the stored conversation ----------
 
 const bump = (env, key) => env.DB.prepare("INSERT INTO tg_stats (day, key, n) VALUES (?1, ?2, 1) ON CONFLICT (day, key) DO UPDATE SET n = n + 1").bind(today(), key).run();
 
-/** Whether this chat may go on; at most one notice an hour when it may not. */
-async function permitted(c, chat, ai = false) {
-  const t = String(chat);
-  const rules = [
-    { key: `tg:h:${t}`, max: 40, window: 3600 },
-    { key: `tg:d:${t}`, max: 200, window: DAY },
-    ...(ai ? [{ key: `support:chat:all:${today()}`, max: 900, window: DAY }] : []),
-  ];
+/** What the rate limits remember of a person: a keyed hash of the id. */
+const idTag = (c, chat) => tag(c.env.TOKEN_SECRET, `telegram:${chat}`);
+
+/** A notice of one kind at most once an hour to one person, however much they send. */
+async function noticeOnce(c, t, kind, chat, text, markup) {
+  const key = `tg:note:${kind}:${t}`;
+  if (await c.kit.blocked(c.env, key, 1, 3600)) return;
+  await c.kit.count(c.env, key, 3600);
+  await c.tg.send(chat, text, markup);
+}
+
+/** Whether a person may go on, before anything of theirs is stored: so many messages an hour and a day, so many button presses an hour. */
+async function pace(c, t, chat, button) {
+  const rules = button
+    ? [{ key: `tg:b:h:${t}`, max: 120, window: 3600 }]
+    : [{ key: `tg:m:h:${t}`, max: 30, window: 3600 }, { key: `tg:m:d:${t}`, max: 120, window: DAY }];
   if (await allowed(c.env, c.kit, rules)) return true;
-  const note = `tg:note:${t}`;
-  if (!(await c.kit.blocked(c.env, note, 1, 3600))) {
-    await c.kit.count(c.env, note, 3600);
-    await c.tg.send(chat, view.esc(ai ? CANNED.busy : view.SLOW_DOWN));
-  }
+  if (!button) await noticeOnce(c, t, "pace", chat, view.SLOW_DOWN);
   return false;
 }
 
+/** Notes who writes; null when this update was just handled (a retry of Telegram's carries the same id). One statement, so a flood costs little. */
 async function touch(env, chat, from, updateId) {
-  await env.DB.prepare(
-    `INSERT INTO tg_users (chat_id, name, username, updated) VALUES (?1, ?2, ?3, ?4)
-     ON CONFLICT (chat_id) DO UPDATE SET name = ?2, username = ?3, updated = ?4`,
-  ).bind(chat, oneLine(from.first_name, 40), String(from.username || "").slice(0, 40), now()).run();
-  // Telegram may send an update twice: only the first one is handled.
-  const first = await env.DB.prepare("UPDATE tg_users SET last_update = ?2 WHERE chat_id = ?1 AND last_update < ?2").bind(chat, updateId).run();
-  if (!first.meta.changes) return null;
+  const written = await env.DB.prepare(
+    `INSERT INTO tg_users (chat_id, name, username, updated, last_update) VALUES (?1, ?2, ?3, ?4, ?5)
+     ON CONFLICT (chat_id) DO UPDATE SET
+       name = CASE WHEN blocked = 1 THEN '' ELSE ?2 END,
+       username = CASE WHEN blocked = 1 THEN '' ELSE ?3 END,
+       updated = ?4, last_update = ?5
+     WHERE last_update != ?5`,
+  ).bind(chat, oneLine(from.first_name, 40), String(from.username || "").slice(0, 40), now(), updateId).run();
+  if (!written.meta.changes) return null;
   return env.DB.prepare("SELECT * FROM tg_users WHERE chat_id = ?1").bind(chat).first();
 }
 
@@ -226,30 +309,43 @@ async function conversation(env, chat, limit = 24) {
 
 const setMode = (env, chat, mode, device = "") => env.DB.prepare("UPDATE tg_users SET mode = ?2, device = ?3 WHERE chat_id = ?1").bind(chat, mode, device).run();
 
-const KINDS = [["photo", "photo"], ["document", "file"], ["voice", "voice message"], ["video", "video"], ["audio", "audio"], ["video_note", "video message"], ["animation", "GIF"], ["sticker", "sticker"], ["location", "location"], ["contact", "contact"], ["poll", "poll"]];
+// A GIF is also a document, a venue also a location: the more specific comes first.
+const KINDS = [["photo", "photo"], ["animation", "GIF"], ["document", "file"], ["voice", "voice message"], ["video", "video"], ["audio", "audio"], ["video_note", "video message"], ["sticker", "sticker"], ["venue", "place"], ["location", "location"], ["contact", "contact"], ["poll", "poll"]];
 const kindOf = (m) => (KINDS.find(([k]) => m[k]) || [])[1] || "";
 const words = (m) => (typeof m.text === "string" ? m.text : kindOf(m) ? `[${kindOf(m)}]${m.caption ? " " + m.caption : ""}` : "");
 
 const who = (u) => `${u.name || "Someone"}${u.username ? ` (@${u.username})` : ""}`;
+
+/** Mails the owner a conversation (all of it); true when it went. Never throws. */
+async function mailChat(c, user, rows, { human = false, ticket = 0 } = {}) {
+  const messages = rows.map((r) => ({ role: r.role, content: r.content }));
+  try {
+    return await mailOwner(c.env, { messages, contact: "", human, meta: { source: "telegram", telegram: { id: user.chat_id, name: user.name, username: user.username }, ...(ticket ? { ticket } : {}), time: stamp() } });
+  } catch (e) {
+    log("mail")(e && e.message ? e.message : e);
+    return false;
+  }
+}
+
+/** Whether another summary may be mailed for this person (a few a day) and in all (a hundred a day). */
+async function mailAllowed(c, t) {
+  return allowed(c.env, c.kit, [{ key: `tg:mail:d:${t}`, max: 8, window: DAY }, { key: `tg:mail:all:${today()}`, max: 100, window: DAY }]);
+}
 
 // ---------- A person writes ----------
 
 async function onUser(c, update, m) {
   const { env, tg } = c;
   const chat = m.chat.id;
+  const t = await idTag(c, chat);
+  if (!(await pace(c, t, chat, false))) return;
   const user = await touch(env, chat, m.from, update.update_id);
   if (!user || user.blocked) return;
   const text = typeof m.text === "string" ? m.text.trim() : "";
-  const command = /^\/([a-z_]+)(?:@\w+)?(?:\s+(.*))?$/is.exec(text);
-  if (command) {
-    if (!(await permitted(c, chat))) return;
-    return onCommand(c, user, command[1].toLowerCase(), (command[2] || "").trim());
-  }
-  if (user.mode === "ticket") return toTeam(c, user, m);
-  if (!text) {
-    if (!(await permitted(c, chat))) return;
-    return tg.send(chat, view.CAN_ONLY_READ.text, view.CAN_ONLY_READ.markup);
-  }
+  const command = parseCommand(text, ""); // in a private chat every command is for this bot
+  if (command) return onCommand(c, user, command.name, command.arg);
+  if (user.mode === "ticket" && user.ticket_id > 0) return toTeam(c, user, m);
+  if (!text) return tg.send(chat, view.CAN_ONLY_READ.text, view.CAN_ONLY_READ.markup);
   return ask(c, user, text);
 }
 
@@ -259,11 +355,11 @@ async function onCommand(c, user, command, arg) {
   const show = (s) => tg.send(chat, s.text, s.markup);
   switch (command) {
     case "start": {
-      if (!user.ticket_id) await setMode(env, chat, "");
+      if (user.ticket_id <= 0) await setMode(env, chat, "");
       const topic = arg.toLowerCase();
       if (topic === "human" || topic === "team") return openTicket(c, user);
       const screens = { connect: view.connectPicker(), install: view.installPicker(), plans: view.PLANS, account: view.ACCOUNT_INFO, downloads: view.DOWNLOADS };
-      return show(screens[topic] || view.menu(user.name));
+      return show(Object.hasOwn(screens, topic) ? screens[topic] : view.menu(user.name));
     }
     case "menu":
       return show(view.menu(user.name));
@@ -273,7 +369,7 @@ async function onCommand(c, user, command, arg) {
       return openTicket(c, user);
     case "close":
     case "end":
-      return user.ticket_id ? closeTicket(c, user.ticket_id, "user") : endChat(c, user, true);
+      return user.ticket_id > 0 ? closeTicket(c, user.ticket_id, "user") : endChat(c, user, true);
     default:
       return tg.send(chat, `I do not know that command.\n\n${view.help().text}`, view.help().markup);
   }
@@ -283,7 +379,10 @@ async function onCommand(c, user, command, arg) {
 async function ask(c, user, text) {
   const { env, tg } = c;
   const chat = user.chat_id;
-  if (!(await permitted(c, chat, true))) return;
+  // All the answers of Telegram in a day have their own budget, apart from the websites'.
+  if (!(await allowed(env, c.kit, [{ key: `tg:chat:all:${today()}`, max: 600, window: DAY }]))) {
+    return noticeOnce(c, await idTag(c, chat), "busy", chat, view.esc(CANNED.busy), view.TRY_AGAIN);
+  }
   if (!(await env.DB.prepare("SELECT 1 AS found FROM tg_messages WHERE chat_id = ?1 LIMIT 1").bind(chat).first())) await bump(env, "chats");
   await remember(env, chat, "user", text);
   tg.typing(chat);
@@ -317,44 +416,87 @@ function card(ticket, user, rows, fresh) {
 
 const teamKeys = (ticket, chat) => ({ inline_keyboard: [[{ text: "✅ Close", callback_data: `o:c:${ticket}` }, { text: "🚫 Block", callback_data: `o:b:${chat}` }, { text: "📜 Full chat", callback_data: `o:f:${ticket}` }]] });
 
-/** Tells the team's chat something about a ticket and remembers the message, so that replying to it answers the person. */
+const remind = (c, id, message) => c.env.DB.prepare("INSERT OR REPLACE INTO tg_relay (team_chat, message_id, ticket_id, at) VALUES (?1, ?2, ?3, ?4)").bind(c.team, message, id, now()).run();
+
+/** Follows a group that became a supergroup: the team's chat has a new id, and so do the cards in it. */
+async function moveTeam(c, to) {
+  const from = c.team;
+  c.team = to;
+  await save(c.env, "telegram_owner_chat", String(to));
+  await c.env.DB.prepare("UPDATE tg_relay SET team_chat = ?2 WHERE team_chat = ?1").bind(from, to).run();
+  await c.tg.call("setMyCommands", { commands: TEAM_COMMANDS, scope: { type: "chat", chat_id: to } });
+}
+
+/** Tells the team's chat something about a ticket and remembers the message, so that replying to it answers the person. Answers Telegram's answer, null when no chat is paired. */
 async function tellTeam(c, ticket, text, markup) {
   if (!c.team) return null;
-  const res = await c.tg.send(c.team, text, markup);
-  if (res.ok) await c.env.DB.prepare("INSERT OR REPLACE INTO tg_relay (team_chat, message_id, ticket_id, at) VALUES (?1, ?2, ?3, ?4)").bind(c.team, res.result.message_id, ticket, now()).run();
+  let res = await c.tg.send(c.team, text, markup);
+  const moved = !res.ok && res.parameters && res.parameters.migrate_to_chat_id;
+  if (moved) {
+    await moveTeam(c, moved);
+    res = await c.tg.send(c.team, text, markup);
+  }
+  if (res.ok) await remind(c, ticket, res.result.message_id);
   return res;
 }
 
+/** The person asks for a person. */
 async function openTicket(c, user) {
   const { env, tg } = c;
   const chat = user.chat_id;
-  if (user.ticket_id) {
-    const open = await ticketOf(env, user.ticket_id);
-    if (open && open.status === "open") return tg.send(chat, view.ticketOpen(open.id).text, view.ticketOpen(open.id).markup);
-  }
-  if (await c.kit.blocked(env, `tg:ticket:${chat}`, 5, DAY)) return tg.send(chat, view.esc(`You have opened several tickets today. Please write in the one that is open, or email ${view.MAIL}.`));
-  await c.kit.count(env, `tg:ticket:${chat}`, DAY);
-  const t = now();
-  const made = await env.DB.prepare("INSERT INTO tg_tickets (id, chat_id, opened, updated) VALUES ((SELECT COALESCE(MAX(id), ?3) + 1 FROM tg_tickets), ?1, ?2, ?2)").bind(chat, t, FIRST_TICKET).run();
-  const id = made.meta.last_row_id;
-  await env.DB.prepare("UPDATE tg_users SET mode = 'ticket', ticket_id = ?2, device = '' WHERE chat_id = ?1").bind(chat, id).run();
+  const have = user.ticket_id > 0 ? await ticketOf(env, user.ticket_id) : null;
+  if (have && have.status === "open") return tg.send(chat, view.ticketOpen(have.id).text, view.ticketOpen(have.id).markup);
   const rows = await conversation(env, chat);
+  const t = await idTag(c, chat);
+  // Nobody reads tickets in Telegram until a chat is paired: the owner gets the chat by mail, and the person is told how things stand.
+  if (!c.team) {
+    tg.typing(chat);
+    const mailed = rows.some((r) => r.role === "user") && (await mailAllowed(c, t)) ? await mailChat(c, user, rows, { human: true }) : false;
+    return tg.send(chat, view.noTeam(mailed).text, view.noTeam(mailed).markup);
+  }
+  if (await c.kit.blocked(env, `tg:ticket:${t}`, 5, DAY)) return tg.send(chat, view.TICKET_LIMIT);
+  if (await c.kit.blocked(env, `tg:tickets:all:${today()}`, 60, DAY)) return tg.send(chat, view.TEAM_BUSY);
+  // The place is taken first, so two presses at once open one ticket. A claim that was never finished (the marker is minus the time it was made) is let go of after a while.
+  const began = now();
+  const claimed = await env.DB.prepare(
+    `UPDATE tg_users SET ticket_id = ?2 WHERE chat_id = ?1 AND (
+       ticket_id = 0 OR (ticket_id < 0 AND ticket_id > ?3)
+       OR (ticket_id > 0 AND NOT EXISTS (SELECT 1 FROM tg_tickets WHERE id = tg_users.ticket_id AND status = 'open')))`,
+  ).bind(chat, -began, -(began - CLAIM)).run();
+  if (!claimed.meta.changes) return;
+  let id;
+  try {
+    const made = await env.DB.prepare("INSERT INTO tg_tickets (id, chat_id, opened, updated) VALUES ((SELECT COALESCE(MAX(id), ?3) + 1 FROM tg_tickets), ?1, ?2, ?2)").bind(chat, began, FIRST_TICKET).run();
+    id = made.meta.last_row_id;
+    await env.DB.prepare("UPDATE tg_users SET mode = 'ticket', ticket_id = ?2, device = '' WHERE chat_id = ?1").bind(chat, id).run();
+  } catch (e) {
+    await env.DB.prepare("UPDATE tg_users SET ticket_id = 0 WHERE chat_id = ?1 AND ticket_id < 0").bind(chat).run();
+    throw e;
+  }
+  await c.kit.count(env, `tg:ticket:${t}`, DAY);
+  await c.kit.count(env, `tg:tickets:all:${today()}`, DAY);
   const opened = view.ticketOpened(id, rows.length > 0);
   await tg.send(chat, opened.text, opened.markup);
   await bump(env, "tickets");
-  await tellTeam(c, id, card(id, user, rows, true), teamKeys(id, chat));
-  const messages = rows.map((r) => ({ role: r.role, content: r.content }));
-  await mailOwner(env, { messages, contact: "", human: true, meta: { source: "telegram", telegram: { id: chat, name: user.name, username: user.username }, ticket: id, time: stamp() } }).catch((e) => console.error("telegram mail:", e && e.message ? e.message : e));
+  const told = await tellTeam(c, id, card(id, user, rows, true), teamKeys(id, chat));
+  const mailed = await mailChat(c, user, rows, { human: true, ticket: id });
+  // Neither the team's chat nor the mail took it: the person must not think someone knows.
+  if (!(told && told.ok) && !mailed) await tg.send(chat, view.TEAM_UNREACHABLE);
 }
 
 /** A person writes while their ticket is open: the team gets it, with who it is from. */
 async function toTeam(c, user, m) {
   const { env, tg } = c;
   const chat = user.chat_id;
-  if (!(await permitted(c, chat))) return;
   const ticket = user.ticket_id;
+  const open = await env.DB.prepare("UPDATE tg_tickets SET updated = ?2 WHERE id = ?1 AND status = 'open'").bind(ticket, now()).run();
+  if (!open.meta.changes) {
+    // The ticket was closed behind this chat's back: it goes on as an ordinary chat.
+    await env.DB.prepare("UPDATE tg_users SET mode = '', ticket_id = 0 WHERE chat_id = ?1 AND ticket_id = ?2").bind(chat, ticket).run();
+    const text = typeof m.text === "string" ? m.text.trim() : "";
+    return text ? ask(c, { ...user, mode: "", ticket_id: 0 }, text) : tg.send(chat, view.CAN_ONLY_READ.text, view.CAN_ONLY_READ.markup);
+  }
   await remember(env, chat, "user", words(m));
-  await env.DB.prepare("UPDATE tg_tickets SET updated = ?2 WHERE id = ?1").bind(ticket, now()).run();
   if (!c.team) return;
   const head = `🎫 <b>#${ticket}</b> - ${view.esc(who(user))}`;
   let sent;
@@ -368,26 +510,39 @@ async function toTeam(c, user, m) {
       await tellTeam(c, ticket, head);
       sent = await c.tg.copy(c.team, m.chat.id, m.message_id);
     }
-    if (sent && sent.ok && sent.result) await env.DB.prepare("INSERT OR REPLACE INTO tg_relay (team_chat, message_id, ticket_id, at) VALUES (?1, ?2, ?3, ?4)").bind(c.team, sent.result.message_id, ticket, now()).run();
+    if (sent && sent.ok && sent.result) await remind(c, ticket, sent.result.message_id);
   }
-  // The person is told it arrived without another message in their chat.
-  await tg.react(chat, m.message_id, "👀");
+  if (sent && sent.ok) {
+    // The person is told it arrived without another message in their chat.
+    await tg.react(chat, m.message_id, "👀");
+    return;
+  }
+  // The team's chat did not take it (the bot was removed, the chat is gone): the owner gets the words by mail, and the person is told, once an hour.
+  const t = await idTag(c, chat);
+  if (await mailAllowed(c, t)) await mailChat(c, user, [{ role: "user", content: words(m) }], { human: true, ticket });
+  await noticeOnce(c, t, "team", chat, view.TEAM_UNREACHABLE);
 }
 
-async function closeTicket(c, id, by) {
+/** Closes a ticket: the person's chat is forgotten and the ticket keeps nothing of them. `tell: false` closes it without a word to the person (a blocked one). */
+async function closeTicket(c, id, by, { tell = true } = {}) {
   const { env, tg } = c;
   const t = await ticketOf(env, id);
   if (!t || t.status !== "open") return false;
-  const user = await env.DB.prepare("SELECT * FROM tg_users WHERE chat_id = ?1").bind(t.chat_id).first();
+  const person = t.chat_id;
+  const user = person ? await env.DB.prepare("SELECT name, username FROM tg_users WHERE chat_id = ?1").bind(person).first() : null;
+  // Only the one who closes it first goes on: a second press does nothing.
+  const closed = await env.DB.prepare("UPDATE tg_tickets SET status = 'closed', closed_by = ?2, updated = ?3, chat_id = 0 WHERE id = ?1 AND status = 'open'").bind(id, by, now()).run();
+  if (!closed.meta.changes) return false;
   await env.DB.batch([
-    env.DB.prepare("UPDATE tg_tickets SET status = 'closed', closed_by = ?2, updated = ?3 WHERE id = ?1").bind(id, by, now()),
-    env.DB.prepare("UPDATE tg_users SET mode = '', ticket_id = 0, device = '' WHERE chat_id = ?1").bind(t.chat_id),
-    env.DB.prepare("DELETE FROM tg_messages WHERE chat_id = ?1").bind(t.chat_id),
-    env.DB.prepare("DELETE FROM tg_relay WHERE ticket_id = ?1").bind(id),
+    // The person's state is reset only if it is still this ticket's: a newer ticket is not touched.
+    env.DB.prepare("UPDATE tg_users SET mode = '', ticket_id = 0, device = '' WHERE chat_id = ?1 AND ticket_id = ?2").bind(person, id),
+    env.DB.prepare("DELETE FROM tg_messages WHERE chat_id = ?1").bind(person),
   ]);
   await bump(env, "closed");
-  const said = by === "team" ? view.ticketClosedByTeam(id) : by === "idle" ? view.ticketClosedIdle(id) : view.ticketClosedByUser(id);
-  await tg.send(t.chat_id, said.text, said.markup);
+  if (tell && person) {
+    const said = by === "team" ? view.ticketClosedByTeam(id) : by === "idle" ? view.ticketClosedIdle(id) : view.ticketClosedByUser(id);
+    await tg.send(person, said.text, said.markup);
+  }
   if (by !== "team") await tellTeam(c, id, `✅ <b>Ticket #${id}</b> was closed ${by === "user" ? `by ${view.esc(who(user || {}))}` : "after three quiet days"}.`);
   return true;
 }
@@ -398,32 +553,39 @@ async function closeTicket(c, id, by) {
 async function endChat(c, user, told = false) {
   const { env, tg } = c;
   const chat = user.chat_id;
-  const rows = await conversation(env, chat, 200);
-  const said = rows.filter((r) => r.role === "user" && r.content.length >= 3);
+  const rows = await conversation(env, chat, MAX_ROWS);
   if (told && !rows.length) return tg.send(chat, view.NOTHING_TO_END.text, view.NOTHING_TO_END.markup);
-  if (said.length && (await allowed(env, c.kit, [{ key: `support:mail:d:tg:${chat}`, max: 8, window: DAY }, { key: `support:mail:all:${today()}`, max: 150, window: DAY }]))) {
-    const messages = cleanMessages(rows.filter((r) => r.role === "user" || r.role === "assistant")) || [];
-    await mailOwner(env, { messages, contact: "", meta: { source: "telegram", telegram: { id: chat, name: user.name, username: user.username }, time: stamp() } }).catch((e) => console.error("telegram mail:", e && e.message ? e.message : e));
-  }
+  const said = rows.some((r) => r.role === "user" && r.content.length >= 3);
+  let mailed = false;
+  if (said && (await mailAllowed(c, await idTag(c, chat)))) mailed = await mailChat(c, user, rows);
   const last = rows.length ? rows[rows.length - 1].id : 0;
   await env.DB.batch([
     env.DB.prepare("DELETE FROM tg_messages WHERE chat_id = ?1 AND id <= ?2").bind(chat, last),
     // The person stays known only while they might write again: a chat that wrote in the meantime stays.
     env.DB.prepare("DELETE FROM tg_users WHERE chat_id = ?1 AND updated = ?2 AND mode != 'ticket' AND blocked = 0").bind(chat, user.updated),
   ]);
-  if (told) await tg.send(chat, view.ENDED.text, view.ENDED.markup);
+  if (told) await tg.send(chat, view.ended(mailed).text, view.ended(mailed).markup);
 }
 
-/** Every ten minutes: chats that went quiet are summarized and forgotten, tickets nobody writes to are closed, old rows go. */
+/** Every minute: a few chats that went quiet are summarized and forgotten, tickets nobody writes to are closed, old rows go. */
 export async function sweep(env, kit) {
+  const began = Date.now();
   const { token, name, team } = await config(env);
   if (!token) return;
   const c = { env, tg: bot(env, token), team, name, kit };
   const t = now();
+  const over = () => Date.now() - began > SWEEP_BUDGET;
   const quiet = await env.DB.prepare("SELECT * FROM tg_users WHERE mode != 'ticket' AND blocked = 0 AND updated < ?1 ORDER BY updated LIMIT ?2").bind(t - IDLE, SWEEP_MAX).all();
-  for (const user of quiet.results) await endChat(c, user).catch((e) => console.error("telegram sweep:", e && e.message ? e.message : e));
-  const stale = await env.DB.prepare("SELECT id FROM tg_tickets WHERE status = 'open' AND updated < ?1 LIMIT 10").bind(t - TICKET_IDLE).all();
-  for (const row of stale.results) await closeTicket(c, row.id, "idle").catch((e) => console.error("telegram sweep:", e && e.message ? e.message : e));
+  for (const user of quiet.results) {
+    if (over()) break;
+    await endChat(c, user).catch(log("sweep"));
+  }
+  const stale = await env.DB.prepare("SELECT id FROM tg_tickets WHERE status = 'open' AND updated < ?1 LIMIT 5").bind(t - TICKET_IDLE).all();
+  for (const row of stale.results) {
+    if (over()) break;
+    await closeTicket(c, row.id, "idle").catch(log("sweep"));
+  }
+  // A ticket's message ids are kept a while after it is closed, so that an answer to an old card says it is closed.
   await env.DB.batch([
     env.DB.prepare("DELETE FROM tg_relay WHERE at < ?1").bind(t - 14 * DAY),
     env.DB.prepare("DELETE FROM tg_stats WHERE day < ?1").bind(new Date((t - 90 * DAY) * 1000).toISOString().slice(0, 10)),
@@ -439,31 +601,44 @@ async function onCallback(c, update) {
   const msg = q.message;
   if (!msg || !msg.chat) return tg.answer(q.id);
   if (data.startsWith("o:")) return onTeamButton(c, q, data, msg);
-  if (msg.chat.type !== "private") return tg.answer(q.id);
+  if (msg.chat.type !== "private" || !q.from || q.from.is_bot) return tg.answer(q.id);
   const chat = msg.chat.id;
+  const t = await idTag(c, chat);
+  if (!(await pace(c, t, chat, true))) return tg.answer(q.id, "Slow down a little.");
   const user = await touch(env, chat, q.from, update.update_id);
   if (!user || user.blocked) return tg.answer(q.id);
-  if (!(await c.kit.blocked(env, `tg:cb:${chat}`, 150, 3600))) await c.kit.count(env, `tg:cb:${chat}`, 3600);
-  else return tg.answer(q.id, "Slow down a little.");
+  const [kind, arg, extra] = data.split(":");
+  // Leaving the guide for a connection that fails ends its "describe the problem" step.
+  if (user.mode === "problem" && !["no", "fb", "h", "tc", "r"].includes(kind)) {
+    await setMode(env, chat, "");
+    user.mode = "";
+  }
+  // A screen of the menu changes in place; an answer or a closing note stays and a new message follows it.
   const edit = async (s) => {
     const res = await tg.edit(chat, msg.message_id, s.text, s.markup);
     if (!res.ok && !/not modified/i.test(res.description || "")) await tg.send(chat, s.text, s.markup);
   };
-  const [kind, arg] = data.split(":");
+  const show = (s) => tg.send(chat, s.text, s.markup);
   switch (kind) {
     case "menu":
       await tg.answer(q.id);
       return edit(view.menu(user.name));
+    case "mn":
+      await tg.answer(q.id);
+      return show(view.menu(user.name));
     case "c":
       await tg.answer(q.id);
       return edit(arg ? view.connectGuide(arg) : view.connectPicker());
+    case "cn":
+      await tg.answer(q.id);
+      return show(view.connectPicker());
     case "ok":
       await tg.answer(q.id, "Great!");
       await bump(env, "fixed");
       return edit(view.FIXED);
     case "no":
       await tg.answer(q.id);
-      if (view.DEVICES[arg] && !user.ticket_id) await setMode(env, chat, "problem", view.DEVICES[arg].name);
+      if (Object.hasOwn(view.DEVICES, arg) && user.ticket_id <= 0) await setMode(env, chat, "problem", view.DEVICES[arg].name);
       return edit(view.stillBroken());
     case "i":
       await tg.answer(q.id);
@@ -480,13 +655,27 @@ async function onCallback(c, update) {
     case "h":
       await tg.answer(q.id);
       return openTicket(c, user);
-    case "tc":
+    case "tc": {
       await tg.answer(q.id);
-      return user.ticket_id ? closeTicket(c, user.ticket_id, "user") : undefined;
-    case "fb":
-      await bump(env, arg === "u" ? "up" : "down");
-      await tg.answer(q.id, arg === "u" ? "Thank you!" : "Sorry about that.");
-      return tg.keys(chat, msg.message_id, arg === "u" ? view.THANKS : view.SORRY);
+      const id = Number(arg) || (user.ticket_id > 0 ? user.ticket_id : 0);
+      const ticket = id ? await ticketOf(env, id) : null;
+      // Only a person's own open ticket: an old button never closes a newer one, nor somebody else's.
+      if (ticket && ticket.status === "open" && ticket.chat_id === chat) return closeTicket(c, id, "user");
+      return show(view.TICKET_GONE);
+    }
+    case "r": {
+      const n = Number(arg);
+      await tg.answer(q.id, "Thank you!");
+      if (!Number.isInteger(n) || n < 1 || n > 5) return;
+      await bump(env, `rate${n}`);
+      return edit(view.rated(n));
+    }
+    case "fb": {
+      const up = arg === "u";
+      await bump(env, up ? "up" : "down");
+      await tg.answer(q.id, up ? "Thank you!" : "Sorry about that.");
+      return tg.keys(chat, msg.message_id, up ? view.thanks(extra === "1") : view.SORRY);
+    }
     default:
       return tg.answer(q.id);
   }
@@ -498,12 +687,13 @@ async function onCallback(c, update) {
 async function onPair(c, m, arg) {
   const { env, tg } = c;
   const chat = m.chat.id;
-  if (await c.kit.blocked(env, `tg:pair:${chat}`, 5, 3600)) return;
-  await c.kit.count(env, `tg:pair:${chat}`, 3600);
+  if (await c.kit.blocked(env, `tg:pair:${await idTag(c, chat)}`, 5, 3600)) return;
+  await c.kit.count(env, `tg:pair:${await idTag(c, chat)}`, 3600);
   const code = await setting(env, "telegram_pair_code");
   if (!code || !(await safeEqual(normalCode(arg), code))) return tg.send(chat, "That code is not right. Open the administration panel's Settings for the current one.");
   await save(env, "telegram_owner_chat", String(chat));
   await drop(env, "telegram_pair_code");
+  c.team = chat;
   await tg.call("setMyCommands", { commands: TEAM_COMMANDS, scope: { type: "chat", chat_id: chat } });
   return tg.send(chat, view.PAIRED);
 }
@@ -513,10 +703,10 @@ async function onTeam(c, m) {
   const { env, tg } = c;
   const chat = m.chat.id;
   const text = typeof m.text === "string" ? m.text.trim() : "";
-  const command = /^\/([a-z_]+)(?:@\w+)?(?:\s+(.*))?$/is.exec(text);
+  const command = parseCommand(text, c.name);
   const replied = m.reply_to_message ? await env.DB.prepare("SELECT ticket_id FROM tg_relay WHERE team_chat = ?1 AND message_id = ?2").bind(chat, m.reply_to_message.message_id).first() : null;
-  const name = command ? command[1].toLowerCase() : "";
-  const arg = command ? (command[2] || "").trim() : "";
+  const name = command ? command.name : "";
+  const arg = command ? command.arg : "";
   const done = async (work) => {
     await work;
     return true;
@@ -524,7 +714,11 @@ async function onTeam(c, m) {
   if (name === "help") return done(tg.send(chat, view.OWNER_HELP));
   if (name === "tickets") return done(listTickets(c));
   if (name === "stats") return done(stats(c));
-  if (name === "block" || name === "unblock") return done(blockUser(c, name === "block", arg));
+  if (name === "block" || name === "unblock") {
+    // Replying to a ticket's message says whom, too.
+    const target = arg || (replied ? ((await ticketOf(env, replied.ticket_id)) || {}).chat_id || "" : "");
+    return done(blockUser(c, name === "block", target));
+  }
   if (name === "close" && (arg || replied)) {
     const id = Number(arg) || (replied && replied.ticket_id);
     return done(closeTicket(c, id, "team").then((closed) => tg.send(chat, closed ? `✅ Ticket #${id} closed.` : `Ticket #${view.esc(arg || id)} is not open.`)));
@@ -540,7 +734,7 @@ async function answerPerson(c, m, id) {
     await tg.send(m.chat.id, `Ticket #${id} is closed. The person can open a new one with /human.`);
     return;
   }
-  const res = typeof m.text === "string" ? await tg.send(t.chat_id, view.teamSays(m.text), view.ticketKeys) : await tg.copy(t.chat_id, m.chat.id, m.message_id);
+  const res = typeof m.text === "string" ? await tg.send(t.chat_id, view.teamSays(fit(m.text, 3800)), view.ticketKeys(id)) : await tg.copy(t.chat_id, m.chat.id, m.message_id, { reply_markup: view.ticketKeys(id) });
   if (!res.ok) {
     await tg.send(m.chat.id, `⚠️ Could not deliver: ${view.esc(oneLine(res.description, 120))}`);
     return;
@@ -567,33 +761,29 @@ async function stats(c) {
   const { results } = await c.env.DB.prepare("SELECT key, n FROM tg_stats WHERE day = ?1").bind(today()).all();
   const n = Object.fromEntries(results.map((r) => [r.key, r.n]));
   const open = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM tg_tickets WHERE status = 'open'").first();
+  const votes = [1, 2, 3, 4, 5].reduce((sum, k) => sum + (n[`rate${k}`] || 0), 0);
+  const average = votes ? ([1, 2, 3, 4, 5].reduce((sum, k) => sum + k * (n[`rate${k}`] || 0), 0) / votes).toFixed(1) : "";
   return c.tg.send(
     c.team,
-    `📊 <b>Today (UTC)</b>\nChats: ${n.chats || 0} - answers: ${n.answers || 0}\nHelpful: 👍 ${n.up || 0} - 👎 ${n.down || 0} - guides that fixed it: ${n.fixed || 0}\nTickets: ${n.tickets || 0} opened - ${n.closed || 0} closed - ${open.n} open now${c.name ? `\n\n@${view.esc(c.name)}` : ""}`,
+    `📊 <b>Today (UTC)</b>\nChats: ${n.chats || 0} - answers: ${n.answers || 0}\nHelpful: 👍 ${n.up || 0} - 👎 ${n.down || 0} - guides that fixed it: ${n.fixed || 0}\nTickets: ${n.tickets || 0} opened - ${n.closed || 0} closed - ${open.n} open now${votes ? `\nRating of the help: ${average} out of 5 (${votes})` : ""}${c.name ? `\n\n@${view.esc(c.name)}` : ""}`,
   );
 }
 
 async function blockUser(c, on, arg) {
+  const { env } = c;
   const id = Number(arg);
-  if (!Number.isSafeInteger(id) || !id) return c.tg.send(c.team, `Say whom: /${on ? "block" : "unblock"} 123456789 (the id is on the ticket).`);
-  await c.env.DB.prepare("INSERT INTO tg_users (chat_id, updated, blocked) VALUES (?1, ?2, ?3) ON CONFLICT (chat_id) DO UPDATE SET blocked = ?3").bind(id, now(), on ? 1 : 0).run();
+  if (!Number.isSafeInteger(id) || !id) return c.tg.send(c.team, `Say whom: /${on ? "block" : "unblock"} 123456789 (the id is on the ticket), or reply with it to a ticket's message.`);
+  await env.DB.prepare("INSERT INTO tg_users (chat_id, updated, blocked) VALUES (?1, ?2, ?3) ON CONFLICT (chat_id) DO UPDATE SET blocked = ?3").bind(id, now(), on ? 1 : 0).run();
   if (on) {
-    const open = await c.env.DB.prepare("SELECT id FROM tg_tickets WHERE chat_id = ?1 AND status = 'open'").bind(id).first();
-    if (open) await closeTicketQuietly(c, open.id);
+    // A blocked person keeps only their id, which is what the block is: no name, no messages, no open ticket.
+    const open = await env.DB.prepare("SELECT id FROM tg_tickets WHERE chat_id = ?1 AND status = 'open'").bind(id).first();
+    if (open) await closeTicket(c, open.id, "team", { tell: false });
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM tg_messages WHERE chat_id = ?1").bind(id),
+      env.DB.prepare("UPDATE tg_users SET name = '', username = '', mode = '', ticket_id = 0, device = '' WHERE chat_id = ?1").bind(id),
+    ]);
   }
   return c.tg.send(c.team, on ? `🚫 ${id} is blocked. /unblock ${id} lets them back.` : `✅ ${id} is unblocked.`);
-}
-
-/** Closes a ticket of someone who was blocked, without telling them. */
-async function closeTicketQuietly(c, id) {
-  const t = await ticketOf(c.env, id);
-  if (!t) return;
-  await c.env.DB.batch([
-    c.env.DB.prepare("UPDATE tg_tickets SET status = 'closed', closed_by = 'team', updated = ?2 WHERE id = ?1").bind(id, now()),
-    c.env.DB.prepare("UPDATE tg_users SET mode = '', ticket_id = 0 WHERE chat_id = ?1").bind(t.chat_id),
-    c.env.DB.prepare("DELETE FROM tg_messages WHERE chat_id = ?1").bind(t.chat_id),
-    c.env.DB.prepare("DELETE FROM tg_relay WHERE ticket_id = ?1").bind(id),
-  ]);
 }
 
 /** The buttons on a ticket in the team's chat. */
@@ -613,7 +803,8 @@ async function onTeamButton(c, q, data, msg) {
   if (kind === "f") {
     await tg.answer(q.id);
     const t = await ticketOf(env, id);
-    if (!t) return tg.send(c.team, `Ticket #${id} is gone.`);
+    // A closed ticket's chat is gone, by design.
+    if (!t || t.status !== "open") return tg.send(c.team, `Ticket #${id} is closed, and its chat was deleted with it.`);
     const rows = await conversation(env, t.chat_id, 60);
     const lines = rows.map((r) => `<b>${r.role === "user" ? "Visitor" : r.role === "team" ? "Team" : "Assistant"}:</b> ${fit(r.content, 600)}`);
     let out = "";
