@@ -67,6 +67,7 @@ const TEAM_COMMANDS = [
 const TEXTS_RETRY = 10 * 60; // seconds a refused attempt to set them waits
 const LANG_KEPT = 365 * DAY; // a language a person picked is remembered this long
 const SETTING_BATCH = 4; // languages whose texts are read and set at once
+const TEXTS_CALLS = 40; // Telegram calls one run spends on the menu and texts: a Worker run may make fifty in all, and there is other work
 
 // ---------- Settings and the Bot API ----------
 
@@ -121,6 +122,19 @@ function bot(env, token) {
     }
     return out;
   }
+  // A call that carries a file (multipart): the picture of the bot.
+  async function upload(method, form) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await fetch(`${base}/bot${token}/${method}`, { method: "POST", body: form, signal: controller.signal });
+      return await res.json();
+    } catch (e) {
+      return { ok: false, description: e && e.name === "AbortError" ? "Telegram took too long to answer." : "Telegram could not be reached." };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   const html = { parse_mode: "HTML", link_preview_options: { is_disabled: true } };
   async function send(chat, text, markup, extra = {}) {
     const body = { chat_id: chat, text, ...html, ...(markup ? { reply_markup: markup } : {}), ...extra };
@@ -131,6 +145,7 @@ function bot(env, token) {
   }
   return {
     call,
+    upload,
     send,
     edit: (chat, id, text, markup) => call("editMessageText", { chat_id: chat, message_id: id, text, ...html, ...(markup ? { reply_markup: markup } : {}) }),
     keys: (chat, id, markup) => call("editMessageReplyMarkup", { chat_id: chat, message_id: id, reply_markup: markup || { inline_keyboard: [] } }),
@@ -142,10 +157,6 @@ function bot(env, token) {
 }
 
 const sameCommands = (got, want) => Array.isArray(got) && got.length === want.length && got.every((c, i) => c.command === want[i].command && c.description === want[i].description);
-
-/** The menu, description and about line the bot should have in each language: English for everyone without a language of their own (no language code) first, then each other language under its code. */
-const wantedTexts = (selling) =>
-  [pack(DEFAULT), ...PACKS.filter((p) => p.code !== DEFAULT)].map((p) => ({ lc: p.code === DEFAULT ? "" : p.code, commands: commandsFor(p.code, selling), about: p.s.about, short: p.s.about_short }));
 
 /** What Telegram refused, as phrases: one reason for many languages is one phrase that names the first few; at most three phrases. */
 function refusals(refused) {
@@ -162,27 +173,94 @@ function refusals(refused) {
   });
 }
 
-/** Makes the bot's menu and texts what this service wants: reads them, writes only what differs, and answers what Telegram refused (one phrase each, none when all is as wanted). */
-async function applyTexts(tg, team, wanted) {
-  const refused = [];
-  const settle = async (fine, what, lc, set) => {
-    if (fine) return;
-    const res = await set();
-    if (!res.ok) refused.push({ what, lc, why: oneLine(res.description, 100) });
-  };
-  const language = async ({ lc, commands, about, short }) => {
-    const l = lc ? { language_code: lc } : {};
-    const [menu, description, line] = await Promise.all([tg.call("getMyCommands", l), tg.call("getMyDescription", l), tg.call("getMyShortDescription", l)]);
-    await settle(menu.ok && sameCommands(menu.result, commands), "menu", lc, () => tg.call("setMyCommands", { commands, ...l }));
-    await settle(description.ok && (description.result || {}).description === about, "description", lc, () => tg.call("setMyDescription", { description: about, ...l }));
-    await settle(line.ok && (line.result || {}).short_description === short, "about line", lc, () => tg.call("setMyShortDescription", { short_description: short, ...l }));
-  };
-  for (let i = 0; i < wanted.length; i += SETTING_BATCH) await Promise.all(wanted.slice(i, i + SETTING_BATCH).map(language));
-  if (team) {
-    const mine = await tg.call("getMyCommands", { scope: { type: "chat", chat_id: team } });
-    await settle(mine.ok && sameCommands(mine.result, TEAM_COMMANDS), "team menu", "", () => tg.call("setMyCommands", { commands: TEAM_COMMANDS, scope: { type: "chat", chat_id: team } }));
+/**
+ * What the bot should show: an entry for each language ("" is English, for
+ * everyone whose language the bot does not have) with its menu of commands,
+ * description and about line, and the team's own menu once a chat is paired.
+ * `hash` says what an entry wants, so one that was set and has not changed is
+ * not set again.
+ */
+async function wantedTexts(selling, team) {
+  const entries = [pack(DEFAULT), ...PACKS.filter((p) => p.code !== DEFAULT)].map((p) => ({ key: p.code === DEFAULT ? "" : p.code, commands: commandsFor(p.code, selling), about: p.s.about, short: p.s.about_short }));
+  if (team) entries.push({ key: "team", commands: TEAM_COMMANDS, team });
+  for (const e of entries) e.hash = await tag("albatross telegram texts", JSON.stringify([e.commands, e.about, e.short, e.team || 0]));
+  return entries;
+}
+
+/**
+ * Makes the bot's menu and texts what this service wants, within a budget of
+ * Telegram calls: a Worker run may make fifty requests in all, and a run that
+ * reads and sets eleven languages would use them up. The outcome is kept as
+ * `telegram_texts`: `{ v, at, ok, more, note, done }`, `done` saying which
+ * entries Telegram has taken as they now are.
+ *  - "apply" (every minute, and when the bot is connected): sets the entries
+ *    that are not done, without reading, as many as the budget allows; the rest
+ *    follows in the next run, a minute later. A try Telegram refused waits ten
+ *    minutes.
+ *  - "core" (every hour): also looks at the English texts and the team's menu
+ *    and sets them again if somebody typed others in BotFather.
+ *  - "full" (the panel's "Check the bot"): looks at every language.
+ * Answers `{ ok, more, note }`: whether all is set, whether more is to follow,
+ * and what Telegram refused.
+ */
+async function refreshTexts(env, tg, team, mode = "apply") {
+  const entries = await wantedTexts((await sales.config(env)).enabled, team);
+  let last = {};
+  try {
+    last = JSON.parse(await setting(env, "telegram_texts")) || {};
+  } catch {
+    last = {};
   }
-  return refusals(refused);
+  const v = await tag("albatross telegram texts", entries.map((e) => e.hash).join());
+  if (mode === "apply" && last.v === v && (last.ok || (!last.more && now() - last.at < TEXTS_RETRY))) return last;
+  const done = { ...(last.done || {}) };
+  const refused = [];
+  let calls = 0;
+  let cut = false;
+  // The calls an entry needs are taken from the budget before it starts, so a run never stops half way through an entry: one it cannot afford waits for the next run.
+  const reserve = (n) => {
+    if (calls + n > TEXTS_CALLS) {
+      cut = true;
+      return false;
+    }
+    calls += n;
+    return true;
+  };
+  const looks = (e) => mode === "full" || (mode === "core" && (e.key === "" || e.key === "team"));
+  const work = async (e) => {
+    const verify = done[e.key] === e.hash && looks(e);
+    if (done[e.key] === e.hash && !verify) return;
+    const team = e.key === "team";
+    const l = team ? { scope: { type: "chat", chat_id: e.team } } : e.key ? { language_code: e.key } : {};
+    // What an entry is made of: what it is called, how Telegram is told, how Telegram is asked, and whether what it answers is what is wanted.
+    const parts = [[team ? "team menu" : "menu", "setMyCommands", { commands: e.commands }, "getMyCommands", (r) => sameCommands(r, e.commands)]];
+    if (!team) {
+      parts.push(["description", "setMyDescription", { description: e.about }, "getMyDescription", (r) => (r || {}).description === e.about]);
+      parts.push(["about line", "setMyShortDescription", { short_description: e.short }, "getMyShortDescription", (r) => (r || {}).short_description === e.short]);
+    }
+    let todo = parts;
+    if (verify) {
+      if (!reserve(parts.length)) return;
+      const got = await Promise.all(parts.map((part) => tg.call(part[3], l)));
+      todo = parts.filter((part, i) => !(got[i].ok && part[4](got[i].result)));
+      if (!todo.length) return;
+    }
+    delete done[e.key]; // not as wanted until the sets below are taken
+    if (!reserve(todo.length)) return;
+    let all = true;
+    for (const [what, method, payload] of todo) {
+      const res = await tg.call(method, { ...payload, ...l });
+      if (!res.ok) {
+        all = false;
+        refused.push({ what, lc: team ? "" : e.key, why: oneLine(res.description, 100) });
+      }
+    }
+    if (all) done[e.key] = e.hash;
+  };
+  for (let i = 0; i < entries.length; i += SETTING_BATCH) await Promise.all(entries.slice(i, i + SETTING_BATCH).map(work));
+  const out = { v, at: now(), ok: entries.every((e) => done[e.key] === e.hash) && !refused.length, more: cut && !refused.length, note: refusals(refused).join("; "), done };
+  await save(env, "telegram_texts", JSON.stringify(out));
+  return out;
 }
 
 /**
@@ -205,13 +283,6 @@ async function versioned(env, key, version, force, work) {
   return out;
 }
 
-/** The menu and texts (the menu has the store's commands while data is on sale). Answers `{ ok, note }`: what Telegram refused. */
-async function refreshTexts(env, tg, team, force = false) {
-  const wanted = wantedTexts((await sales.config(env)).enabled);
-  const version = await tag("albatross telegram texts", JSON.stringify([wanted, TEAM_COMMANDS]));
-  return versioned(env, "telegram_texts", version, force, () => applyTexts(tg, team, wanted));
-}
-
 const hookVersion = (url) => tag("albatross telegram hook", JSON.stringify([HOOK, url]));
 
 /** The webhook, set again (waiting updates kept) when this version of the service wants other updates than the last one set. */
@@ -220,6 +291,27 @@ async function refreshHook(env, tg, url, force = false) {
   return versioned(env, "telegram_hook", await hookVersion(url), force, async () => {
     const res = await tg.call("setWebhook", { url, secret_token: await hookSecret(env), ...HOOK });
     return res.ok ? [] : [`webhook: ${oneLine(res.description, 100)}`];
+  });
+}
+
+const PHOTO_VERSION = "1"; // raise it when public/bot.jpg changes: the picture is then set again
+
+/**
+ * The bot's profile picture (public/bot.jpg: Telegram's ad platform wants a
+ * bot it promotes to have one, and people trust a bot that has): set once for
+ * each bot, and again when PHOTO_VERSION is raised. `force` sets it now.
+ * Answers `{ ok, note }`.
+ */
+async function refreshPhoto(env, tg, botId, force = false) {
+  if (!env.ASSETS) return { ok: true };
+  return versioned(env, "telegram_photo", `${PHOTO_VERSION}:${botId}`, force, async () => {
+    const res = await env.ASSETS.fetch(new Request("https://assets.local/bot.jpg"));
+    if (!res.ok || !/^image\//.test(res.headers.get("Content-Type") || "")) return []; // no picture comes with this build
+    const form = new FormData();
+    form.set("photo", JSON.stringify({ type: "static", photo: "attach://picture" }));
+    form.set("picture", new Blob([await res.arrayBuffer()], { type: "image/jpeg" }), "bot.jpg");
+    const out = await tg.upload("setMyProfilePhoto", form);
+    return out.ok ? [] : [`picture: ${oneLine(out.description, 100)}`];
   });
 }
 
@@ -251,23 +343,25 @@ export async function connect(env, request, token) {
   if (before.token && before.token.split(":")[0] !== token.split(":")[0]) {
     await bot(env, before.token).call("deleteWebhook", { drop_pending_updates: true });
     await forgetChats(env);
-    await drop(env, "telegram_owner_chat", "telegram_pair_code");
+    await drop(env, "telegram_owner_chat", "telegram_pair_code", "telegram_texts");
   }
-  // The menu and the texts people see before they write. The bot works without them, so a refusal does not stop it, but it is told.
-  const texts = await refreshTexts(env, tg, 0, true);
+  // The menu and the texts people see before they write. The bot works without them, so a refusal does not stop it, but it is told; what the run's budget leaves undone follows within a minute.
+  const texts = await refreshTexts(env, tg, 0);
+  const photo = await refreshPhoto(env, tg, token.split(":")[0]);
   const username = String(me.result.username || "");
   await save(env, "telegram_bot_token", token);
   await save(env, "telegram_bot_username", username);
   await save(env, "telegram_webhook_url", url);
   if (!(await setting(env, "telegram_owner_chat")) && !(await setting(env, "telegram_pair_code"))) await save(env, "telegram_pair_code", newCode());
-  return { username, ...(texts.ok ? {} : { warning: `Telegram did not take the bot's ${texts.note}. "Check the bot" tries again.` }) };
+  const refused = [texts.note, photo.note].filter(Boolean).join("; ");
+  return { username, ...(refused ? { warning: `Telegram did not take the bot's ${refused}. "Check the bot" tries again.` } : {}) };
 }
 
 /** Disconnects the bot and forgets every chat. */
 export async function disconnect(env) {
   const { token } = await config(env);
   if (token) await bot(env, token).call("deleteWebhook", { drop_pending_updates: true });
-  await drop(env, ...KEYS, "telegram_pair_code", "telegram_texts", "telegram_hook");
+  await drop(env, ...KEYS, "telegram_pair_code", "telegram_texts", "telegram_hook", "telegram_photo");
   await forgetChats(env);
 }
 
@@ -289,8 +383,10 @@ export async function check(env) {
   if (!hook.url) return `@${name} is reachable, but its webhook is not set. Save the token again.`;
   const when = hook.last_error_date ? new Date(hook.last_error_date * 1000).toISOString().slice(0, 16).replace("T", " ") : "";
   const last = hook.last_error_message ? ` Last error: ${oneLine(hook.last_error_message, 120)} (${when} UTC).` : " No errors.";
-  const texts = await refreshTexts(env, tg, team, true);
-  return `@${name} is reachable; its webhook is set and ${hook.pending_update_count || 0} update(s) are waiting.${last} ${texts.ok ? "Its menu and texts are set." : `Telegram refused its ${texts.note}.`}`;
+  const texts = await refreshTexts(env, tg, team, "full");
+  const photo = await refreshPhoto(env, tg, token.split(":")[0], true);
+  const refusedPhoto = photo.ok ? "" : ` Telegram refused its ${photo.note}.`;
+  return `@${name} is reachable; its webhook is set and ${hook.pending_update_count || 0} update(s) are waiting.${last} ${texts.ok ? "Its menu and texts are set." : texts.more ? "Its menu and texts are still being set; the rest follows within a minute." : `Telegram refused its ${texts.note}.`}${refusedPhoto}`;
 }
 
 /** Every hour: a webhook that is gone, or points elsewhere, is set again, and the menu and texts are looked at. */
@@ -305,7 +401,7 @@ export async function heal(env) {
       console.warn("telegram: the webhook was not set; it was set again:", res.ok ? "ok" : oneLine(res.description, 100));
     }
   }
-  await refreshTexts(env, tg, team, true);
+  await refreshTexts(env, tg, team, "core");
 }
 
 // ---------- The webhook ----------
@@ -500,7 +596,11 @@ async function onUser(c, update, m) {
   const command = parseCommand(text, ""); // in a private chat every command is for this bot
   // Nobody is spoken to before they pick a language, except a person whose ticket the team is already answering. A link into the bot (/start buy) is remembered through the choice.
   const waiting = user.mode === "ticket" && user.ticket_id > 0;
-  if (!(await langOf(c, chat)) && !waiting) return askLanguage(c, user, m.from.language_code, command && command.name === "start" ? command.arg.toLowerCase() : "");
+  if (!(await langOf(c, chat)) && !waiting) {
+    const topic = command && command.name === "start" ? command.arg.toLowerCase() : "";
+    await countSource(c, t, topic);
+    return askLanguage(c, user, m.from.language_code, topic);
+  }
   if (command) return onCommand(c, user, command.name, command.arg, m.from.language_code);
   if (user.mode === "topup" && text) return onAccountName(c, user, text);
   if (waiting) return toTeam(c, user, m);
@@ -509,6 +609,22 @@ async function onUser(c, update, m) {
     return tg.send(chat, v.CAN_ONLY_READ.text, v.CAN_ONLY_READ.markup);
   }
   return ask(c, user, text);
+}
+
+/** A link such as t.me/<bot>?start=ad_fa1 names where a person came from (an advertisement, a post): the words of one, and none for a topic a link opens (buy, plans...). */
+const sourceOf = (arg) => {
+  const a = String(arg || "").toLowerCase();
+  return /^[a-z0-9_-]{1,24}$/.test(a) && !view.TOPICS.includes(a) && a !== "team" ? a : "";
+};
+
+/** Counts a person who comes from a link that names its source, once a day for each (the team's /stats lists them). */
+async function countSource(c, t, arg) {
+  const source = sourceOf(arg);
+  if (!source) return;
+  const key = `tg:from:${t}:${source}`;
+  if (await c.kit.blocked(c.env, key, 1, DAY)) return;
+  await c.kit.count(c.env, key, DAY);
+  await bump(c.env, `from:${source}`);
 }
 
 /** The language picker, for a person who has not picked one (or asked to change it). */
@@ -625,7 +741,7 @@ async function moveTeam(c, to) {
   c.team = to;
   await save(c.env, "telegram_owner_chat", String(to));
   await c.env.DB.prepare("UPDATE tg_relay SET team_chat = ?2 WHERE team_chat = ?1").bind(from, to).run();
-  await c.tg.call("setMyCommands", { commands: TEAM_COMMANDS, scope: { type: "chat", chat_id: to } });
+  await refreshTexts(c.env, c.tg, to);
 }
 
 /** Tells the team's chat something about a ticket and remembers the message, so that replying to it answers the person. Answers Telegram's answer, null when no chat is paired. */
@@ -781,6 +897,7 @@ export async function sweep(env, kit) {
   const over = () => Date.now() - began > SWEEP_BUDGET;
   await refreshHook(env, c.tg, url).catch(log("hook"));
   await refreshTexts(env, c.tg, team).catch(log("texts"));
+  await refreshPhoto(env, c.tg, token.split(":")[0]).catch(log("photo"));
   // Stars Telegram took that were not delivered within minutes are given back.
   const stuck = await env.DB.prepare("SELECT id FROM stars_payments WHERE status = 'paid' AND updated < ?1 LIMIT 5").bind(t - 180).all();
   for (const row of stuck.results) {
@@ -931,7 +1048,7 @@ async function onPair(c, m, arg) {
   await save(env, "telegram_owner_chat", String(chat));
   await drop(env, "telegram_pair_code");
   c.team = chat;
-  await tg.call("setMyCommands", { commands: TEAM_COMMANDS, scope: { type: "chat", chat_id: chat } });
+  await refreshTexts(env, tg, chat);
   return tg.send(chat, view.PAIRED);
 }
 
@@ -1004,9 +1121,12 @@ async function stats(c) {
   const open = await c.env.DB.prepare("SELECT COUNT(*) AS n FROM tg_tickets WHERE status = 'open'").first();
   const votes = [1, 2, 3, 4, 5].reduce((sum, k) => sum + (n[`rate${k}`] || 0), 0);
   const average = votes ? ([1, 2, 3, 4, 5].reduce((sum, k) => sum + k * (n[`rate${k}`] || 0), 0) / votes).toFixed(1) : "";
+  // New people by the link they came from (an advertisement's), over the last week.
+  const week = await c.env.DB.prepare("SELECT substr(key, 6) AS source, SUM(n) AS total, SUM(CASE WHEN day = ?2 THEN n ELSE 0 END) AS today FROM tg_stats WHERE key LIKE 'from:%' AND day >= ?1 GROUP BY key ORDER BY total DESC, key LIMIT 12").bind(new Date((now() - 6 * DAY) * 1000).toISOString().slice(0, 10), today()).all();
+  const sources = week.results.length ? `\nNew people by link, 7 days: ${week.results.map((r) => `${view.esc(r.source)} ${r.total}${r.today ? ` (today ${r.today})` : ""}`).join(", ")}` : "";
   return c.tg.send(
     c.team,
-    `📊 <b>Today (UTC)</b>\nChats: ${n.chats || 0} - answers: ${n.answers || 0}\nHelpful: 👍 ${n.up || 0} - 👎 ${n.down || 0} - guides that fixed it: ${n.fixed || 0}\nTickets: ${n.tickets || 0} opened - ${n.closed || 0} closed - ${open.n} open now${votes ? `\nRating of the help: ${average} out of 5 (${votes})` : ""}${c.name ? `\n\n@${view.esc(c.name)}` : ""}`,
+    `📊 <b>Today (UTC)</b>\nChats: ${n.chats || 0} - answers: ${n.answers || 0}\nHelpful: 👍 ${n.up || 0} - 👎 ${n.down || 0} - guides that fixed it: ${n.fixed || 0}\nTickets: ${n.tickets || 0} opened - ${n.closed || 0} closed - ${open.n} open now${votes ? `\nRating of the help: ${average} out of 5 (${votes})` : ""}${sources}${c.name ? `\n\n@${view.esc(c.name)}` : ""}`,
   );
 }
 

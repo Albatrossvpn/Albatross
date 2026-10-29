@@ -321,7 +321,7 @@ export const receiptTest = (id) => `✅ <b>Test payment received</b> (P${id}). S
 export const OWNER_HELP = `<b>Team commands</b>
 
 /tickets - the open tickets
-/stats - today's numbers
+/stats - today's numbers, and the new people of the last week by the link they came from (t.me/<bot>?start=ad_fa1)
 /close 1042 - close a ticket (or reply /close to one of its messages)
 /block 123456 - block a user, and /unblock to let them back
 /sales - today's sales and the last payments

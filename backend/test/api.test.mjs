@@ -21,18 +21,27 @@ const TG_TOKEN = "123456789:" + "A".repeat(35);
 const tgCalls = [];
 let tgNext = 900;
 let tgHook = "";
+// What the bot's menu, description and about line were set to, per scope and language, for the getters to answer.
+const tgShown = new Map();
+const tgSlot = (p) => JSON.stringify([p.scope || "all", p.language_code || ""]);
 const tgServer = createServer((req, res) => {
   let body = "";
   req.on("data", (d) => (body += d));
   req.on("end", () => {
     const [, token, method] = /^\/bot([^/]+)\/(\w+)$/.exec(req.url) || [];
-    const payload = body ? JSON.parse(body) : {};
+    // A call with a file (the bot's picture) is multipart: only that it came is noted.
+    const payload = body && !/^multipart\//.test(req.headers["content-type"] || "") ? JSON.parse(body) : body ? { multipart: true } : {};
     tgCalls.push({ token, method, ...payload });
     if (token === TG_TOKEN && method === "setWebhook") tgHook = payload.url;
     if (token === TG_TOKEN && method === "deleteWebhook") tgHook = "";
+    const kept = tgShown.get(tgSlot(payload)) || {};
+    if (token === TG_TOKEN && /^setMy(Commands|Description|ShortDescription)$/.test(method)) tgShown.set(tgSlot(payload), { ...kept, [method]: payload });
     const answer = token !== TG_TOKEN ? { ok: false, error_code: 401, description: "Unauthorized" }
       : method === "getMe" ? { ok: true, result: { username: "MockSupportBot" } }
       : method === "getWebhookInfo" ? { ok: true, result: { url: tgHook, pending_update_count: 0 } }
+      : method === "getMyCommands" ? { ok: true, result: (kept.setMyCommands || {}).commands || [] }
+      : method === "getMyDescription" ? { ok: true, result: { description: (kept.setMyDescription || {}).description || "" } }
+      : method === "getMyShortDescription" ? { ok: true, result: { short_description: (kept.setMyShortDescription || {}).short_description || "" } }
       : method === "sendMessage" || method === "copyMessage" ? { ok: true, result: { message_id: tgNext++ } }
       : { ok: true, result: true };
     res.writeHead(answer.ok ? 200 : answer.error_code, { "Content-Type": "application/json" });

@@ -40,14 +40,15 @@ export function telegram(overrides = {}) {
   };
   globalThis.fetch = async (url, init) => {
     const [, token, method] = /\/bot([^/]+)\/(\w+)$/.exec(String(url));
-    const payload = JSON.parse(init.body);
+    // A call with a file (the bot's picture) is multipart: its parts are kept, a file as its name, size and type.
+    const payload = init.body instanceof FormData ? Object.fromEntries([...init.body.entries()].map(([k, v]) => [k, typeof v === "string" ? v : { file: v.name, bytes: v.size, type: v.type }])) : JSON.parse(init.body);
     calls.push({ method, token, ...payload });
     const o = overrides[method];
     const given = typeof o === "function" ? o(payload) : o;
     const body = given ?? (remembered[method] ? remembered[method](payload) : method === "getMe" ? { ok: true, result: { username: "AlbatrossSupportBot" } } : method === "sendMessage" || method === "copyMessage" ? { ok: true, result: { message_id: next++ } } : { ok: true, result: true });
     return new Response(JSON.stringify(body), { status: body.ok ? 200 : body.error_code || 400 });
   };
-  return { calls, shown, of: (method) => calls.filter((c) => c.method === method) };
+  return { calls, shown, overrides, of: (method) => calls.filter((c) => c.method === method) };
 }
 
 export const labels = (markup) => (markup ? markup.inline_keyboard.flat().map((b) => b.text) : []);

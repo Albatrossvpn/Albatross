@@ -5,10 +5,10 @@
 import assert from "node:assert/strict";
 import { readdirSync } from "node:fs";
 import test, { afterEach } from "node:test";
-import { check, htmlProblems } from "./i18n-check.mjs";
+import { check as checkPack, htmlProblems } from "./i18n-check.mjs";
 import en from "../src/i18n/en.js";
 import { DEFAULT, PACKS, fill, has, pack, translator } from "../src/i18n/index.js";
-import { connect, disconnect, sweep } from "../src/telegram.js";
+import { check, connect, disconnect, sweep } from "../src/telegram.js";
 import { languagePicker, screens } from "../src/telegram-content.js";
 import { d1 } from "./d1.mjs";
 import { ADMIN_REQUEST, SARA, TEAM, TOKEN, datas, labels, nextUpdate, press, real, telegram, text, world } from "./tg-helpers.mjs";
@@ -22,7 +22,7 @@ test("every language file is a pack on the picker, and every pack is complete an
   assert.deepEqual(PACKS.map((p) => p.code).sort(), files.sort(), "a pack that is not in index.js is never offered, and one that is not a file cannot load");
   assert.ok(PACKS.some((p) => p.code === DEFAULT), "English, the master and the fallback, is a pack");
   for (const p of PACKS) {
-    const problems = check(p.code, p);
+    const problems = checkPack(p.code, p);
     assert.deepEqual(problems, [], `${p.code}.js: ${problems.slice(0, 5).join(" | ")}`);
   }
   assert.equal(new Set(PACKS.map((p) => p.flag + p.name)).size, PACKS.length, "each language has its own name and flag");
@@ -350,20 +350,48 @@ test("the bot's menu, description and about line are set for every language, und
   assert.equal(plain.commands.find((c) => c.command === "start").description, en.s.cmd_start);
 });
 
-test("what is set for the languages is looked at again, and only what differs is written", async () => {
+test("the panel's check looks at every language and writes only what differs", async () => {
   const w = await world({ lang: "en" });
-  await w.env.DB.prepare("DELETE FROM settings WHERE key = 'telegram_texts'").run();
+  w.api.overrides.getWebhookInfo = { ok: true, result: { url: "https://accounts.albatrossvpn.online/api/v1/telegram" } };
   w.api.calls.length = 0;
-  await sweep(w.env, w.kit);
-  assert.equal(w.api.of("setMyCommands").length + w.api.of("setMyDescription").length + w.api.of("setMyShortDescription").length, 0, "all of it is as wanted already");
-  assert.ok(w.api.of("getMyCommands").length >= PACKS.length && w.api.of("getMyDescription").length === PACKS.length);
+  assert.match(await check(w.env), /Its menu and texts are set\.$/);
+  assert.equal(w.api.calls.filter((c) => c.method.startsWith("setMy")).length, 0, "all of it is as wanted already");
+  assert.equal(w.api.of("getMyDescription").length, PACKS.length, "and it looked at each language");
   // One language lost its description: just that one is set again.
   w.api.shown.local.set("zh", { description: "something else", about: w.api.shown.local.get("zh").about });
-  await w.env.DB.prepare("DELETE FROM settings WHERE key = 'telegram_texts'").run();
   w.api.calls.length = 0;
-  await sweep(w.env, w.kit);
-  const set = w.api.calls.filter((c) => c.method.startsWith("setMy"));
-  assert.deepEqual(set.map((c) => [c.method, c.language_code]), [["setMyDescription", "zh"]]);
+  assert.match(await check(w.env), /Its menu and texts are set\.$/);
+  assert.deepEqual(w.api.calls.filter((c) => c.method.startsWith("setMy")).map((c) => [c.method, c.language_code]), [["setMyDescription", "zh"]]);
+});
+
+test("a run is held to forty calls to Telegram (a Worker run may make fifty), and the next run sets what the first left", async () => {
+  // Four more languages than forty calls can set: the first run sets what it can, says nothing is refused, and the schedule finishes.
+  const extra = ["xa", "xb", "xc", "xd"].map((code) => ({ ...en, code, name: code, flag: "🏳" }));
+  PACKS.push(...extra);
+  try {
+    const w = await world({ lang: "en", team: false });
+    const perRun = w.boot.filter((c) => /^(get|set)My/.test(c.method)).length;
+    assert.ok(perRun > 0 && perRun <= 40, `${perRun} calls in one run`);
+    const first = JSON.parse(await w.setting("telegram_texts"));
+    assert.equal(first.ok, false);
+    assert.equal(first.more, true, "cut short is not a refusal: the next run goes on");
+    assert.equal(first.note, "");
+    w.api.calls.length = 0;
+    await sweep(w.env, w.kit);
+    const second = JSON.parse(await w.setting("telegram_texts"));
+    assert.equal(second.ok, true);
+    assert.ok(w.api.calls.length <= 40);
+    // Each language got its description once over the two runs, none twice.
+    const described = [...w.boot, ...w.api.calls].filter((c) => c.method === "setMyDescription").map((c) => c.language_code || "");
+    assert.equal(new Set(described).size, described.length, "nothing is set twice");
+    assert.equal(described.length, PACKS.length);
+    // And now it is all done: a run asks Telegram nothing.
+    w.api.calls.length = 0;
+    await sweep(w.env, w.kit);
+    assert.equal(w.api.calls.length, 0);
+  } finally {
+    PACKS.splice(PACKS.length - extra.length, extra.length);
+  }
 });
 
 test("many languages refused for one reason are told as one problem", async () => {

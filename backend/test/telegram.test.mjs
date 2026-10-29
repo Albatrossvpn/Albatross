@@ -81,20 +81,26 @@ test("a token of another bot replaces the old one and forgets what belonged to i
 test("every hour a webhook that is gone is set again and one that is there is left alone; the panel can ask how the bot is", async () => {
   const w = await world();
   const url = "https://accounts.albatrossvpn.online/api/v1/telegram";
-  const gone = telegram({ getWebhookInfo: { ok: true, result: { url: "" } } });
+  w.api.overrides.getWebhookInfo = { ok: true, result: { url: "" } };
+  w.api.calls.length = 0;
   await heal(w.env);
-  assert.equal(gone.of("setWebhook").length, 1);
-  assert.equal(gone.of("setWebhook")[0].url, url);
-  assert.equal(gone.of("setWebhook")[0].drop_pending_updates, undefined, "waiting updates are kept");
-  const fine = telegram({ getWebhookInfo: { ok: true, result: { url, pending_update_count: 3 } } });
+  assert.equal(w.api.of("setWebhook").length, 1);
+  assert.equal(w.api.of("setWebhook")[0].url, url);
+  assert.equal(w.api.of("setWebhook")[0].drop_pending_updates, undefined, "waiting updates are kept");
+  w.api.overrides.getWebhookInfo = { ok: true, result: { url, pending_update_count: 3 } };
+  w.api.calls.length = 0;
   await heal(w.env);
-  assert.equal(fine.of("setWebhook").length, 0);
+  assert.equal(w.api.of("setWebhook").length, 0);
   assert.equal(await check(w.env), "@AlbatrossSupportBot is reachable; its webhook is set and 3 update(s) are waiting. No errors. Its menu and texts are set.");
-  telegram({ getWebhookInfo: { ok: true, result: { url, last_error_date: 1760000000, last_error_message: "Wrong response from the webhook: 500 Internal Server Error" } } });
+  w.api.overrides.getWebhookInfo = { ok: true, result: { url, last_error_date: 1760000000, last_error_message: "Wrong response from the webhook: 500 Internal Server Error" } };
   assert.match(await check(w.env), /Last error: Wrong response from the webhook: 500/);
-  telegram({ getWebhookInfo: { ok: true, result: { url } }, setMyDescription: { ok: false, error_code: 400, description: "Bad Request: nope" } });
+  // Texts typed in BotFather over the service's, and Telegram refusing to put them right: told, once, for all the languages.
+  w.api.overrides.getWebhookInfo = { ok: true, result: { url } };
+  w.api.overrides.setMyDescription = { ok: false, error_code: 400, description: "Bad Request: nope" };
+  w.api.shown.description = "typed in BotFather";
+  w.api.shown.local.clear();
   assert.match(await check(w.env), /Telegram refused its description \(default, \w\w, \w\w and \d+ more\): Bad Request: nope\.$/, "one reason for every language is one phrase");
-  telegram({ getWebhookInfo: { ok: true, result: { url: "" } } });
+  w.api.overrides.getWebhookInfo = { ok: true, result: { url: "" } };
   assert.match(await check(w.env), /webhook is not set/);
   await disconnect(w.env);
   assert.equal(await check(w.env), "The bot is not connected.");
@@ -109,14 +115,15 @@ test("the bot's menu and texts are set when connecting, and what Telegram refuse
   assert.equal(api.of("setMyShortDescription").length, PACKS.length, "what Telegram does take is set all the same, for every language");
   assert.deepEqual(api.shown.menus.get('"all"').map((c) => c.command), ["start", "menu", "human", "close", "password", "language", "help"]);
   assert.equal(JSON.parse((await env.DB.prepare("SELECT value FROM settings WHERE key = 'telegram_texts'").first()).value).ok, false);
-  // All taken: no warning, and a second connecting writes nothing that is already right.
+  // All taken: no warning, and saving the token again writes nothing that is already set.
   const good = telegram();
-  const again = await connect({ DB: d1(), TOKEN_SECRET: SECRET }, ADMIN_REQUEST(), TOKEN);
+  const kept = { DB: d1(), TOKEN_SECRET: SECRET };
+  const again = await connect(kept, ADMIN_REQUEST(), TOKEN);
   assert.equal(again.warning, undefined);
   assert.ok(good.shown.description.startsWith("Albatross VPN support.") && good.shown.about === "Albatross VPN support and data. albatrossvpn.online" && good.shown.about.length <= 120 && good.shown.description.length <= 512 && good.shown.description.endsWith("albatrossvpn.online"));
   const writes = good.calls.filter((c) => c.method.startsWith("setMy")).length;
-  await connect({ DB: d1(), TOKEN_SECRET: SECRET }, ADMIN_REQUEST(), TOKEN);
-  assert.equal(good.calls.filter((c) => c.method.startsWith("setMy")).length, writes, "a bot whose texts are right is not written to again");
+  await connect(kept, ADMIN_REQUEST(), TOKEN);
+  assert.equal(good.calls.filter((c) => c.method.startsWith("setMy")).length, writes, "a bot whose texts are set is not written to again");
 });
 
 test("the schedule sets the menu and texts when they are not what the service wants, and a refused try waits ten minutes", async () => {
@@ -153,14 +160,15 @@ test("every hour the menu and texts are looked at, and written only where Telegr
   const w = await world();
   const bare = telegram({ getWebhookInfo: { ok: true, result: { url: HOOK_URL } } });
   await heal(w.env);
-  assert.equal(bare.of("setMyDescription").length, PACKS.length);
+  assert.equal(bare.of("setMyDescription").length, 1, "the hourly look is at the English texts, which are what most people see");
   assert.ok(bare.of("setMyCommands").some((c) => c.scope && c.scope.chat_id === TEAM), "the team's menu too");
   await heal(w.env);
-  assert.equal(bare.of("setMyDescription").length, PACKS.length, "right now: left alone");
-  assert.equal(bare.of("setMyCommands").length, PACKS.length + 1);
+  assert.equal(bare.of("setMyDescription").length, 1, "right now: left alone");
+  assert.equal(bare.of("setMyCommands").length, 2);
+  assert.ok(bare.calls.length < 20, "and an hour's look is a handful of calls, not a call for each language");
   bare.shown.description = "something somebody typed in BotFather";
   await heal(w.env);
-  assert.equal(bare.of("setMyDescription").length, PACKS.length + 1, "a text that was changed behind the service's back is put right");
+  assert.equal(bare.of("setMyDescription").length, 2, "a text that was changed behind the service's back is put right");
 });
 
 // ---------- A person: the menu and the guides ----------
@@ -868,4 +876,63 @@ test("an English chat is English from end to end: nothing in it is in Persian sc
   await w.send(press(SARA, "r:5"));
   const said = JSON.stringify(w.api.calls);
   assert.ok(!/[؀-ۿ]/.test(said));
+});
+
+// ---------- The bot's picture, and where people came from ----------
+
+test("the bot gets its profile picture once for each bot, and a refusal is told", async () => {
+  const asked = [];
+  const assets = { fetch: async (request) => (asked.push(new URL(request.url).pathname), new Response(new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]), { headers: { "Content-Type": "image/jpeg" } })) };
+  const env = { DB: d1(), TOKEN_SECRET: SECRET, ASSETS: assets };
+  const api = telegram();
+  const quiet = { blocked: async () => false, count: async () => {} };
+  const linked = await connect(env, ADMIN_REQUEST(), TOKEN);
+  assert.equal(linked.warning, undefined);
+  const set = api.of("setMyProfilePhoto");
+  assert.equal(set.length, 1);
+  assert.deepEqual(JSON.parse(set[0].photo), { type: "static", photo: "attach://picture" });
+  assert.deepEqual(set[0].picture, { file: "bot.jpg", bytes: 6, type: "image/jpeg" });
+  assert.deepEqual(asked, ["/bot.jpg"]);
+  // Saved again, and the schedule every minute: the picture is not sent again.
+  await connect(env, ADMIN_REQUEST(), TOKEN);
+  await sweep(env, quiet);
+  await sweep(env, quiet);
+  assert.equal(api.of("setMyProfilePhoto").length, 1);
+  // Another bot has none yet.
+  await connect(env, ADMIN_REQUEST(), `987654321:${"B".repeat(35)}`);
+  assert.equal(api.of("setMyProfilePhoto").length, 2);
+  // Telegram refuses it: told when the token is saved, and by the panel's check, which tries again.
+  const refusing = telegram({ setMyProfilePhoto: { ok: false, error_code: 400, description: "Bad Request: PHOTO_INVALID" }, getWebhookInfo: { ok: true, result: { url: HOOK_URL } } });
+  const other = { DB: d1(), TOKEN_SECRET: SECRET, ASSETS: assets };
+  const told = await connect(other, ADMIN_REQUEST(), TOKEN);
+  assert.match(told.warning, /did not take the bot's picture: Bad Request: PHOTO_INVALID\. "Check the bot" tries again\.$/);
+  assert.match(await check(other), /Telegram refused its picture: Bad Request: PHOTO_INVALID\.$/);
+  assert.equal(refusing.of("setMyProfilePhoto").length, 2);
+  // A build with no picture, or a service with no assets, sets none and says nothing.
+  const bare = telegram();
+  const none = await connect({ DB: d1(), TOKEN_SECRET: SECRET, ASSETS: { fetch: async () => new Response("<html>", { headers: { "Content-Type": "text/html" } }) } }, ADMIN_REQUEST(), TOKEN);
+  assert.equal(none.warning, undefined);
+  assert.equal(bare.of("setMyProfilePhoto").length, 0);
+});
+
+test("a link that names its source counts a new person once a day, and /stats lists the links of the week", async () => {
+  const w = await world({ lang: false });
+  await w.send(text(SARA, "/start ad_fa1"));
+  await w.send(text(SARA, "/start ad_fa1"));
+  await w.send(text(SARA + 1, "/start ad_fa1"));
+  await w.send(text(SARA + 2, "/start AD_zh1"));
+  // Not sources: a topic of a link, nothing, a word that is too long or has other characters.
+  for (const [i, arg] of ["buy", "", "x".repeat(40), "bad!", "team"].entries()) await w.send(text(SARA + 3 + i, `/start ${arg}`.trim()));
+  assert.deepEqual(await w.rows("SELECT key, n FROM tg_stats WHERE key LIKE 'from:%' ORDER BY key"), [{ key: "from:ad_fa1", n: 2 }, { key: "from:ad_zh1", n: 1 }], "once for each person, in lower case");
+  // Someone who has a language already is not new.
+  await w.speak(SARA + 20, "en");
+  await w.send(text(SARA + 20, "/start ad_fa1"));
+  assert.equal((await w.row("SELECT n FROM tg_stats WHERE key = 'from:ad_fa1'")).n, 2);
+  await w.send(text(TEAM, "/stats"));
+  assert.ok(w.lastText(TEAM).text.includes("New people by link, 7 days: ad_fa1 2 (today 2), ad_zh1 1 (today 1)"), w.lastText(TEAM).text);
+  // Older days count in the week, and are not "today".
+  await w.env.DB.prepare("UPDATE tg_stats SET day = date(day, '-3 days') WHERE key = 'from:ad_zh1'").run();
+  await w.send(text(TEAM, "/stats"));
+  assert.ok(w.lastText(TEAM).text.includes("ad_fa1 2 (today 2), ad_zh1 1"), w.lastText(TEAM).text);
+  assert.ok(!w.lastText(TEAM).text.includes("ad_zh1 1 (today"));
 });
