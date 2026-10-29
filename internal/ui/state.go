@@ -40,6 +40,30 @@ type conn struct {
 	CountryName string `json:"country_name"`
 	Flag        string `json:"flag"`
 	Delay       int    `json:"delay"`
+	// Protocol names how the server is reached ("VLESS Reality"), Since
+	// when the connection began (Unix seconds); Up and Down are the bytes
+	// it carried, UpRate and DownRate its bytes a second now.
+	Protocol string `json:"protocol"`
+	Since    int64  `json:"since"`
+	Up       int64  `json:"up"`
+	Down     int64  `json:"down"`
+	UpRate   int64  `json:"up_rate"`
+	DownRate int64  `json:"down_rate"`
+}
+
+// protocolName is how a protocol is shown: its name in the protocol list,
+// with REALITY, the TLS that looks like a well-known site, named.
+func protocolName(proto, security string) string {
+	name := proto
+	for _, p := range engine.ProtocolChoices() {
+		if p.Value == proto && p.Value != "" {
+			name = p.Label
+		}
+	}
+	if security == "reality" {
+		name += " Reality"
+	}
+	return name
 }
 
 type region struct {
@@ -98,7 +122,9 @@ func publicState(s engine.Snapshot) state {
 		out.Regions = append(out.Regions, region{r.Code, r.Name})
 	}
 	if c := s.Conn; c != nil {
-		out.Conn = &conn{Country: c.Country, CountryName: c.CountryName, Flag: c.Flag, Delay: c.Delay}
+		out.Conn = &conn{Country: c.Country, CountryName: c.CountryName, Flag: c.Flag, Delay: c.Delay,
+			Protocol: protocolName(c.Proto, c.Security), Since: c.Since,
+			Up: c.Up, Down: c.Down, UpRate: c.UpRate, DownRate: c.DownRate}
 	}
 	return out
 }

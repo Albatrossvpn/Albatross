@@ -151,6 +151,10 @@ export const FEATURES = {
   // so they come with choosing the protocol.
   own: { name: "Albatross's own servers", tier: "gold" },
   lan: { name: "Share with other devices", tier: "vip" },
+  // The project's own servers, which public lists do not crowd, ranked
+  // first for the account; and a direct line to support.
+  priority: { name: "Our private servers first", tier: "vip" },
+  support: { name: "Direct support", tier: "vip" },
 };
 
 const RANK = Object.fromEntries(Object.keys(TIERS).map((t, i) => [t, i]));

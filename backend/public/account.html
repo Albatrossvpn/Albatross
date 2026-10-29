@@ -48,7 +48,8 @@
 
   <!-- Dashboard -->
   <div class="dash hidden" id="dash">
-    <div class="card">
+    <div class="card member" id="member">
+      <span class="sheen" aria-hidden="true"></span>
       <div class="row between wrap-row">
         <div><div class="row wrap-row"><h2 id="d-name" class="flush"></h2><span id="d-plan"></span></div><span class="muted" id="d-sub"></span></div>
         <span class="pill" id="d-status"></span>
@@ -57,6 +58,11 @@
       <div class="meter" id="m-data"></div>
       <div class="meter" id="m-time"></div>
       <dl class="kv" id="d-kv"></dl>
+    </div>
+    <div class="card hidden" id="support">
+      <h2>Direct support</h2>
+      <p class="muted">As a VIP member you reach our team directly. Tell us your username and what happens, and we answer as soon as we can.</p>
+      <div class="row wrap-row" id="support-links"></div>
     </div>
     <div class="card hidden" id="plan-card">
       <h2>What your plan includes</h2>

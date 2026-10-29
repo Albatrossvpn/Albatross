@@ -102,6 +102,9 @@ func (s *Server) mux() *http.ServeMux {
 		"POST /api/share/import":      s.shareImport,
 		"POST /api/share/app":         s.shareApp,
 		"POST /api/share/installer":   s.saveInstaller,
+		"GET /api/speedtest":          s.speedState,
+		"POST /api/speedtest":         s.speedStart,
+		"POST /api/speedtest/stop":    s.speedStop,
 	}
 	for pattern, h := range api {
 		mux.Handle(pattern, s.guard(h))
@@ -314,6 +317,23 @@ func (s *Server) open(w http.ResponseWriter, r *http.Request) {
 	if s.hooks.OpenURL != nil {
 		s.hooks.OpenURL(req.URL)
 	}
+	ok(w)
+}
+
+func (s *Server) speedState(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.eng.SpeedTestState())
+}
+
+func (s *Server) speedStart(w http.ResponseWriter, r *http.Request) {
+	if err := s.eng.StartSpeedTest(); err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, s.eng.SpeedTestState())
+}
+
+func (s *Server) speedStop(w http.ResponseWriter, r *http.Request) {
+	s.eng.StopSpeedTest()
 	ok(w)
 }
 

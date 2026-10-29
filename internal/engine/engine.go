@@ -90,6 +90,8 @@ type Engine struct {
 	pool *pool.Pool
 
 	acct *account.Client // nil when this build has no accounts
+	// speed is the in-app speed test (speedtest.go).
+	speed speedRun
 	// crowdURLs are the account service's addresses, which also collect
 	// crowd stats (crowd.go); crowdAt is when tests were last reported.
 	crowdURLs []string

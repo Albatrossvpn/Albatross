@@ -40,6 +40,7 @@ SITE_NAME = "Albatross"
 COMPANY_NAME = ""
 COMPANY_ADDRESS = ""
 CONTACT_EMAIL = ""
+SUPPORT_URL = ""
 # Cloudflare Turnstile site key for the sign-up form (optional; the secret
 # key goes in the TURNSTILE_SECRET secret).
 TURNSTILE_SITEKEY = ""

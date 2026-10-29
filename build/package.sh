@@ -137,7 +137,8 @@ Bundled components (see the licenses folder):
   Tor Expert Bundle         https://www.torproject.org (BSD-3-Clause; transports under their own licenses)
   Snowflake proxy           https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/snowflake (BSD-3-Clause)
   Twemoji country flags     https://github.com/talkjs/country-flag-emoji-polyfill (CC-BY 4.0 graphics by Twitter)
-  Cinzel, Cormorant fonts   https://github.com/NDISCOVER/Cinzel, https://github.com/CatharsisFonts/Cormorant (SIL OFL 1.1)
+  Manrope font              https://github.com/googlefonts/manrope (SIL OFL 1.1)
+  World map                 https://www.naturalearthdata.com (public domain)
   Site rule sets            https://github.com/SagerNet/sing-geoip, https://github.com/SagerNet/sing-geosite (GPL-3.0-or-later),
                             https://github.com/Chocolate4U/Iran-sing-box-rules
   Ad list (updated daily)   HaGeZi, OISD, AdGuard DNS filter (GPL-3.0), PersianBlocker (AGPL-3.0);
