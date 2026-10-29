@@ -216,11 +216,11 @@ async function refreshTexts(env, tg, team, mode = "apply") {
   const work = async (e) => {
     const verify = done[e.key] === e.hash && looks(e);
     if (done[e.key] === e.hash && !verify) return;
-    const team = e.key === "team";
-    const l = team ? { scope: { type: "chat", chat_id: e.team } } : e.key ? { language_code: e.key } : {};
+    const forTeam = e.key === "team";
+    const l = forTeam ? { scope: { type: "chat", chat_id: e.team } } : e.key ? { language_code: e.key } : {};
     // What an entry is made of: what it is called, how Telegram is told, how Telegram is asked, and whether what it answers is what is wanted.
-    const parts = [[team ? "team menu" : "menu", "setMyCommands", { commands: e.commands }, "getMyCommands", (r) => sameCommands(r, e.commands)]];
-    if (!team) {
+    const parts = [[forTeam ? "team menu" : "menu", "setMyCommands", { commands: e.commands }, "getMyCommands", (r) => sameCommands(r, e.commands)]];
+    if (!forTeam) {
       parts.push(["description", "setMyDescription", { description: e.about }, "getMyDescription", (r) => (r || {}).description === e.about]);
       parts.push(["about line", "setMyShortDescription", { short_description: e.short }, "getMyShortDescription", (r) => (r || {}).short_description === e.short]);
     }
@@ -238,7 +238,7 @@ async function refreshTexts(env, tg, team, mode = "apply") {
       const res = await tg.call(method, { ...payload, ...l });
       if (!res.ok) {
         all = false;
-        refused.push({ what, lc: team ? "" : e.key, why: oneLine(res.description, 100) });
+        refused.push({ what, lc: forTeam ? "" : e.key, why: oneLine(res.description, 100) });
       }
     }
     if (all) done[e.key] = e.hash;
