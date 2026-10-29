@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { HANDOFF, chat, cleanMessages, close, composeEmail, fallbackSummary, looksPersian, platformOf, replyText, splitHandoff, systemPrompt, withCors } from "../src/support.js";
+import { HANDOFF, chat, cleanMessages, close, composeEmail, fallbackSummary, platformOf, replyText, splitHandoff, systemPrompt, withCors } from "../src/support.js";
 
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 
@@ -80,8 +80,8 @@ test("the model's answer is read from any shape it may come in, without its thin
 
 test("the system prompt keeps the rules and the knowledge", () => {
   const p = systemPrompt();
-  for (const s of ["Persian", HANDOFF, "Never ask for or accept a password", "Bronze", "V2Box", "accounts.albatrossvpn.online"]) assert.ok(p.includes(s), s);
-  assert.ok(looksPersian("سلام، وصل نمی‌شوم") && !looksPersian("hello"));
+  for (const s of ["Answer in English only", HANDOFF, "Never ask for or accept a password", "Bronze", "V2Box", "accounts.albatrossvpn.online"]) assert.ok(p.includes(s), s);
+  assert.ok(!/[؀-ۿ]/.test(p), "nothing in the assistant's instructions is Persian");
   assert.equal(platformOf("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)"), "iOS");
   assert.equal(platformOf("Mozilla/5.0 (Linux; Android 13; Pixel 7)"), "Android");
   assert.equal(platformOf("Mozilla/5.0 (Windows NT 10.0; Win64; x64)"), "Windows");
@@ -91,7 +91,7 @@ test("the system prompt keeps the rules and the knowledge", () => {
 test("chat: the visitor is answered by the model with the whole conversation, and the hand-over marker becomes a flag", async () => {
   const e = env({ answer: `Your plan comes from where you got the account.\n${HANDOFF}` });
   const k = kit();
-  const res = await chat(post({ messages: [{ role: "user", content: "How do I recharge?" }], lang: "en" }), e, k);
+  const res = await chat(post({ messages: [{ role: "user", content: "How do I recharge?" }], }), e, k);
   assert.equal(res.status, 200);
   assert.deepEqual(await res.json(), { reply: "Your plan comes from where you got the account.", handoff: true });
   assert.equal(e.asked.length, 1);
@@ -115,15 +115,14 @@ test("chat: a bad request is refused before the model is asked", async () => {
   assert.equal(e.asked.length, 0);
 });
 
-test("chat: a model that is away, or too many messages, are answered in the visitor's language", async () => {
-  const fa = { messages: [{ role: "user", content: "وصل نمی‌شوم" }] };
-  const away = await chat(post(fa), env({ fail: true }), kit());
+test("chat: a model that is away, or too many messages, are answered in English, whatever the visitor writes", async () => {
+  const away = await chat(post({ messages: [{ role: "user", content: "وصل نمی‌شوم" }] }), env({ fail: true }), kit());
   const a = await away.json();
   assert.equal(away.status, 200);
-  assert.ok(a.degraded && a.handoff && looksPersian(a.reply) && a.reply.includes("support@albatrossvpn.online"));
+  assert.ok(a.degraded && a.handoff && !/[؀-ۿ]/.test(a.reply) && a.reply.includes("support@albatrossvpn.online"));
   const nothing = await chat(post({ messages: [{ role: "user", content: "hello" }] }), env({ answer: "" }), kit());
   const n = await nothing.json();
-  assert.ok(n.degraded && !looksPersian(n.reply));
+  assert.ok(n.degraded && !/[؀-ۿ]/.test(n.reply));
   const spent = await chat(post({ messages: [{ role: "user", content: "hello" }] }), env(), kit({ spent: ["support:chat:h:"] }));
   assert.equal(spent.status, 429);
   const s = await spent.json();
@@ -137,7 +136,7 @@ test("close: the owner is mailed a plain-text summary with the conversation, onc
   const k = kit({ account: "sara (gold)" });
   const talk = {
     messages: [{ role: "user", content: "Android: the VPN does not connect" }, { role: "assistant", content: "Update the app." }, { role: "user", content: "<b>still</b> nothing" }],
-    sid: "abcdef123456", contact: "  @someone\nBcc: evil@example.com ", lang: "en", page: "/account?x=1<script>",
+    sid: "abcdef123456", contact: "  @someone\nBcc: evil@example.com ", page: "/account?x=1<script>",
   };
   const res = await close(post(talk, { "User-Agent": "Mozilla/5.0 (Linux; Android 13)", "CF-IPCountry": "IR" }), e, k);
   assert.deepEqual(await res.json(), { ok: true });
@@ -154,7 +153,7 @@ test("close: the owner is mailed a plain-text summary with the conversation, onc
   assert.ok(!m.text.includes("<script"), "the page's address is cleaned");
   // The model was asked for the summary, not to answer.
   assert.ok(e.asked[0].input.messages[0].content.includes("RESOLVED or NEEDS FOLLOW-UP"));
-  assert.match(e.wrote[0], /^Sent, \d{4}-\d\d-\d\d \d\d:\d\d UTC$/, "the administrator can see that it went out");
+  assert.match(e.wrote[e.wrote.length - 1], /^Sent, \d{4}-\d\d-\d\d \d\d:\d\d UTC$/, "the administrator can see that it went out");
   // The page saying the conversation is over again changes nothing.
   const again = await close(post(talk), e, kit({ spent: ["support:sid:"] }));
   assert.deepEqual(await again.json(), { ok: true, duplicate: true });
@@ -168,18 +167,18 @@ test("close: nothing to mail without a conversation, an address or the mail bind
   const noAddress = env({ notify: "" });
   await close(post(talk), noAddress, kit());
   assert.equal(noAddress.sent.length, 0);
-  assert.match(noAddress.wrote[0], /^Not sent, .*no address is set in Settings$/);
+  assert.match(noAddress.wrote[noAddress.wrote.length - 1], /^Not sent, .*no address is set in Settings$/);
   const badAddress = env({ notify: "someone" });
   await close(post(talk), badAddress, kit());
   assert.equal(badAddress.sent.length, 0);
   const noMail = env({ mail: false });
   assert.equal((await close(post(talk), noMail, kit())).status, 200);
-  assert.match(noMail.wrote[0], /no mail binding$/);
+  assert.match(noMail.wrote[noMail.wrote.length - 1], /no mail binding$/);
   // A refusal by the mail service is noted, with its words.
   const refused = env();
   refused.EMAIL = { send: async () => { throw new Error("destination address is not verified"); } };
   assert.equal((await close(post(talk), refused, kit())).status, 200);
-  assert.match(refused.wrote[0], /^Failed, .*: destination address is not verified$/);
+  assert.match(refused.wrote[refused.wrote.length - 1], /^Failed, .*: destination address is not verified$/);
   const away = env({ fail: true });
   await close(post(talk), away, kit());
   assert.equal(away.sent.length, 1);
@@ -190,7 +189,7 @@ test("close: nothing to mail without a conversation, an address or the mail bind
 
 test("the mail says resolved only when the model says so and the visitor left no contact", () => {
   const messages = [{ role: "user", content: "How do I install on iPhone?" }, { role: "assistant", content: "Use V2Box." }];
-  const meta = { lang: "en", platform: "iOS", country: "", page: "", account: "", time: "2026-10-29 17:00 UTC" };
+  const meta = { platform: "iOS", country: "", page: "", account: "", time: "2026-10-29 17:00 UTC" };
   assert.ok(composeEmail({ summary: "Problem: install.\nStatus: RESOLVED", messages, contact: "", meta }).subject.includes("resolved"));
   assert.ok(composeEmail({ summary: "Problem: install.\nStatus: RESOLVED", messages, contact: "@me", meta }).subject.includes("needs follow-up"));
   assert.ok(composeEmail({ summary: "Status: NEEDS FOLLOW-UP", messages, contact: "", meta }).subject.includes("needs follow-up"));

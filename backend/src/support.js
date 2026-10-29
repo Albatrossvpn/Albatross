@@ -15,6 +15,10 @@ const MAX_TOTAL = 9000; // the whole conversation
 const MAX_BODY = 40 * 1024;
 const MAX_CONTACT = 120;
 const AI_TIMEOUT = 30_000;
+// A summary is written after the visitor has their response, in the time the
+// platform leaves (30 seconds for everything): the model gets half of it, and
+// a summary the model did not write in time is the plain one.
+const SUMMARY_TIMEOUT = 14_000;
 
 // Only the websites (and their mirror on GitHub Pages) may read the answers in
 // a browser; the account pages (same origin) need no header.
@@ -66,7 +70,7 @@ export function systemPrompt() {
   return `You are the support assistant on the websites of Albatross, a VPN service. A visitor is asking you for help.
 
 How to answer:
-- Answer in the language the visitor writes in: Persian (natural, polite, simple, using "شما") or English. If they mix, follow their last message.
+- Answer in English only, whatever language the visitor writes in. Use short, simple sentences and common words: many visitors read English as a second language.
 - Be brief and practical: a few sentences, or a short numbered list of steps. At most one or two questions at a time.
 - Use only the KNOWLEDGE below. Never invent features, prices, links, times, limits or promises. If something is not in the knowledge, say you are not sure.
 - You cannot see accounts, usage, payments or servers, and you cannot change anything. Never say you checked or fixed something.
@@ -90,18 +94,9 @@ Next step: one short suggestion for the owner.
 Use only what is in the conversation. Do not invent anything.`;
 
 const CANNED = {
-  fa: {
-    busy: "الان پیام‌های زیادی دارم و نمی‌توانم جواب بدهم. چند دقیقه بعد دوباره امتحان کنید یا به support@albatrossvpn.online ایمیل بزنید.",
-    failed: "نتوانستم الان جواب بدهم. لطفاً دوباره امتحان کنید. اگر مشکل ادامه داشت، خلاصه‌ی گفتگو برای تیم ما ارسال می‌شود یا می‌توانید به support@albatrossvpn.online ایمیل بزنید.",
-  },
-  en: {
-    busy: "I am getting a lot of messages right now and cannot answer. Try again in a few minutes, or email support@albatrossvpn.online.",
-    failed: "I could not answer just now. Please try again. If it keeps happening, a summary of this chat goes to our team, or you can email support@albatrossvpn.online.",
-  },
+  busy: "I am getting a lot of messages right now and cannot answer. Try again in a few minutes, or email support@albatrossvpn.online.",
+  failed: "I could not answer just now. Please try again. If it keeps happening, a summary of this chat goes to our team, or you can email support@albatrossvpn.online.",
 };
-
-/** True when the text is mostly Persian or Arabic script. */
-export const looksPersian = (text) => /[؀-ۿ]/.test(text);
 
 /** The visitor's messages as a conversation a chat model accepts: starting and ending with the visitor, alternating, trimmed. */
 export function cleanMessages(list) {
@@ -148,7 +143,7 @@ export function splitHandoff(text) {
 const withTimeout = (p, ms) =>
   Promise.race([p, new Promise((_, reject) => setTimeout(() => reject(new Error("The model took too long.")), ms))]);
 
-async function ask(env, system, messages, maxTokens) {
+async function ask(env, system, messages, maxTokens, timeout = AI_TIMEOUT) {
   if (!env.AI) throw new Error("No AI binding.");
   const res = await withTimeout(
     env.AI.run(MODEL, {
@@ -158,7 +153,7 @@ async function ask(env, system, messages, maxTokens) {
       // The answer is read, not reasoned over: thinking would only spend the allowance.
       chat_template_kwargs: { enable_thinking: false },
     }),
-    AI_TIMEOUT,
+    timeout,
   );
   return replyText(res);
 }
@@ -204,24 +199,22 @@ export async function chat(request, env, kit) {
   const b = await readJson(request);
   const messages = b && cleanMessages(b.messages);
   if (!messages || !messages.length || messages[messages.length - 1].role !== "user") return kit.json({ error: "Bad request." }, 400);
-  const fa = looksPersian(messages[messages.length - 1].content) || b.lang === "fa";
-  const lang = fa ? "fa" : "en";
   const t = await kit.tag(request);
   const ok = await allowed(env, kit, [
     { key: `support:chat:h:${t}`, max: 40, window: 3600 },
     { key: `support:chat:d:${t}`, max: 150, window: DAY },
     { key: `support:chat:all:${today()}`, max: 900, window: DAY },
   ]);
-  if (!ok) return kit.json({ reply: CANNED[lang].busy, handoff: true, limited: true }, 429);
+  if (!ok) return kit.json({ reply: CANNED.busy, handoff: true, limited: true }, 429);
   let reply = "";
   try {
     reply = await ask(env, systemPrompt(), messages, 600);
   } catch (e) {
     console.warn("support chat:", e && e.message ? e.message : e);
   }
-  if (!reply) return kit.json({ reply: CANNED[lang].failed, handoff: true, degraded: true });
+  if (!reply) return kit.json({ reply: CANNED.failed, handoff: true, degraded: true });
   const { text, handoff } = splitHandoff(reply);
-  return kit.json({ reply: text || CANNED[lang].failed, handoff });
+  return kit.json({ reply: text || CANNED.failed, handoff });
 }
 
 /** The device a visitor writes from, from the browser's own words. */
@@ -256,7 +249,7 @@ export function composeEmail({ summary, messages, contact, meta }) {
     summary.trim(),
     "",
     `Contact left by the visitor: ${contact || "none"}`,
-    `Language: ${meta.lang}   Device: ${meta.platform}   Country: ${meta.country || "?"}   Page: ${meta.page || "?"}`,
+    `Device: ${meta.platform}   Country: ${meta.country || "?"}   Page: ${meta.page || "?"}`,
     meta.account ? `Signed in as: ${meta.account}` : "Not signed in",
     `Time: ${meta.time}`,
     "",
@@ -293,9 +286,10 @@ async function mailSummary(env, { messages, contact, meta }) {
     await noteMail(env, `Not sent, ${stamp()}: ${to ? "this service has no mail binding" : "no address is set in Settings"}`);
     return false;
   }
+  await noteMail(env, `Sending, ${stamp()}`);
   let summary = "";
   try {
-    summary = await ask(env, SUMMARY_PROMPT, [{ role: "user", content: transcript(messages) }], 400);
+    summary = await ask(env, SUMMARY_PROMPT, [{ role: "user", content: transcript(messages) }], 400, SUMMARY_TIMEOUT);
   } catch (e) {
     console.warn("support summary:", e && e.message ? e.message : e);
   }
@@ -329,7 +323,6 @@ export async function close(request, env, kit, ctx) {
   const contact = oneLine(b.contact, MAX_CONTACT);
   const account = await kit.account(request).catch(() => "");
   const meta = {
-    lang: b.lang === "fa" ? "fa" : "en",
     platform: platformOf(request.headers.get("User-Agent")),
     country: request.headers.get("CF-IPCountry") || "",
     page: oneLine(b.page, 80).replace(/[^\w\-./#?=&]/g, ""),

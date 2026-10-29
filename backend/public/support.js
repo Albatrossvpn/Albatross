@@ -14,42 +14,21 @@
   var IDLE_MS = 8 * 60 * 1000; // a conversation left alone this long is over
 
   var TEXT = {
-    en: {
-      fab: "Support",
-      title: "Albatross Support",
-      sub: "AI assistant. Usually answers in seconds.",
-      placeholder: "Type your question…",
-      send: "Send",
-      close: "Close",
-      end: "End chat",
-      lang: "FA",
-      hello: "Hi! I'm Albatross's support assistant. Tell me what is going wrong and I will help you step by step. If I cannot solve it, a summary goes to our team.",
-      chips: ["I can't connect", "Install on iPhone", "Plans and upgrading", "Account or data problem"],
-      contact: "Want our team to reach you? Leave a Telegram @name, an email or a phone number (optional).",
-      contactPlaceholder: "Telegram @name, email or phone",
-      toTeam: "Send to our team",
-      sent: "Thank you. Our team has a summary of this chat.",
-      failed: "The message did not go through. Check your connection and try again.",
-      note: "An AI assistant can be wrong. Do not write passwords. When the chat ends, a summary goes to our team.",
-    },
-    fa: {
-      fab: "پشتیبانی",
-      title: "پشتیبانی آلباتروس",
-      sub: "دستیار هوشمند. معمولاً در چند ثانیه جواب می‌دهد.",
-      placeholder: "سؤال یا مشکل‌تان را بنویسید…",
-      send: "ارسال",
-      close: "بستن",
-      end: "پایان گفتگو",
-      lang: "EN",
-      hello: "سلام! من دستیار پشتیبانی آلباتروس هستم. بنویسید چه مشکلی دارید تا قدم‌به‌قدم کمک‌تان کنم. اگر نتوانستم حل کنم، خلاصه‌ی گفتگو برای تیم ما فرستاده می‌شود.",
-      chips: ["وصل نمی‌شوم", "نصب روی آیفون", "پلن‌ها و ارتقا", "مشکل حساب یا حجم"],
-      contact: "می‌خواهید تیم ما با شما تماس بگیرد؟ آیدی تلگرام، ایمیل یا شماره‌تان را بنویسید (اختیاری).",
-      contactPlaceholder: "آیدی تلگرام، ایمیل یا شماره",
-      toTeam: "ارسال برای تیم",
-      sent: "ممنون. خلاصه‌ی این گفتگو برای تیم ما فرستاده شد.",
-      failed: "پیام ارسال نشد. اینترنت‌تان را بررسی کنید و دوباره امتحان کنید.",
-      note: "دستیار هوشمند ممکن است اشتباه کند. رمز عبور ننویسید. وقتی گفتگو تمام شود، خلاصه‌اش برای تیم ما فرستاده می‌شود.",
-    },
+    fab: "Support",
+    title: "Albatross Support",
+    sub: "AI assistant. Usually answers in seconds.",
+    placeholder: "Type your question…",
+    send: "Send",
+    close: "Close",
+    end: "End chat",
+    hello: "Hi! I'm Albatross's support assistant. Tell me what is going wrong and I will help you step by step. If I cannot solve it, a summary goes to our team.",
+    chips: ["I can't connect", "Install on iPhone", "Plans and upgrading", "Account or data problem"],
+    contact: "Want our team to reach you? Leave a Telegram @name, an email or a phone number (optional).",
+    contactPlaceholder: "Telegram @name, email or phone",
+    toTeam: "Send to our team",
+    sent: "Thank you. Our team has a summary of this chat.",
+    failed: "The message did not go through. Check your connection and try again.",
+    note: "An AI assistant can be wrong. Do not write passwords. When the chat ends, a summary goes to our team.",
   };
 
   function randomId() {
@@ -61,8 +40,7 @@
   }
 
   function fresh() {
-    var fa = /^fa/i.test(navigator.language || "");
-    return { sid: randomId(), lang: fa ? "fa" : "en", messages: [], contact: "", contactSent: "", sentAt: 0, offered: false };
+    return { sid: randomId(), messages: [], contact: "", contactSent: "", sentAt: 0, offered: false };
   }
 
   function load() {
@@ -75,7 +53,7 @@
 
   var state = load();
   function save() { try { sessionStorage.setItem(STORE, JSON.stringify(state)); } catch (e) {} }
-  var t = function (k) { return TEXT[state.lang][k]; };
+  var t = function (k) { return TEXT[k]; };
 
   // ---------- Elements ----------
 
@@ -124,8 +102,6 @@
   var sub = el("div", "sp-sub");
   titles.appendChild(title);
   titles.appendChild(sub);
-  var langBtn = el("button", "sp-icon-btn");
-  langBtn.type = "button";
   var endBtn = el("button", "sp-icon-btn");
   endBtn.type = "button";
   var closeBtn = el("button", "sp-icon-btn");
@@ -133,7 +109,6 @@
   closeBtn.appendChild(icon("M6 6l12 12M18 6L6 18"));
   head.appendChild(avatar);
   head.appendChild(titles);
-  head.appendChild(langBtn);
   head.appendChild(endBtn);
   head.appendChild(closeBtn);
 
@@ -272,16 +247,11 @@
   // ---------- Showing it all ----------
 
   function draw() {
-    var rtl = state.lang === "fa";
-    root.classList.toggle("sp-rtl", rtl);
-    panel.dir = rtl ? "rtl" : "ltr";
     fabText.textContent = t("fab");
     fab.setAttribute("aria-label", t("fab"));
     panel.setAttribute("aria-label", t("title"));
     title.textContent = t("title");
     sub.textContent = t("sub");
-    langBtn.textContent = t("lang");
-    langBtn.setAttribute("aria-label", rtl ? "English" : "فارسی");
     endBtn.textContent = t("end");
     closeBtn.setAttribute("aria-label", t("close"));
     box.placeholder = t("placeholder");
@@ -367,7 +337,7 @@
     save();
     showTyping(true);
     bumpIdle();
-    request("chat", { messages: history(), lang: state.lang, page: location.pathname }).then(function (r) {
+    request("chat", { messages: history(), page: location.pathname }).then(function (r) {
       showTyping(false);
       if (r && r.reply) {
         state.messages.push({ role: "assistant", content: r.reply });
@@ -408,7 +378,7 @@
     if (typeof contact === "string") state.contact = contact;
     // A conversation that went on after its summary was sent gets a new summary of its own.
     if (state.sentAt) state.sid = randomId();
-    var data = { messages: history(), sid: state.sid, contact: state.contact, lang: state.lang, page: location.pathname, why: why };
+    var data = { messages: history(), sid: state.sid, contact: state.contact, page: location.pathname, why: why };
     state.sentAt = said;
     state.contactSent = state.contact;
     save();
@@ -437,17 +407,10 @@
   fab.addEventListener("click", function () { setOpen(true); });
   closeBtn.addEventListener("click", function () { setOpen(false); });
   document.addEventListener("keydown", function (e) { if (e.key === "Escape" && !panel.hidden) setOpen(false); });
-  langBtn.addEventListener("click", function () {
-    state.lang = state.lang === "fa" ? "en" : "fa";
-    save();
-    draw();
-  });
   endBtn.addEventListener("click", function () {
     conclude("ended", teamInput.value);
     bubble("info", t("sent"));
-    var lang = state.lang;
     state = fresh();
-    state.lang = lang;
     save();
     setTimeout(function () { if (!panel.hidden) draw(); }, 1800);
   });

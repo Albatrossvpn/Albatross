@@ -159,11 +159,6 @@
 .sp-send svg { width: 20px; height: 20px; }
 .sp-note { margin: 0; padding: 0 16px 10px; background: #fff; font-size: 11.5px; line-height: 1.45; color: var(--sp-muted); text-align: center; }
 
-/* Right to left: the panel's own order flips with the language; the bubbles follow what is written in them. */
-.sp-rtl .sp-bot > div { border-bottom-left-radius: 18px; border-bottom-right-radius: 5px; }
-.sp-rtl .sp-me > div { border-bottom-right-radius: 18px; border-bottom-left-radius: 5px; }
-.sp-rtl .sp-fab .sp-dot { left: auto; right: 36px; }
-
 @media (max-width: 520px) {
   .sp-root { right: 12px; bottom: 12px; }
   .sp-fab { height: 54px; padding: 0 18px 0 14px; }

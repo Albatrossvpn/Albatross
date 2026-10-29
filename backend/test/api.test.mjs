@@ -608,7 +608,7 @@ test("copies older than the manifest's min_version are refused; the website neve
 });
 
 test("support chat: bad requests are refused, only the websites may read the answers, and a model that is away is no error", async () => {
-  const say = (text) => ({ messages: [{ role: "user", content: text }], lang: "en" });
+  const say = (text) => ({ messages: [{ role: "user", content: text }] });
   assert.equal((await call("POST", "support/chat", { body: {} })).status, 400);
   assert.equal((await call("POST", "support/chat", { body: { messages: "hello" } })).status, 400);
   assert.equal((await call("POST", "support/chat", { body: { messages: [{ role: "assistant", content: "hi" }] } })).status, 400);
@@ -639,7 +639,7 @@ test("support close: the summary address is the administrator's to set, a conver
   assert.equal(saved.body.support_notify_to, "owner@example.com");
   const talk = {
     messages: [{ role: "user", content: "The VPN does not connect on Android" }, { role: "assistant", content: "Update the app." }, { role: "user", content: "still nothing" }],
-    sid: "abcdef123456", contact: "@someone", lang: "en", page: "/account",
+    sid: "abcdef123456", contact: "@someone", page: "/account",
   };
   assert.equal((await call("POST", "support/close", { body: {} })).status, 400);
   assert.equal((await call("POST", "support/close", { body: { messages: [{ role: "assistant", content: "hello" }] } })).status, 400);
