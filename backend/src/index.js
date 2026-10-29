@@ -7,6 +7,7 @@ import {
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
+import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
@@ -22,6 +23,7 @@ const DEFAULTS = {
   plan_features: "", // which plan brings each feature, where it differs from FEATURES (JSON)
   download_windows: "",
   download_android: "",
+  support_notify_to: "", // where the support chat's summaries are mailed
 };
 
 class HttpError extends Error {
@@ -54,24 +56,26 @@ export default {
   async scheduled(event, env, ctx) {
     ctx.waitUntil(publishCrowdServers(env));
   },
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/list/")) return mirror(request, url, env);
     if (url.pathname.startsWith("/dl/")) return download(request, url, env);
     if (url.pathname.startsWith("/sub/")) return subscription(request, url, env);
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+    // The websites' support chat is read from the website's own origin.
+    const cors = url.pathname.startsWith("/api/v1/support/") ? (r) => supportCors(request, r) : (r) => r;
     try {
       if (!env.TOKEN_SECRET || env.TOKEN_SECRET.length < 24) throw new HttpError(503, "The service is not configured yet.");
-      return await route(request, env, url);
+      return cors(await route(request, env, url, ctx));
     } catch (e) {
-      if (e instanceof HttpError) return json({ error: e.message }, e.status);
+      if (e instanceof HttpError) return cors(json({ error: e.message }, e.status));
       console.error(e && e.stack ? e.stack : e);
-      return json({ error: "Something went wrong. Try again." }, 500);
+      return cors(json({ error: "Something went wrong. Try again." }, 500));
     }
   },
 };
 
-async function route(request, env, url) {
+async function route(request, env, url, ctx) {
   const path = url.pathname.replace(/^\/api\/v1\/?/, "");
   const key = `${request.method} ${path}`;
   const admin = path.match(/^admin\/users\/(\d+)(?:\/([a-z-]+))?$/);
@@ -101,6 +105,10 @@ async function route(request, env, url) {
     case "POST stats": return crowdReport(request, env);
     case "POST admin/crowd/publish": return adminPublishCrowd(request, env);
     case "GET stats": return crowdSummary(request, env, url);
+    case "POST support/chat": return supportChat(request, env, supportKit(env));
+    case "POST support/close": return supportClose(request, env, supportKit(env), ctx);
+    case "OPTIONS support/chat":
+    case "OPTIONS support/close": return new Response(null, { status: 204 });
   }
   const list = path.match(/^admin\/list\/(.+)$/);
   if (list && request.method === "PUT") return adminPutList(request, env, list[1]);
@@ -185,6 +193,20 @@ async function count(env, key, window) {
 }
 
 const forget = (env, key) => env.DB.prepare("DELETE FROM attempts WHERE key = ?1").bind(key).run();
+
+// What the support chat (support.js) takes from here: answers, rate limits,
+// and who is signed in, for the mail to the owner.
+const supportKit = (env) => ({
+  json,
+  blocked,
+  count,
+  tag: (request) => clientTag(request, env),
+  account: async (request) => {
+    if (!request.headers.get("Authorization")) return "";
+    const { user } = await authUser(request, env);
+    return `${user.username} (${tierOf(user.tier)})`;
+  },
+});
 
 const tooMany = () => new HttpError(429, "Too many attempts. Wait a few minutes and try again.");
 
@@ -925,6 +947,8 @@ async function adminSaveSettings(request, env) {
       v = JSON.stringify(planFeatures(c));
     } else if (k.startsWith("download_")) {
       if (v && !/^https:\/\//.test(v)) throw new HttpError(400, "Download links must start with https://");
+    } else if (k === "support_notify_to") {
+      if (v && !/^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(v)) throw new HttpError(400, "That is not an email address.");
     } else if (!/^\d{1,16}$/.test(v)) throw new HttpError(400, `Bad value for ${k}.`);
     stmts.push(env.DB.prepare("INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT (key) DO UPDATE SET value = ?2").bind(k, v));
   }

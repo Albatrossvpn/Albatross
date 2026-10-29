@@ -22,6 +22,16 @@ run_worker_first = ["/api/*"]
 binding = "FILES"
 bucket_name = "albatross-files"
 
+# The support chat on the websites (src/support.js): Workers AI answers (its
+# free allowance is enough), and each conversation's summary is mailed to the
+# administrator's address (the support_notify_to setting) through Email
+# Routing, which sends free to an address the account has verified.
+[ai]
+binding = "AI"
+
+[[send_email]]
+name = "EMAIL"
+
 # Users' reports about servers are summed into list/servers/crowd.json
 # every hour (scheduled in src/index.js).
 [triggers]

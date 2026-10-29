@@ -266,6 +266,7 @@ $("#settings").addEventListener("click", async () => {
   $("#t-tier").value = s.default_tier || "auto";
   $("#t-win").value = s.download_windows;
   $("#t-and").value = s.download_android;
+  $("#t-support").value = s.support_notify_to || "";
   // Which plan brings each feature: the saved choice over the features' own.
   let chosen = {};
   try { chosen = JSON.parse(s.plan_features || "{}"); } catch {}
@@ -286,6 +287,7 @@ $("#settings-form").addEventListener("submit", async (e) => {
     default_tier: $("#t-tier").value,
     download_windows: $("#t-win").value.trim(),
     download_android: $("#t-and").value.trim(),
+    support_notify_to: $("#t-support").value.trim(),
     plan_features: Object.fromEntries([...document.querySelectorAll("#t-features select")].map((el) => [el.dataset.feature, el.value])),
   }), $("#t-error"));
   if (r) { $("#settings-dialog").close(); toast("Saved."); }

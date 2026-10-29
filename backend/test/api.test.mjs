@@ -607,6 +607,50 @@ test("copies older than the manifest's min_version are refused; the website neve
   assert.equal((await login({})).status, 401, "no minimum, no refusal");
 });
 
+test("support chat: bad requests are refused, only the websites may read the answers, and a model that is away is no error", async () => {
+  const say = (text) => ({ messages: [{ role: "user", content: text }], lang: "en" });
+  assert.equal((await call("POST", "support/chat", { body: {} })).status, 400);
+  assert.equal((await call("POST", "support/chat", { body: { messages: "hello" } })).status, 400);
+  assert.equal((await call("POST", "support/chat", { body: { messages: [{ role: "assistant", content: "hi" }] } })).status, 400);
+  // The model is not there when the Worker runs locally: the visitor still gets an answer.
+  const r = await call("POST", "support/chat", { body: say("I can't connect"), ip: "203.0.113.7", headers: { Origin: "https://albatrossvpn.online" } });
+  assert.equal(r.status, 200);
+  assert.ok(r.body.reply && r.body.handoff === true && r.body.degraded === true, JSON.stringify(r.body));
+  assert.equal(r.headers.get("access-control-allow-origin"), "https://albatrossvpn.online");
+  const other = await call("POST", "support/chat", { body: say("hello"), ip: "203.0.113.7", headers: { Origin: "https://example.com" } });
+  assert.equal(other.headers.get("access-control-allow-origin"), null);
+  const pre = await call("OPTIONS", "support/chat", { headers: { Origin: "https://www.albatrossvpn.online" } });
+  assert.equal(pre.status, 204);
+  assert.equal(pre.headers.get("access-control-allow-origin"), "https://www.albatrossvpn.online");
+});
+
+test("support chat: one address gets forty messages an hour", async () => {
+  const ip = "203.0.113.50";
+  let last;
+  for (let i = 0; i < 41; i++) last = await call("POST", "support/chat", { body: { messages: [{ role: "user", content: "hello " + i }] }, ip });
+  assert.equal(last.status, 429);
+  assert.ok(last.body.reply && last.body.limited === true);
+});
+
+test("support close: the summary address is the administrator's to set, a conversation is mailed once", async () => {
+  assert.equal((await call("PUT", "admin/settings", { token: admin, body: { support_notify_to: "not an address" } })).status, 400);
+  const saved = await call("PUT", "admin/settings", { token: admin, body: { support_notify_to: "owner@example.com" } });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.support_notify_to, "owner@example.com");
+  const talk = {
+    messages: [{ role: "user", content: "The VPN does not connect on Android" }, { role: "assistant", content: "Update the app." }, { role: "user", content: "still nothing" }],
+    sid: "abcdef123456", contact: "@someone", lang: "en", page: "/account",
+  };
+  assert.equal((await call("POST", "support/close", { body: {} })).status, 400);
+  assert.equal((await call("POST", "support/close", { body: { messages: [{ role: "assistant", content: "hello" }] } })).status, 400);
+  const first = await call("POST", "support/close", { body: talk, ip: "203.0.113.9" });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.ok, true);
+  const again = await call("POST", "support/close", { body: talk, ip: "203.0.113.9" });
+  assert.equal(again.body.duplicate, true);
+  assert.equal((await call("PUT", "admin/settings", { token: admin, body: { support_notify_to: "" } })).status, 200);
+});
+
 test("too many failed administrator logins lock the sign-in for a while", async () => {
   let last;
   for (let i = 0; i < 11; i++) last = await call("POST", "admin/login", { body: { username: "root", password: "wrong" + i } });

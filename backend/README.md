@@ -70,6 +70,14 @@ Then open `/admin`, sign in, turn on sign-ups if you want them, set the default 
 
 Create a Turnstile widget in Cloudflare, put its site key in `wrangler.toml` (`TURNSTILE_SITEKEY`) and run `npx wrangler secret put TURNSTILE_SECRET`. The sign-up form then asks for the check.
 
+### The support chat
+
+The websites carry a chat button (`public/support.js`, copied to `site/public/`). An AI assistant answers visitors in Persian or English from the pages' own words (`src/support.js`), and when a chat ends a summary of it goes to the owner by email. It needs no account beyond Cloudflare's:
+
+- **Workers AI** (the `AI` binding) writes the answers; its free daily allowance is plenty for a small service, and the service stops answering at 900 questions a day (150 summaries) and says so.
+- **Email** goes out through the `EMAIL` binding (`[[send_email]]`), from the contact address, to an address Cloudflare **Email Routing** has verified (Email → Email Routing → Destination addresses). Set that address in the admin panel's Settings ("Mail the support chat's summaries to"), or in `SUPPORT_NOTIFY_TO`. Empty: no mail is sent.
+- Nothing of a chat is stored on the service; the browser keeps it for the tab only. The privacy page says so.
+
 ## Running locally
 
 ```sh
