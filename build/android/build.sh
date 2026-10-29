@@ -333,9 +333,14 @@ tidy "the cores for x86_64"
 # as lib<name>.so like the cores; pt_config.json cannot ship beside them,
 # so it is built into the engine (internal/core/tor.go).
 readelf="$(ls "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*/bin/llvm-readelf | head -1)"
+# Tor 16 calls what Android 7 added to libc (getifaddrs, __write_chk), which
+# Android 6 lacks; 15.0.x does not. The build keeps to the last 15.0.x (the
+# Windows and Linux packages take the newest) until the oldest phone it
+# supports moves up. Everything in the bundle is checked at the end.
+ANDROID_TOR_VERSION="${ANDROID_TOR_VERSION:-15.0.26}"
 tor() { # abi bundle-platform
   local out="$jni/$1" t="$tmp/tor-$1"
-  bash "$root/build/tor.sh" "$2" "$t" "$dl"
+  TOR_VERSION="$ANDROID_TOR_VERSION" bash "$root/build/tor.sh" "$2" "$t" "$dl"
   cp "$t/tor/libTor.so" "$out/libtor.so"
   for f in "$t"/tor/pluggable_transports/*; do
     [ -x "$f" ] && [ -f "$f" ] || continue
@@ -409,7 +414,11 @@ for dir in "$x"/lib/*; do
   esac
   for so in "$dir"/*.so; do
     name="$abi/$(basename "$so")"
-    "$readelf" -h "$so" | grep -q "Machine:.*$machine" || { echo "$name is not built for $abi" >&2; failed=1; }
+    # Read whole, not piped into grep -q: that stops at the first match, and
+    # llvm-readelf, which writes line by line, then dies of the broken pipe,
+    # which pipefail turns into a failure of a good library (one run in a few).
+    header="$("$readelf" -h "$so" 2>&1 | sed -n 's/^ *Machine: *//p')"
+    [[ "$header" == *"$machine" ]] || { echo "$name is not built for $abi (its header says: ${header:-nothing}; $(stat -c %s "$so") bytes)" >&2; failed=1; }
     bad="$("$readelf" -d "$so" | sed -n 's/.*Shared library: \[\(.*\)\]/\1/p' | grep -vxE 'lib(c|m|dl|log|z|android|EGL|GLESv2|jnigraphics)\.so' || true)"
     [ -z "$bad" ] || { echo "$name needs libraries Android does not have: $bad" >&2; failed=1; }
     new="$(missing_symbols "$abi" "$so" | tr '\n' ' ')"
