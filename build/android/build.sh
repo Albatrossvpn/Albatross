@@ -38,6 +38,15 @@ fi
 
 bash "$root/build/snapshot.sh"
 
+# The runner's disk is small (14 GB), the helpers built from source (a dozen
+# Go programs, for three ABIs and once more for this machine) fill it, and a
+# runner whose disk is full dies without a word. Each stage says how much is
+# left, and the Go build cache, which is of no use to the next target, goes
+# between them.
+disk() { echo "disk: $(df -h / | awk 'NR == 2 {print $4 " free of " $2}') after $1"; }
+tidy() { go clean -cache > /dev/null 2>&1 || true; disk "$1"; }
+disk "the start"
+
 fetch() {
   [ -s "$2" ] || curl -fsSL --retry 4 --retry-delay 3 -o "$2" "$1"
 }
@@ -313,8 +322,11 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
   chmod 755 "$out"/*.so
 }
 cores arm64-v8a arm64 Xray-android-arm64-v8a.zip warp-plus_android-arm64.zip
+tidy "the cores for arm64-v8a"
 cores armeabi-v7a arm "" ""
+tidy "the cores for armeabi-v7a"
 cores x86_64 amd64 Xray-android-amd64.zip ""
+tidy "the cores for x86_64"
 
 # Tor, the last resort. Its Android bundle holds executables (libTor.so is
 # one, despite the name) that need only the system's libraries. They ship
@@ -355,13 +367,17 @@ if [ "$n" -gt 100 ]; then
 fi
 printf "The engine's root certificates are Mozilla's (https://wiki.mozilla.org/CA), under the Mozilla Public License 2.0.\n" > "$app/src/main/assets/licenses/mozilla-roots-LICENSE.txt"
 
-# The engine, UI and tun2socks as one Android library.
+# The engine, UI and tun2socks as one Android library. The helpers' modules
+# are of no use to it, and it needs the room.
+go clean -modcache > /dev/null 2>&1 || true
+disk "dropping the helpers' modules"
 go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target=android/arm64,android/arm,android/amd64 -androidapi "$api" \
   -javapkg app.albatross -trimpath \
   -ldflags "-s -w -extldflags=-Wl,-z,max-page-size=16384 -X github.com/Albatrossvpn/vp/mobile.Version=$VERSION -X github.com/Albatrossvpn/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/Albatrossvpn/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.WorkerMirror=${MIRROR_URL:-${ACCOUNT_URL:-}} -X github.com/Albatrossvpn/vp/internal/engine.UpdateKey=${UPDATE_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.DomesticMirror=${DOMESTIC_MIRROR:-}" \
   -o "$app/libs/albatross.aar" ./mobile
 
+tidy "the engine's library"
 # The engine's library comes out of the archive for the check; the cores
 # are already in place.
 mkdir -p "$tmp/aar" && (cd "$tmp/aar" && unzip -oq "$app/libs/albatross.aar" 'jni/*')
@@ -371,6 +387,7 @@ cd "$root/android"
 VERSION="$VERSION" ./gradlew --no-daemon -q assembleRelease
 apk="$dist/Albatross-$VERSION-android.apk"
 cp app/build/outputs/apk/release/app-release.apk "$apk"
+disk "the APK"
 
 # Every library in the APK must run on the oldest phone: built for its ABI,
 # needing only the system's libraries, and calling only what Android $api's

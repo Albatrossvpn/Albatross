@@ -269,10 +269,24 @@ jobs:
     env:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
+      # The runner has 14 GB of disk and the helpers built from source fill it
+      # (the Android job died again and again, without a log, while it built
+      # the engine): take back what the image carries and the build does not
+      # use, some 25 GB.
+      - name: Free disk space
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/share/boost /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift
+          sudo docker image prune --all --force > /dev/null 2>&1 || true
+          df -h / | tail -1
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          # A cache of the Go build would be some gigabytes to restore here and
+          # to save after, for a build that compiles for other targets than any
+          # job before it.
+          cache: false
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -306,6 +320,8 @@ jobs:
             echo "::warning::The list keys could not be read: the bundled server list stays as it is."
           fi
       - name: Build APKs
+        # A build that hangs is ended with its log instead of a lost runner.
+        timeout-minutes: 55
         env:
           OWN_KEY: ${{ secrets.OWN_KEY }}
           TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
@@ -403,6 +419,8 @@ jobs:
       # used to kill the app as soon as it started a core).
       - name: Connect on an Android 11 emulator
         if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
+        # Old versions are not a reason to hold a release: a failure shows as a warning.
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 30
@@ -414,6 +432,7 @@ jobs:
       # The oldest Android the app supports.
       - name: Connect on an Android 6 emulator
         if: inputs.release == '' && !startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 23
