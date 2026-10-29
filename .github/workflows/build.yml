@@ -250,16 +250,21 @@ jobs:
             export ACCOUNT_URL MIRROR_URL UPDATE_KEY
           fi
           bash build/package.sh
+      # Artifacts count against the account's small Actions storage (0.5 GB
+      # on the free plan), and a run's builds are some 400 MB: only what a
+      # later job of the run reads is kept, for a day, and the builds
+      # themselves only when a release publishes them.
       - uses: actions/upload-artifact@v7
         with:
           name: Albatross-folder
           path: dist/Albatross
-          retention-days: 7
+          retention-days: 1
       - uses: actions/upload-artifact@v7
+        if: inputs.release != '' || startsWith(github.ref, 'refs/tags/v')
         with:
           name: Albatross-portable-${{ steps.version.outputs.version }}
           path: dist/*.zip
-          retention-days: 7
+          retention-days: 1
 
   android:
     needs: build
@@ -370,10 +375,11 @@ jobs:
           echo "APK signer SHA-256: $signer"
           echo "- APK signer SHA-256: \`$signer\`, signed with $want, $(du -m "$apk" | cut -f1) MB" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
+        if: inputs.release != '' || startsWith(github.ref, 'refs/tags/v')
         with:
           name: Albatross-android-${{ env.VERSION }}
           path: dist/*.apk
-          retention-days: 7
+          retention-days: 1
       # The same app, debuggable, connects on an emulator: proves the cores,
       # Tor and the VPN service run on Android, not just that it builds. A
       # release asks for an account, so the commit's own run (without one)
@@ -535,10 +541,11 @@ jobs:
           }
           "installed OK: $dir"
       - uses: actions/upload-artifact@v7
+        if: inputs.release != '' || startsWith(github.ref, 'refs/tags/v')
         with:
           name: Albatross-Setup-${{ env.VERSION }}
           path: dist/Albatross-Setup-*.exe
-          retention-days: 7
+          retention-days: 1
 
   # Only this job publishes the release, once every build and test passed,
   # so a platform that failed never ships half a release marked latest.
