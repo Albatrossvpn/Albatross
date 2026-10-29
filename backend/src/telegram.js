@@ -294,7 +294,7 @@ async function refreshHook(env, tg, url, force = false) {
   });
 }
 
-const PHOTO_VERSION = "1"; // raise it when public/bot.jpg changes: the picture is then set again
+const PHOTO_VERSION = "2"; // raise it when public/bot.jpg changes: the picture is then set again (and only then: a picture changed in @BotFather stays)
 
 /**
  * The bot's profile picture (public/bot.jpg: Telegram's ad platform wants a
