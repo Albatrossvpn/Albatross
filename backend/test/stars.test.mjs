@@ -331,6 +331,31 @@ test("a payment that matches no order is refunded and the team is told", async (
   assert.equal((await w.row("SELECT COUNT(*) AS n FROM stars_payments")).n, 0);
 });
 
+test("a payment whose handling breaks before it is noted is given back at once, not lost", async () => {
+  const w = await shop();
+  const id = await order(w, SARA);
+  await w.send(press(SARA, `sp:${id}`));
+  const invoice = w.api.of("sendInvoice").pop();
+  await w.send(checkoutOf(SARA, invoice.payload, 29));
+  const prepare = w.env.DB.prepare;
+  w.env.DB.prepare = (sql) => {
+    if (/INSERT INTO stars_payments/.test(sql)) throw new Error("the database is away");
+    return prepare(sql);
+  };
+  const error = console.error;
+  console.error = () => {};
+  try {
+    await w.send(paidBy(SARA, invoice.payload, 29, "lost-charge"));
+  } finally {
+    console.error = error;
+    w.env.DB.prepare = prepare;
+  }
+  assert.deepEqual({ user_id: w.api.of("refundStarPayment")[0].user_id, charge: w.api.of("refundStarPayment")[0].telegram_payment_charge_id }, { user_id: SARA, charge: "lost-charge" });
+  assert.ok(w.lastText(SARA).text.includes("the Stars were given back"));
+  assert.ok(w.lastText(TEAM).text.includes("could not be processed") && w.lastText(TEAM).text.includes("was refunded") && w.lastText(TEAM).text.includes("lost-charge"));
+  assert.equal((await w.row("SELECT COUNT(*) AS n FROM users WHERE tg_owner = ?1", SARA)).n, 0, "no account for a payment that was given back");
+});
+
 test("a payment paid but never delivered, left for minutes, is given back by the schedule; recent ones are left", async () => {
   const w = await shop();
   const t = now();

@@ -321,6 +321,18 @@ async function failed(c, update, e) {
   log("update")(e);
   const q = update.callback_query;
   const m = update.message;
+  const paid = m && m.from && m.successful_payment;
+  if (paid) {
+    // A payment whose handling broke before it was noted must not be lost: the Stars go back, and the team and the buyer are told.
+    const charge = String(paid.telegram_payment_charge_id || "");
+    const known = charge ? await c.env.DB.prepare("SELECT 1 AS found FROM stars_payments WHERE charge_id = ?1").bind(charge).first().catch(() => null) : null;
+    if (charge && !known) {
+      const res = await c.tg.call("refundStarPayment", { user_id: m.from.id, telegram_payment_charge_id: charge });
+      await tellTeam(c, 0, `⚠️ A payment of ⭐${Number(paid.total_amount) || 0} could not be processed (${view.esc(oneLine(e && e.message ? e.message : String(e), 100))}) and ${res.ok ? "was refunded" : "could NOT be refunded"}. Charge <code>${view.esc(charge)}</code>.`, undefined, false).catch(() => {});
+      if (res.ok) await c.tg.send(m.chat.id, view.DELIVERY_FAILED);
+    }
+    return;
+  }
   if (q) await c.tg.answer(q.id, "Something went wrong. Please try again.");
   else if (m && m.chat && m.chat.type === "private" && m.from && !m.from.is_bot) await c.tg.send(m.chat.id, view.WENT_WRONG);
 }
