@@ -98,15 +98,41 @@ func TestSpeedDownloadFailsOnBadStatus(t *testing.T) {
 
 func TestSpeedUploadStopsWhenCancelled(t *testing.T) {
 	withSpeedServer(t, 5*time.Second)
-	ctx, cancel := context.WithCancel(t.Context())
-	go func() { time.Sleep(300 * time.Millisecond); cancel() }()
-	start := time.Now()
-	err := speedUpload(ctx, http.DefaultClient, func(float64) {})
-	if err == nil {
-		t.Fatal("a stopped upload reports no error")
+	// The request failing and the context ending race: whichever the upload
+	// sees first, a stop is an error, never a finished test.
+	for i := 0; i < 10; i++ {
+		ctx, cancel := context.WithCancel(t.Context())
+		go func() { time.Sleep(100 * time.Millisecond); cancel() }()
+		start := time.Now()
+		err := speedUpload(ctx, http.DefaultClient, func(float64) {})
+		if err == nil {
+			t.Fatalf("round %d: a stopped upload reports no error", i)
+		}
+		if took := time.Since(start); took > 2*time.Second {
+			t.Fatalf("stopping took %v", took)
+		}
 	}
-	if took := time.Since(start); took > 2*time.Second {
-		t.Fatalf("stopping took %v", took)
+}
+
+// A line that takes the request and never answers: when the time is up, the
+// test reports no data, not a finished upload of nothing.
+func TestSpeedUploadHangingIsAnError(t *testing.T) {
+	withSpeedServer(t, 300*time.Millisecond)
+	oldGrace := speedGrace
+	speedGrace = 300 * time.Millisecond
+	defer func() { speedGrace = oldGrace }()
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-hang }))
+	defer srv.Close()
+	defer close(hang)
+	old := speedUpURL
+	speedUpURL = srv.URL
+	defer func() { speedUpURL = old }()
+	client := &http.Client{Transport: &http.Transport{ResponseHeaderTimeout: 10 * time.Second}}
+	defer client.CloseIdleConnections()
+	err := speedUpload(t.Context(), client, func(float64) {})
+	if err == nil {
+		t.Fatal("an upload that moved nothing reports no error")
 	}
 }
 
@@ -131,9 +157,25 @@ func TestRateLeavesOutTheStart(t *testing.T) {
 	if rateOf(nil) != 0 {
 		t.Fatal("no samples, a rate")
 	}
-	// Under two seconds: the whole average.
+	// With no sample to start from, the whole average.
 	if got := rateOf([]rateSample{{0, 0}, {time.Second, 125_000}}); got < 0.99e6 || got > 1.01e6 {
 		t.Fatalf("short transfer: %.0f", got)
+	}
+	// A fast line that reaches the cap in a second and a half: 1 MB a
+	// tenth of a second for the first half second, then 5 MB.
+	s = s[:0]
+	var m int64
+	for at := time.Duration(0); at <= 1500*time.Millisecond; at += 100 * time.Millisecond {
+		if at > 0 {
+			m += 1_000_000
+			if at > 500*time.Millisecond {
+				m += 4_000_000
+			}
+		}
+		s = append(s, rateSample{at, m})
+	}
+	if got := rateOf(s); got < 340e6 {
+		t.Fatalf("a short, fast transfer reads %.0f bit/s: the start is counted", got)
 	}
 }
 

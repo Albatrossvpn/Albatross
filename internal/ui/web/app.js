@@ -99,7 +99,7 @@ var kickers = { idle: "Not protected", searching: "Securing", connecting: "Secur
 
 var state = null;
 var view = "home";
-var wasStatus = "";
+var wasOn = false;
 
 function isBusy(s) { return s.status === "searching" || s.status === "connecting" || s.status === "reconnecting"; }
 
@@ -114,17 +114,18 @@ function homeCode() {
 // ---------- Connect ----------
 
 function render(s) {
-  var prev = state;
   state = s;
   var body = document.body;
   var busy = isBusy(s), on = s.status === "connected" && !!s.conn;
   body.classList.toggle("mobile", !!s.mobile);
   body.classList.toggle("busy", busy);
   body.classList.toggle("on", on);
-  if (on && wasStatus !== "connected") connectedAt = Date.now();
-  if (on && (!prev || prev.status !== "connected")) rememberLast(s);
+  if (on && !wasOn) {
+    connectedAt = Date.now();
+    rememberLast(s);
+  }
   if (!on) resetChart();
-  wasStatus = s.status;
+  wasOn = on;
 
   var p = $("power");
   p.setAttribute("aria-label", s.status === "idle" ? "Connect" : "Disconnect");
@@ -667,6 +668,10 @@ function drawWorld() {
   var cv = $("worldmap"), f = fitCanvas(cv);
   if (!f) return;
   var ctx = f.ctx, w = f.w, h = f.h;
+  if (picked) {
+    // The pings change every few seconds: the pin keeps up with them.
+    showPick(state.countries.filter(function (c) { return c.code === picked.code; })[0] || null);
+  }
   if (!mapFitted) fitMap();
   if (!mapView.scale) mapView.scale = w / 70;
   mapView.scale = Math.max(w / 360, Math.min(w / 12, mapView.scale));
@@ -727,19 +732,22 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
 }
+// The card under the map shows the pin picked.
+function showPick(c) {
+  picked = c;
+  $("map-card").classList.toggle("hidden", !c);
+  if (!c) return;
+  $("mc-flag").textContent = c.flag;
+  $("mc-name").textContent = c.name;
+  $("mc-meta").textContent = num(c.servers) + " servers · " + num(c.best_delay) + " ms · " + PING_WORD[pingClass(c.best_delay)];
+}
 function pickAt(x, y) {
   var cv = $("worldmap"), w = cv.clientWidth, h = cv.clientHeight, best = null, bestD = 24 * 24;
   mapPins().forEach(function (c) {
     var p = toXY(mapView, w, h, place(c.code)), d = (p.x - x) * (p.x - x) + (p.y - y) * (p.y - y);
     if (d < bestD) { bestD = d; best = c; }
   });
-  picked = best;
-  $("map-card").classList.toggle("hidden", !best);
-  if (best) {
-    $("mc-flag").textContent = best.flag;
-    $("mc-name").textContent = best.name;
-    $("mc-meta").textContent = num(best.servers) + " servers · " + num(best.best_delay) + " ms · " + PING_WORD[pingClass(best.best_delay)];
-  }
+  showPick(best);
   drawWorld();
 }
 function zoomBy(k, x, y) {

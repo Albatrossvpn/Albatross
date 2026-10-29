@@ -47,8 +47,10 @@ var (
 	// several in a phase.
 	speedUpChunk int64 = 25 << 20
 	// speedCap is the most bytes a phase moves: a fast line finishes the
-	// measurement sooner instead of using the account's data for nothing.
+	// measurement sooner instead of moving data for nothing.
 	speedCap int64 = 64 << 20
+	// speedGrace is how long past its phase a request may take to end.
+	speedGrace = 5 * time.Second
 )
 
 const speedPings = 6
@@ -140,6 +142,11 @@ func (e *Engine) runSpeedTest(ctx context.Context, cancel context.CancelFunc, id
 	set(func(s *SpeedTest) { s.Phase = "upload" })
 	if err := speedUpload(ctx, fresh, func(bps float64) { set(func(s *SpeedTest) { s.Up = bps }) }); err != nil {
 		fail(err)
+		return
+	}
+	// Stopped just as it finished: it was stopped.
+	if ctx.Err() != nil {
+		fail(ctx.Err())
 		return
 	}
 	set(func(s *SpeedTest) { s.Phase = "done" })
@@ -243,15 +250,20 @@ func rateOf(samples []rateSample) float64 {
 	}
 	last := samples[len(samples)-1]
 	skip, window := speedPhase/8, speedPhase*5/8
+	// A short transfer (a fast line reaches the cap in a second or two)
+	// leaves out a quarter of itself, and with no sample after that reads as
+	// a whole. In a long one a start with no sample after it is a line that
+	// stopped: no rate.
+	long := last.at >= 2*skip
+	if !long {
+		skip = last.at / 4
+	}
 	from := max(skip, last.at-window)
 	base := rateSample{}
-	// The first seconds read as a whole: too few to leave one out.
-	if last.at >= 2*skip {
-		for _, s := range samples {
-			if s.at >= from {
-				base = s
-				break
-			}
+	for i, s := range samples {
+		if s.at >= from && (long || i < len(samples)-1) {
+			base = s
+			break
 		}
 	}
 	if last.at <= base.at || last.at == 0 {
@@ -262,7 +274,7 @@ func rateOf(samples []rateSample) float64 {
 
 // speedDownload downloads for speedPhase, telling the speed as it goes.
 func speedDownload(ctx context.Context, client *http.Client, tell func(float64)) error {
-	ctx, cancel := context.WithTimeout(ctx, speedPhase+5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, speedPhase+speedGrace)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, speedURL+strconv.FormatInt(speedCap, 10), nil)
 	if err != nil {
@@ -338,7 +350,8 @@ func (b *zeroBody) Read(p []byte) (int, error) {
 // speedUpload sends for speedPhase, in requests of speedUpChunk bytes, telling
 // the speed as it goes. A request the phase cuts short is no failure.
 func speedUpload(ctx context.Context, client *http.Client, tell func(float64)) error {
-	ctx, cancel := context.WithTimeout(ctx, speedPhase+5*time.Second)
+	stopped := ctx
+	ctx, cancel := context.WithTimeout(ctx, speedPhase+speedGrace)
 	defer cancel()
 	meter := &rateMeter{}
 	until := time.Now().Add(speedPhase)
@@ -354,9 +367,12 @@ func speedUpload(ctx context.Context, client *http.Client, tell func(float64)) e
 			req.Header.Set("Content-Type", "application/octet-stream")
 			resp, err := client.Do(req)
 			if err != nil {
-				if time.Now().Before(until) && ctx.Err() == nil {
+				switch {
+				case stopped.Err() != nil:
+					done <- stopped.Err()
+				case time.Now().Before(until) && ctx.Err() == nil:
 					done <- err
-				} else {
+				default: // the phase is over, and cut the request short
 					done <- nil
 				}
 				return
@@ -370,6 +386,17 @@ func speedUpload(ctx context.Context, client *http.Client, tell func(float64)) e
 		}
 		done <- nil
 	}()
+	// finish ends the phase: what moved is the result, and nothing moved is
+	// an error, as it is when the line hangs until the time is up.
+	finish := func() error {
+		meter.stop()
+		rate := meter.rate()
+		if rate == 0 {
+			return errors.New("upload: no data")
+		}
+		tell(rate)
+		return nil
+	}
 	tick := time.NewTicker(200 * time.Millisecond)
 	defer tick.Stop()
 	for {
@@ -378,21 +405,14 @@ func speedUpload(ctx context.Context, client *http.Client, tell func(float64)) e
 			if err != nil {
 				return err
 			}
-			meter.stop()
-			if meter.rate() == 0 {
-				return errors.New("upload: no data")
-			}
-			tell(meter.rate())
-			return nil
+			return finish()
 		case <-tick.C:
 			tell(meter.rate())
 		case <-ctx.Done():
-			if ctx.Err() == context.Canceled {
-				return ctx.Err()
+			if stopped.Err() != nil {
+				return stopped.Err()
 			}
-			meter.stop()
-			tell(meter.rate())
-			return nil
+			return finish()
 		}
 	}
 }

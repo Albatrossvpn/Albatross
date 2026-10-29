@@ -67,8 +67,6 @@ func (e *Engine) Can(feature string) bool {
 	return slices.Contains(v.Info.Features, feature)
 }
 
-// Locked returns a PlanError when the plan does not have the feature, nil
-// when it has.
 // Has reports whether the signed-in account's plan names the feature. Unlike
 // Can, a build without accounts, or a service that names no features, has
 // none: for what only a plan that pays for it gets.
@@ -80,6 +78,8 @@ func (e *Engine) Has(feature string) bool {
 	return v.SignedIn && slices.Contains(v.Info.Features, feature)
 }
 
+// Locked returns a PlanError when the plan does not have the feature, nil
+// when it has.
 func (e *Engine) Locked(feature string) error {
 	if e.Can(feature) {
 		return nil

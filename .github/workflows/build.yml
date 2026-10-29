@@ -254,10 +254,12 @@ jobs:
       # artifacts: artifacts count against the account's Actions storage
       # (0.5 GB on the free plan; a run's builds are some 440 MB, and the
       # storage stays full for hours after it was), the cache has a limit of
-      # its own. One key a run; the Windows and Linux jobs share an archive.
+      # its own. A key per run and attempt (an entry cannot be replaced), and
+      # a restore takes the newest attempt's when the job it needs was not
+      # run again; the Windows and Linux jobs share an archive.
       - uses: actions/cache/save@v6
         with:
-          key: folder-${{ github.run_id }}
+          key: folder-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/Albatross
           enableCrossOsArchive: true
 
@@ -372,7 +374,7 @@ jobs:
       - uses: actions/cache/save@v6
         if: inputs.release != '' || startsWith(github.ref, 'refs/tags/v')
         with:
-          key: android-${{ github.run_id }}
+          key: android-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/*.apk
       # The same app, debuggable, connects on an emulator: proves the cores,
       # Tor and the VPN service run on Android, not just that it builds. A
@@ -432,7 +434,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/cache/restore@v6
         with:
-          key: folder-${{ github.run_id }}
+          key: folder-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: folder-${{ github.run_id }}-
           path: dist/Albatross
           enableCrossOsArchive: true
           fail-on-cache-miss: true
@@ -539,7 +542,7 @@ jobs:
       - uses: actions/cache/save@v6
         if: inputs.release != '' || startsWith(github.ref, 'refs/tags/v')
         with:
-          key: setup-${{ github.run_id }}
+          key: setup-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/Albatross-Setup-*.exe
           enableCrossOsArchive: true
 
@@ -552,12 +555,14 @@ jobs:
     steps:
       - uses: actions/cache/restore@v6
         with:
-          key: android-${{ github.run_id }}
+          key: android-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: android-${{ github.run_id }}-
           path: dist/*.apk
           fail-on-cache-miss: true
       - uses: actions/cache/restore@v6
         with:
-          key: setup-${{ github.run_id }}
+          key: setup-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: setup-${{ github.run_id }}-
           path: dist/Albatross-Setup-*.exe
           enableCrossOsArchive: true
           fail-on-cache-miss: true
