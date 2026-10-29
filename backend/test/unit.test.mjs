@@ -269,3 +269,65 @@ test("the administrator's choice of plan for a feature wins where it names a kno
   assert.equal(a.plans.lan, "gold");
   assert.deepEqual(a.plan_devices, { bronze: 1, silver: 2, gold: 4, vip: 0 });
 });
+
+// The links of the Apple subscriptions, in the standard form the engine's
+// reading of them makes: what public lists write every which way comes
+// out as the share links every app reads.
+test("subscription links come out in the standard form, and the broken ones not at all", async () => {
+  const { cleanLink } = await import("../src/links.js");
+  const id = "11111111-2222-4333-8444-555555555555";
+  // A vless link behind "ss://", and one with "&amp;" for "&".
+  assert.equal(cleanLink(`ss://${id}@1.2.3.4:443?security=tls&type=ws&host=a.example.com&path=%2Fws#x`, "x"),
+    `vless://${id}@1.2.3.4:443?encryption=none&security=tls&type=ws&host=a.example.com&path=%2Fws#x`);
+  assert.equal(cleanLink(`vless://${id}@1.2.3.4:443?security=tls&amp;type=ws&amp;host=a.example.com&amp;path=%2F%3Fed%3D2048`),
+    `vless://${id}@1.2.3.4:443?encryption=none&security=tls&type=ws&host=a.example.com&path=%2F%3Fed%3D2048`);
+  assert.equal(cleanLink("hy2://pw@h.example.com:443?obfs=salamander&obfs-password=op&mport=20000-30000", "n"),
+    "hysteria2://pw@h.example.com:443?obfs=salamander&obfs-password=op&mport=20000-30000#n");
+  // VMess JSON with numbers and its early data in the path; and behind "ss://".
+  const j = { v: 2, ps: "a", add: "v.example.com", port: 443, id, aid: 0, net: "ws", path: "/p?ed=2048", tls: "tls" };
+  const vm = "vmess://" + Buffer.from(JSON.stringify(j)).toString("base64");
+  const out = JSON.parse(Buffer.from(cleanLink(vm, "a").slice(8), "base64").toString());
+  assert.deepEqual([out.port, out.aid, out.net, out.path, out.tls, out.ps], ["443", "0", "ws", "/p?ed=2048", "tls", "a"]);
+  assert.ok(cleanLink("ss://" + vm.slice(8), "a").startsWith("vmess://"));
+  // Shadowsocks: SIP002 base64, and SIP022's key in the clear.
+  assert.equal(cleanLink("ss://" + btoa("aes-256-gcm:pass") + "@s.example.com:8388", "s"), "ss://YWVzLTI1Ni1nY206cGFzcw@s.example.com:8388#s");
+  const key = btoa("k".repeat(32));
+  assert.equal(cleanLink("ss://" + btoa("2022-blake3-aes-256-gcm:" + key) + "@s.example.com:8388"),
+    "ss://2022-blake3-aes-256-gcm:" + encodeURIComponent(key) + "@s.example.com:8388");
+  // What the engine refuses stays out: a bad Reality key, no password, no port, a name without a dot, a short 2022 key.
+  for (const bad of [
+    `vless://${id}@1.2.3.4:443?security=reality&pbk=short&type=tcp`, "trojan://@t.example.com:443", `vless://${id}@1.2.3.4`,
+    `vless://${id}@localhost:443`, "ss://" + btoa("2022-blake3-aes-256-gcm:" + btoa("short")) + "@s.example.com:8388", "albatross://x@h.example.com:1",
+  ]) assert.equal(cleanLink(bad), null, bad);
+  // Written once, a link reads back the same.
+  for (const l of [`ss://${id}@1.2.3.4:443?security=tls&type=ws&host=a.example.com&path=%2Fws`, vm, "hy2://pw@h.example.com:443?mport=20000-30000"]) {
+    assert.equal(cleanLink(cleanLink(l, "n"), "n"), cleanLink(l, "n"));
+  }
+});
+
+test("the sing-box apps get a sing-box config, with what sing-box cannot run left out", async () => {
+  const { singBoxConfig, wantsSingBox } = await import("../src/singbox.js");
+  const id = "11111111-2222-4333-8444-555555555555";
+  const wg = (k) => btoa(String.fromCharCode(...new Uint8Array(32).fill(k)));
+  const c = await singBoxConfig([
+    { link: `vless://${id}@1.2.3.4:443?security=reality&pbk=${wg(1).replace(/=+$/, "")}&sid=ab&sni=www.example.com&type=tcp&flow=xtls-rprx-vision`, name: "A 1 · vless" },
+    { link: `vless://${id}@x.example.com:443?type=xhttp&security=tls`, name: "A 2 · vless" },
+    { link: `vmess://${id}@v.example.com:443?type=grpc&serviceName=g&mode=multi&security=tls`, name: "A 3 · vmess" },
+    { link: `wireguard://${encodeURIComponent(wg(2))}@w.example.com:51820?publickey=${encodeURIComponent(wg(3))}&address=172.16.0.2&reserved=1,2,3`, name: "A 4 · wireguard" },
+    { link: "hy2://pw@h.example.com:443?obfs=salamander&obfs-password=op&mport=20000-30000", name: "A 5 · hysteria2" },
+  ]);
+  assert.deepEqual(c.outbounds.map((o) => o.tag), ["select", "auto", "A 1 · vless", "A 5 · hysteria2", "direct"], "XHTTP and gRPC's multi mode are Xray's");
+  assert.deepEqual(c.outbounds[0].outbounds, ["auto", "A 1 · vless", "A 4 · wireguard", "A 5 · hysteria2"]);
+  const v = c.outbounds[2];
+  assert.deepEqual([v.flow, v.tls.reality.short_id, v.tls.utls.fingerprint, v.tls.server_name], ["xtls-rprx-vision", "ab", "chrome", "www.example.com"]);
+  assert.deepEqual(c.endpoints.map((e) => [e.type, e.address[0], e.peers[0].reserved]), [["wireguard", "172.16.0.2/32", [1, 2, 3]]]);
+  assert.deepEqual([c.outbounds[3].server_ports, c.outbounds[3].obfs], [["20000:30000"], { type: "salamander", password: "op" }]);
+  assert.equal(await singBoxConfig([{ link: `vless://${id}@x.example.com:443?type=xhttp`, name: "x" }]), null);
+
+  const req = (ua) => new Request("https://a.example/sub/t", { headers: ua ? { "User-Agent": ua } : {} });
+  const url = (q = "") => new URL("https://a.example/sub/t" + q);
+  assert.equal(wantsSingBox(req(""), url("?f=singbox")), true);
+  assert.equal(wantsSingBox(req("SFI/1.12.0 (Build 1; sing-box 1.12.0; language en_US)"), url()), true);
+  assert.equal(wantsSingBox(req("HiddifyNext/2.5.7 (ios) like ClashMeta v2ray sing-box"), url()), false, "Hiddify reads the links itself");
+  assert.equal(wantsSingBox(req("V2Box/10.1.9"), url()), false);
+});

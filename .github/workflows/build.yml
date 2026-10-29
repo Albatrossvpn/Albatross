@@ -54,6 +54,17 @@ jobs:
       - run: npm ci
       - name: Unit tests
         run: npm test
+      - name: sing-box loads the subscription's config
+        # The sing-box apps on Apple devices load the subscription as a whole
+        # config, and one outbound sing-box refuses stops every server: a
+        # config of every kind of link the subscriptions carry is checked by
+        # sing-box itself, at the version the app ships.
+        run: |
+          v="$(sed -n 's/^SINGBOX_VERSION="\${SINGBOX_VERSION:-\([0-9.]*\)}"$/\1/p' ../build/package.sh)"
+          curl -fsSL --retry 4 -o /tmp/sb.tgz "https://github.com/SagerNet/sing-box/releases/download/v$v/sing-box-$v-linux-amd64.tar.gz"
+          tar xzf /tmp/sb.tgz -C /tmp --strip-components=1
+          node test/singbox-config.mjs > /tmp/sub.json
+          /tmp/sing-box check -c /tmp/sub.json
       - name: API tests (a local Worker with a local database)
         run: npm run test:api
       - name: Edge Worker unit tests
