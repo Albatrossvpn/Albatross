@@ -48,8 +48,9 @@ const APPS = [
   { id: "shadowrocket", name: "Shadowrocket", store: "https://apps.apple.com/app/id932747118",
     link: (u, n) => `shadowrocket://add/sub://${btoa(u).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}?remark=${encodeURIComponent(n)}` },
   { id: "hiddify", name: "Hiddify", store: "https://apps.apple.com/app/id6596777532", link: (u, n) => `hiddify://import/${u}#${encodeURIComponent(n)}` },
+  // sing-box loads a whole config, which the subscription gives with f=singbox.
   { id: "singbox", name: "sing-box", store: "https://apps.apple.com/app/id6673731168",
-    link: (u, n) => `sing-box://import-remote-profile?url=${encodeURIComponent(u)}#${encodeURIComponent(n)}` },
+    link: (u, n) => `sing-box://import-remote-profile?url=${encodeURIComponent(u + (u.includes("?") ? "&" : "?") + "f=singbox")}#${encodeURIComponent(n)}` },
 ];
 let app = APPS.find((a) => a.id === localStorage.getItem("app")) || APPS[0];
 let sub;

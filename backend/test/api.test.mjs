@@ -442,7 +442,10 @@ test("the app's own files: only the administrator publishes them; anyone reads t
 test("subscriptions for other devices: one address per account, servers by country, void after a password change", async () => {
   const put = fetch(BASE + "/api/v1/admin/list/servers/hot.txt", {
     method: "PUT", headers: { Authorization: "Bearer " + admin, "Content-Type": "text/plain" },
-    body: "vless://a@b:443#Germany-1\ntrojan://p@h:443#US%20%F0%9F%87%BA%F0%9F%87%B8%20fast\nss://YWVzOmJhc2U@h:8388#no-country\n",
+    // The fourth link is one the engine refuses: no subscription carries it.
+    body: "vless://11111111-2222-4333-8444-555555555555@b.example.com:443?security=tls&type=ws&path=%2Fws#Germany-1\n" +
+      "trojan://p@h.example.com:443#US%20%F0%9F%87%BA%F0%9F%87%B8%20fast\nss://YWVzLTI1Ni1nY206cGFzcw@h.example.com:8388#no-country\n" +
+      "vless://a@b:443#France-1\n",
   });
   assert.equal((await put).status, 200);
   const c = await call("POST", "admin/users", { token: admin, body: { username: "subscriber", password: "sub-pass-1234", quota_bytes: 100 * GB } });
@@ -465,6 +468,15 @@ test("subscriptions for other devices: one address per account, servers by count
   assert.equal(links.length, 3);
   assert.equal(decodeURIComponent(links[0].split("#")[1]), "Albatross 🇩🇪 Germany 1 · vless");
   assert.equal(links.some((l) => /Raydikalx|fast|no-country/.test(l)), false, "the servers' own names never show");
+  // The sing-box apps get a whole config: the address the account page
+  // writes for them says so, and so does their own user agent.
+  const sb = await fetch(info.body.url + "?f=singbox");
+  assert.equal(sb.status, 200);
+  assert.match(sb.headers.get("content-type"), /^application\/json/);
+  const config = await sb.json();
+  assert.deepEqual(config.outbounds.filter((o) => !["selector", "urltest", "direct"].includes(o.type)).map((o) => o.type), ["vless", "trojan", "shadowsocks"]);
+  const sfi = await fetch(info.body.url, { headers: { "User-Agent": "SFI/1.12.0 (Build 1; sing-box 1.12.0; language en_US)" } });
+  assert.match(sfi.headers.get("content-type"), /^application\/json/);
   const de = await fetch(info.body.url + "?c=de");
   assert.equal(atob(await de.text()).trim().split("\n").length, 1);
   assert.equal((await fetch(info.body.url + "?c=zz")).status, 200, "an unknown country is an empty list");

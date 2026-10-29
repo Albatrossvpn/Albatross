@@ -6,6 +6,7 @@
 import { DAY, accountOf, edgeLinks, sign, verify } from "./lib.js";
 import { LIST_KEYS } from "./files.js";
 import { COUNTRIES, flag, hint } from "./countries.js";
+import { cleanLink } from "./links.js";
 
 export const SUB_TTL = 365 * DAY;
 
@@ -90,22 +91,28 @@ const TOPUP_FROM = 400;
  * real, in order) and, when it is short, a top-up from the fresh list
  * (newly seen, their address answering), a different sample each time so
  * that refreshing the subscription brings other servers to try. Servers
- * inside the country and ones the Apple apps cannot use are left out.
+ * inside the country and ones the Apple apps cannot use are left out;
+ * keep writes each of the rest anew, or leaves it out with null.
  */
-export function pool(hot, fresh, min = SUB_MIN, pick = Math.random) {
+export function pool(hot, fresh, min = SUB_MIN, pick = Math.random, keep = (e) => e) {
   const seen = new Set();
   const out = [];
   for (const e of parseList(hot)) {
     if (e.country !== "IR" && forApple(e) && !seen.has(e.link)) {
       seen.add(e.link);
-      out.push(e);
+      const k = keep(e);
+      if (k) out.push(k);
     }
   }
   if (out.length >= min) return tcpFirst(out);
   const cands = [];
   for (const e of parseList(fresh)) {
     if (cands.length >= TOPUP_FROM) break;
-    if (e.country !== "IR" && forApple(e) && !seen.has(e.link)) cands.push(e);
+    if (e.country !== "IR" && forApple(e) && !seen.has(e.link)) {
+      seen.add(e.link);
+      const k = keep(e);
+      if (k) cands.push(k);
+    }
   }
   // A random sample of the candidates, in their order.
   const want = Math.min(min - out.length, cands.length);
@@ -144,15 +151,16 @@ export function build(entries, choice, brand, edge, updated = "") {
   } else {
     list = entries.filter((e) => e.country !== "IR");
   }
-  const links = [];
-  if (!choice || choice === "edge") for (const [i, l] of edge.entries()) links.push(rename(l, `${brand} Edge ${i + 1}`));
+  const servers = [];
+  if (!choice || choice === "edge") for (const [i, l] of edge.entries()) servers.push({ link: l, name: `${brand} Edge ${i + 1}` });
   for (const [i, e] of list.entries()) {
     const where = e.country ? `${flag(e.country)} ${COUNTRIES[e.country] || e.country}` : "Server";
-    links.push(rename(e.link, `${brand} ${where} ${i + 1} · ${protoOf(e.link)}`));
+    servers.push({ link: e.link, name: `${brand} ${where} ${i + 1} · ${protoOf(e.link)}` });
   }
+  const links = servers.map((s) => rename(s.link, s.name));
   // The title carries the list's time, so a refresh visibly brings a newer list.
   const when = stamp(updated);
-  return { title: `${brand} ${label}${when ? " · " + when : ""}`, body: b64(links.join("\n") + "\n"), count: links.length };
+  return { title: `${brand} ${label}${when ? " · " + when : ""}`, body: b64(links.join("\n") + "\n"), count: links.length, servers };
 }
 
 /** The protocol a link's scheme names, as the apps show it. */
@@ -262,12 +270,22 @@ export async function listUpdated(env) {
   }
 }
 
-/** The servers a subscription offers right now (pool). */
+/**
+ * A server as the apps on Apple devices take it: its link in the standard
+ * form the engine's reading of it makes (links.js), still named as it
+ * came, or null when the engine would refuse it.
+ */
+export function cleanEntry(e) {
+  const link = cleanLink(e.link, nameOf(e.link));
+  return link ? { ...e, link } : null;
+}
+
+/** The servers a subscription offers right now (pool), each in the standard form. */
 export async function subPool(env) {
   const hot = await listFile(env, "hot.txt");
-  const entries = pool(hot, "");
+  const entries = pool(hot, "", SUB_MIN, Math.random, cleanEntry);
   if (entries.length >= SUB_MIN) return entries;
-  return pool(hot, await listFile(env, "fresh.txt"));
+  return pool(hot, await listFile(env, "fresh.txt"), SUB_MIN, Math.random, cleanEntry);
 }
 
 // How many clean Cloudflare addresses a subscription carries the edge on.
