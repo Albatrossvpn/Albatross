@@ -237,3 +237,18 @@ test("the widget builds its text as elements, never as markup, and shows links o
   assert.ok(!/\.innerHTML\s*=|insertAdjacentHTML|document\.write|eval\(/.test(js));
   assert.ok(js.includes("albatrossvpn\\.online$"));
 });
+
+test("the knowledge follows the panel: its plans, whether data is on sale and in which bot; it never names a price", async () => {
+  const { knowledge } = await import("../src/support.js");
+  const on = knowledge({ features: JSON.stringify({ adblock: "bronze" }), bot: "AlbatrossHelp_bot", selling: true });
+  assert.ok(on.includes("@AlbatrossHelp_bot") && on.includes("/buy") && on.includes("Never say a price"));
+  assert.ok(on.includes("- Bronze, 1 device at once: the fastest location found for them with every protocol, unencrypted traffic refused, Ad & tracker blocker."), "the panel moved the blocker to Bronze");
+  assert.ok(!/Silver, 2 devices at once:[^\n]*Ad & tracker blocker/.test(on));
+  assert.ok(on.includes("64-bit phones") && on.includes("App not installed"), "32-bit phones are not supported");
+  assert.ok(on.includes("Bypass local sites") && on.includes("Snapp"));
+  assert.ok(!/\$\d|⭐\d|\d+ ?(toman|تومان)/i.test(on), "no prices");
+  const off = knowledge({ bot: "AlbatrossHelp_bot", selling: false });
+  assert.ok(off.includes("Data is not on sale right now") && !off.includes("/buy"));
+  const p = systemPrompt("", "English", { bot: "AlbatrossHelp_bot", selling: true });
+  assert.ok(p.includes("do not guess") && p.includes(HANDOFF));
+});

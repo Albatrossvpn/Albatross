@@ -117,6 +117,7 @@ export default {
     ticket_opened_chat: "🎫 <b>Destek talebi #{id} açıldı</b>\n\nEkibimize haber verildi ve şu ana kadarki sohbetiniz onlara iletildi. Yardımcı olabilecek her şeyi ekleyin: gördüğünüz mesajın aynısı, cihazınız ve ağınız. Ekran görüntüsü de gönderebilirsiniz.\n\nYanıtlarını bu sohbette alacaksınız.",
     ticket_opened_new: "🎫 <b>Destek talebi #{id} açıldı</b>\n\nEkibimize haber verildi. Sorununuzu buraya yazın: gördüğünüz mesajın aynısı, cihazınız ve ağınız. Ekran görüntüsü de gönderebilirsiniz.\n\nYanıtlarını bu sohbette alacaksınız.",
     ticket_open: "<b>Destek talebi #{id}</b> zaten açık. Buraya yazmanız yeterli, ekibimiz görecek.",
+    ask_first: "🧑‍💼 <b>Sorunu anlatın</b>\n\nTek bir mesajda yazın: ne görüyorsunuz (mesajın tam metni), cihazınız ve ağınız, ve hesabınızla ilgiliyse hesabınızın kullanıcı adı. Hemen yanıtlarım; çözemezsem sorununuz ekibimize iletilir.\n\nEkran görüntüsü doğrudan ekibimize gider.",
     ticket_closed_user: "✅ Sorunun çözülmesine sevindim! <b>Destek talebi #{id}</b> kapatıldı.\n\nYardımımız nasıldı?",
     ticket_closed_team: "✅ <b>Destek talebi #{id} kapatıldı.</b> Başka bir sorun olursa bana yazmanız veya menüyü açmanız yeterli.\n\nYardımımız nasıldı?",
     ticket_closed_idle: "<b>Destek talebi #{id}</b>, üç gün boyunca yazışma olmadığı için kapatıldı. Yeniden başlamak için istediğiniz zaman bana yazabilirsiniz.",

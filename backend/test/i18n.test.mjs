@@ -12,7 +12,7 @@ import { check, connect, disconnect, sweep } from "../src/telegram.js";
 import { languagePicker, screens } from "../src/telegram-content.js";
 import * as sales from "../src/sales.js";
 import { d1 } from "./d1.mjs";
-import { ADMIN_REQUEST, SARA, TEAM, TOKEN, datas, labels, nextUpdate, press, real, telegram, text, world } from "./tg-helpers.mjs";
+import { ADMIN_REQUEST, SARA, TEAM, TOKEN, datas, labels, nextUpdate, press, real, telegram, text, toTeamWith, world } from "./tg-helpers.mjs";
 
 afterEach(() => (globalThis.fetch = real));
 
@@ -264,18 +264,17 @@ test("a link into the bot (/start buy) is remembered through the choice of a lan
   assert.equal(plans.message_id, 71);
   assert.ok(plans.text.startsWith(screens("vi").t("plans").split("\n")[0]) && plans.text.includes("• 25 GB - ⭐72 - Silver"), "no rate for the dong yet: the Stars alone");
   assert.ok(datas(plans.reply_markup).includes("s"), "and its buy button");
-  // A person asking for the team gets a ticket after the choice.
+  // A person asking for the team is asked what is wrong after the choice, in their language.
   await w.send(text(SARA + 2, "/start human"));
   await w.send(press(SARA + 2, "l:id:human", 72));
   assert.ok(w.api.of("editMessageText").pop().text.includes(screens("id").t("menu_title")));
-  assert.ok(w.lastText(SARA + 2).text.includes("1001"), "the ticket opened, in Indonesian");
-  assert.equal(w.lastText(SARA + 2).text, screens("id").ticketOpened(1001, false).text);
+  assert.equal(w.lastText(SARA + 2).text, screens("id").ASK_FIRST.text, "in Indonesian");
 });
 
 test("a person whose ticket is open is not stopped to pick a language: the team has their words, and they are spoken to in English", async () => {
   const w = await fresh();
   await w.speak(SARA, "en");
-  await w.send(text(SARA, "/human"));
+  await toTeamWith(w, SARA, "It does not connect");
   await w.env.DB.prepare("DELETE FROM tg_langs").run();
   await w.send(text(SARA, "the app shows an error"));
   assert.ok(w.api.calls.some((c) => c.chat_id === TEAM && /the app shows an error/.test(c.text || "")), "the team got it");
@@ -312,10 +311,12 @@ test("the assistant's failures are said in the person's language, with the way t
 test("a ticket is opened, answered and closed in the person's language; the team's card names it", async () => {
   const w = await world({ lang: "ru" });
   await w.send(text(SARA, "/human"));
-  const opened = w.lastText(SARA);
-  assert.equal(opened.text, screens("ru").ticketOpened(1001, false).text);
-  assert.equal(labels(opened.reply_markup)[0], screens("ru").t("btn_solved"));
+  assert.equal(w.lastText(SARA).text, screens("ru").ASK_FIRST.text);
+  w.env.answer = "Наша команда ответит вам здесь.\n[[HUMAN]]";
   await w.send(text(SARA, "Не подключается"));
+  const opened = w.lastText(SARA);
+  assert.equal(opened.text, screens("ru").ticketOpened(1001, true).text);
+  assert.equal(labels(opened.reply_markup)[0], screens("ru").t("btn_solved"));
   const card = w.api.calls.filter((c) => c.method === "sendMessage" && c.chat_id === TEAM).pop();
   assert.ok(card.text.includes(`🌐 ${pack("ru").name}`), card.text);
   // The team answers by replying to the card: the person reads it with their own label.
@@ -328,8 +329,7 @@ test("a ticket is opened, answered and closed in the person's language; the team
   assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === SARA).pop().text, screens("ru").ticketClosedByTeam(1001).text);
   // An English chat needs no language on its card. (A second service stands in for Telegram from here on.)
   const english = await world({ lang: "en" });
-  await english.send(text(SARA, "/human"));
-  await english.send(text(SARA, "It does not connect"));
+  await toTeamWith(english, SARA, "It does not connect");
   const englishCard = english.api.calls.filter((c) => c.method === "sendMessage" && c.chat_id === TEAM).pop();
   assert.ok(!englishCard.text.includes("🌐"), "an English chat needs no language on its card");
 });

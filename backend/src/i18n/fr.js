@@ -117,6 +117,7 @@ export default {
     ticket_opened_chat: "🎫 <b>Ticket n° {id} ouvert</b>\n\nNotre équipe a été prévenue et dispose de votre discussion jusqu'ici. Ajoutez tout ce qui peut aider : le message exact, votre appareil et votre réseau. Les captures d'écran sont les bienvenues.\n\nLa réponse de l'équipe arrivera dans cette discussion.",
     ticket_opened_new: "🎫 <b>Ticket n° {id} ouvert</b>\n\nNotre équipe a été prévenue. Décrivez votre problème ici : le message exact, votre appareil et votre réseau. Les captures d'écran sont les bienvenues.\n\nLa réponse de l'équipe arrivera dans cette discussion.",
     ticket_open: "Le <b>ticket n° {id}</b> est déjà ouvert. Écrivez simplement ici et notre équipe le verra.",
+    ask_first: "🧑‍💼 <b>Dites-moi ce qui ne va pas</b>\n\nÉcrivez-le en un seul message : ce que vous voyez (le message exact), votre appareil et votre réseau, et le nom d'utilisateur de votre compte si cela concerne votre compte. Je réponds tout de suite, et si je ne peux pas résoudre le problème, il part à notre équipe.\n\nUne capture d'écran va directement à notre équipe.",
     ticket_closed_user: "✅ Tant mieux, c'est réglé ! Le <b>ticket n° {id}</b> est fermé.\n\nComment avez-vous trouvé notre aide ?",
     ticket_closed_team: "✅ <b>Le ticket n° {id} est fermé.</b> Si autre chose se présente, écrivez-moi simplement ou ouvrez le menu.\n\nComment avez-vous trouvé notre aide ?",
     ticket_closed_idle: "Le <b>ticket n° {id}</b> a été fermé après trois jours sans message. Écrivez-moi quand vous voulez pour recommencer.",

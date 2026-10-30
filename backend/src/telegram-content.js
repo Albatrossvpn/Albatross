@@ -284,6 +284,8 @@ function build(code) {
 
     ticketOpened: (id, hadChat) => ({ text: t(hadChat ? "ticket_opened_chat" : "ticket_opened_new", { id }), markup: ticketKeys(id) }),
     ticketOpen: (id) => ({ text: t("ticket_open", { id }), markup: ticketKeys(id) }),
+    /** "Talk to our team" before a word: the assistant hears the problem first. */
+    ASK_FIRST: { text: t("ask_first"), markup: keys([MENU_BUTTON]) },
     ticketClosedByUser: (id) => ({ text: t("ticket_closed_user", { id }), markup: rating }),
     ticketClosedByTeam: (id) => ({ text: t("ticket_closed_team", { id }), markup: rating }),
     ticketClosedIdle: (id) => ({ text: t("ticket_closed_idle", { id }), markup: THANKS }),
@@ -423,6 +425,10 @@ export const OWNER_HELP = `<b>Team commands</b>
 /refund P12 - give a payment back (the account is switched off, or the data taken off again)
 /teststars - a test payment of 1 Star, to see that selling works
 
-Reply to a ticket's message to answer the person. Photos, files and voice notes work too.`;
+Reply to a ticket's message to answer the person. Photos, files and voice notes work too.
 
-export const PAIRED = "✅ <b>Paired.</b> Tickets will arrive in this chat. Reply to a ticket's message to answer the person. /help lists the commands.";
+In a group with Topics, each ticket gets its own topic: write in it to answer, /close there closes it, and the topic goes with the ticket. The bot must be an admin with the right to manage topics.`;
+
+export const PAIRED = "✅ <b>Paired.</b> Tickets will arrive in this chat. Reply to a ticket's message to answer the person. /help lists the commands.\n\nTip: in a group with Topics turned on, each ticket gets its own topic.";
+export const PAIRED_TOPICS = "✅ <b>Paired.</b> Each ticket gets its own topic in this group: write in it to answer the person, and /close there closes it. Make me an admin with the right to manage topics. /help lists the commands.";
+export const TOPICS_RIGHT = "⚠️ To give each ticket its own topic, make me an admin of this group with the right to <b>manage topics</b>. Until then tickets arrive here: reply to a ticket's message to answer.";

@@ -72,13 +72,13 @@ const TEXTS_CALLS = 40; // Telegram calls one run spends on the menu and texts: 
 
 // ---------- Settings and the Bot API ----------
 
-const KEYS = ["telegram_bot_token", "telegram_bot_username", "telegram_owner_chat", "telegram_webhook_url"];
+const KEYS = ["telegram_bot_token", "telegram_bot_username", "telegram_owner_chat", "telegram_webhook_url", "telegram_team_forum"];
 
 /** The bot's token, name, webhook address and the team's chat, in one read. */
 async function config(env) {
   const { results } = await env.DB.prepare(`SELECT key, value FROM settings WHERE key IN (${KEYS.map((_, i) => `?${i + 1}`).join(", ")})`).bind(...KEYS).all();
   const c = Object.fromEntries(results.map((r) => [r.key, r.value]));
-  return { token: c.telegram_bot_token || "", name: c.telegram_bot_username || "", team: Number(c.telegram_owner_chat) || 0, url: c.telegram_webhook_url || "" };
+  return { token: c.telegram_bot_token || "", name: c.telegram_bot_username || "", team: Number(c.telegram_owner_chat) || 0, url: c.telegram_webhook_url || "", forum: c.telegram_team_forum === "1" };
 }
 
 const setting = async (env, key) => ((await env.DB.prepare("SELECT value FROM settings WHERE key = ?1").bind(key).first()) || {}).value || "";
@@ -344,7 +344,7 @@ export async function connect(env, request, token) {
   if (before.token && before.token.split(":")[0] !== token.split(":")[0]) {
     await bot(env, before.token).call("deleteWebhook", { drop_pending_updates: true });
     await forgetChats(env);
-    await drop(env, "telegram_owner_chat", "telegram_pair_code", "telegram_texts");
+    await drop(env, "telegram_owner_chat", "telegram_team_forum", "telegram_pair_code", "telegram_texts");
   }
   // The menu and the texts people see before they write. The bot works without them, so a refusal does not stop it, but it is told; what the run's budget leaves undone follows within a minute.
   const texts = await refreshTexts(env, tg, 0);
@@ -421,7 +421,7 @@ export async function webhook(request, env, kit, ctx) {
     update = null;
   }
   if (!update || typeof update !== "object" || !Number.isSafeInteger(update.update_id)) return new Response("Bad request.", { status: 400 });
-  const run = { env, kit, tg: bot(env, c.token), team: c.team, name: c.name, tags: new Map(), langs: new Map() };
+  const run = { env, kit, tg: bot(env, c.token), team: c.team, forum: c.forum, name: c.name, tags: new Map(), langs: new Map() };
   const work = handle(run, update).catch((e) => failed(run, update, e));
   if (ctx && ctx.waitUntil) ctx.waitUntil(work);
   else await work;
@@ -468,7 +468,11 @@ async function handle(c, update) {
   const text = typeof m.text === "string" ? m.text : "";
   const pair = /^\/pair(?:@\w+)?(?:\s+([\s\S]*))?$/i.exec(text);
   if (pair) return onPair(c, m, pair[1]);
-  if (c.team && m.chat.id === c.team && (await onTeam(c, m))) return;
+  if (c.team && m.chat.id === c.team) {
+    // The group turned Topics on or off: tickets follow.
+    if (!!m.chat.is_forum !== !!c.forum) await setForum(c, !!m.chat.is_forum);
+    if (await onTeam(c, m)) return;
+  }
   if (m.chat.type === "private" && person) return onUser(c, update, m);
 }
 
@@ -605,6 +609,9 @@ async function onUser(c, update, m) {
   if (command) return onCommand(c, user, command.name, command.arg, m.from.language_code);
   if (user.mode === "topup" && text) return onAccountName(c, user, text);
   if (waiting) return toTeam(c, user, m);
+  // They asked for the team and now say what is wrong: the assistant answers
+  // words first; a screenshot, which it cannot read, opens the ticket.
+  if (user.mode === "ask" && !text) return openTicket(c, user, m);
   if (!text) {
     const v = await viewOf(c, chat);
     return tg.send(chat, v.CAN_ONLY_READ.text, v.CAN_ONLY_READ.markup);
@@ -718,14 +725,24 @@ async function ask(c, user, text) {
     ...(v.code === DEFAULT ? [] : [v.t("ctx_language", { language: v.ai })]),
   ].join("\n");
   const answer = messages && messages.length && messages[messages.length - 1].role === "user" ? await reply(env, messages, context, AI_TIMEOUT, v.ai) : null;
+  // The person asked for the team ("Talk to our team", then their problem).
+  const wanted = user.mode === "ask";
   if (!answer || !answer.text) {
+    // The assistant is away: what they wrote goes to the team as it is.
+    if (wanted) return openTicket(c, { ...user, mode: "" });
     await tg.send(chat, v.failed().text, v.failed().markup);
     return;
   }
   await remember(env, chat, "assistant", answer.text);
-  if (user.mode === "problem") await setMode(env, chat, "");
+  if (user.mode === "problem" || wanted) await setMode(env, chat, "");
   await bump(env, "answers");
-  await tg.send(chat, fit(answer.text), v.feedback(answer.handoff));
+  // The assistant cannot solve what they asked the team for: the ticket opens
+  // with their words and its answer, without another tap.
+  if (wanted && answer.handoff) {
+    await tg.send(chat, fit(answer.text));
+    return openTicket(c, { ...user, mode: "" });
+  }
+  await tg.send(chat, fit(answer.text), v.feedback(answer.handoff || wanted));
 }
 
 // ---------- Tickets ----------
@@ -733,11 +750,11 @@ async function ask(c, user, text) {
 const ticketOf = (env, id) => env.DB.prepare("SELECT * FROM tg_tickets WHERE id = ?1").bind(id).first();
 
 /** The team's chat is told of a ticket with who it is, what was said, and what it can do. */
-function card(ticket, user, rows, fresh, lang = "") {
+function card(ticket, user, rows, fresh, lang = "", forum = false) {
   const last = rows.slice(-6).map((r) => `<b>${r.role === "user" ? "Visitor" : r.role === "team" ? "Team" : "Assistant"}:</b> ${fit(oneLine(r.content, 300), 400)}`).join("\n");
   // The team answers in the person's language: the card says which it is.
   const speaks = lang && lang !== DEFAULT ? ` - 🌐 ${view.esc(pack(lang).name)}` : "";
-  return `🎫 <b>Ticket #${ticket}</b>${fresh ? " - new" : ""}\n👤 ${view.esc(who(user))} - id <code>${user.chat_id}</code>${speaks}\n\n${last || "<i>No message yet. They were asked to describe the problem.</i>"}\n\n<i>Reply to this message to answer.</i>`;
+  return `🎫 <b>Ticket #${ticket}</b>${fresh ? " - new" : ""}\n👤 ${view.esc(who(user))} - id <code>${user.chat_id}</code>${speaks}\n\n${last || "<i>No message yet. They were asked to describe the problem.</i>"}\n\n<i>${forum ? "Write in this topic to answer." : "Reply to this message to answer."}</i>`;
 }
 
 const teamKeys = (ticket, chat) => ({ inline_keyboard: [[{ text: "✅ Close", callback_data: `o:c:${ticket}` }, { text: "🚫 Block", callback_data: `o:b:${chat}` }, { text: "📜 Full chat", callback_data: `o:f:${ticket}` }]] });
@@ -749,31 +766,78 @@ async function moveTeam(c, to) {
   const from = c.team;
   c.team = to;
   await save(c.env, "telegram_owner_chat", String(to));
+  await setForum(c, false);
   await c.env.DB.prepare("UPDATE tg_relay SET team_chat = ?2 WHERE team_chat = ?1").bind(from, to).run();
   await refreshTexts(c.env, c.tg, to);
 }
 
-/** Tells the team's chat something about a ticket and remembers the message, so that replying to it answers the person. Answers Telegram's answer, null when no chat is paired. */
-async function tellTeam(c, ticket, text, markup) {
+/** Tells the team's chat something about a ticket, in the ticket's topic where the group has topics (`general`: in its General chat), and remembers the message, so that replying to it answers the person. Answers Telegram's answer, null when no chat is paired. */
+async function tellTeam(c, ticket, text, markup, { general = false } = {}) {
   if (!c.team) return null;
-  let res = await c.tg.send(c.team, text, markup);
+  const where = async () => {
+    const topic = general ? 0 : await topicOf(c, ticket);
+    return topic ? { message_thread_id: topic } : {};
+  };
+  let res = await c.tg.send(c.team, text, markup, await where());
   const moved = !res.ok && res.parameters && res.parameters.migrate_to_chat_id;
   if (moved) {
     await moveTeam(c, moved);
-    res = await c.tg.send(c.team, text, markup);
+    res = await c.tg.send(c.team, text, markup, await where());
+  } else if (!res.ok && /thread not found|TOPIC_DELETED|TOPIC_ID_INVALID/i.test(res.description || "")) {
+    // Someone deleted the ticket's topic: it gets a new one.
+    await c.env.DB.prepare("UPDATE tg_tickets SET topic = 0 WHERE id = ?1").bind(ticket).run();
+    res = await c.tg.send(c.team, text, markup, await where());
   }
   if (res.ok) await remind(c, ticket, res.result.message_id);
   return res;
 }
 
-/** The person asks for a person. */
-async function openTicket(c, user) {
+/** The team's group has topics (or no longer has). */
+async function setForum(c, on) {
+  c.forum = on;
+  await save(c.env, "telegram_team_forum", on ? "1" : "");
+}
+
+/** A topic's name: the ticket and whose it is. */
+const topicName = (ticket, user) => `#${ticket} · ${who(user || {})}`.slice(0, 128);
+
+/** The ticket's topic in the team's group, made when first needed; 0 where the group has no topics, or the bot may not make them. */
+async function topicOf(c, ticket) {
+  if (!c.forum || !c.team) return 0;
+  const t = await ticketOf(c.env, ticket);
+  if (!t || t.status !== "open") return 0;
+  if (t.topic) return t.topic;
+  const user = t.chat_id ? await c.env.DB.prepare("SELECT name, username FROM tg_users WHERE chat_id = ?1").bind(t.chat_id).first() : null;
+  const res = await c.tg.call("createForumTopic", { chat_id: c.team, name: topicName(ticket, user), icon_color: 0x6fb9f0 });
+  if (!res.ok) {
+    if (/not a forum|CHAT_NOT_FORUM|TOPICS?_DISABLED/i.test(res.description || "")) await setForum(c, false);
+    // No right to manage topics: tickets arrive in the General chat, and the team is told how to fix it, once a day.
+    else if ((await setting(c.env, "telegram_topics_note")) !== today()) {
+      await save(c.env, "telegram_topics_note", today());
+      await c.tg.send(c.team, view.TOPICS_RIGHT);
+    }
+    return 0;
+  }
+  const topic = res.result.message_thread_id;
+  // Two messages at once may each make one: the first kept stays, the other goes.
+  const kept = await c.env.DB.prepare("UPDATE tg_tickets SET topic = ?2 WHERE id = ?1 AND topic = 0").bind(ticket, topic).run();
+  if (kept.meta.changes) return topic;
+  await c.tg.call("deleteForumTopic", { chat_id: c.team, message_thread_id: topic });
+  return ((await ticketOf(c.env, ticket)) || {}).topic || 0;
+}
+
+/** The person asks for a person. Before they have said anything the assistant asks what is wrong and answers it first: a ticket opens only with their words (or a screenshot, `first`, which then goes to the team). */
+async function openTicket(c, user, first = null) {
   const { env, tg } = c;
   const chat = user.chat_id;
   const v = await viewOf(c, chat);
   const have = user.ticket_id > 0 ? await ticketOf(env, user.ticket_id) : null;
   if (have && have.status === "open") return tg.send(chat, v.ticketOpen(have.id).text, v.ticketOpen(have.id).markup);
   const rows = await conversation(env, chat);
+  if (!first && !rows.some((r) => r.role === "user")) {
+    await setMode(env, chat, "ask");
+    return tg.send(chat, v.ASK_FIRST.text, v.ASK_FIRST.markup);
+  }
   const t = await idTag(c, chat);
   // Nobody reads tickets in Telegram until a chat is paired: the owner gets the chat by mail, and the person is told how things stand.
   if (!c.team) {
@@ -803,18 +867,17 @@ async function openTicket(c, user) {
   await c.kit.count(env, `tg:ticket:${t}`, DAY);
   await c.kit.count(env, `tg:tickets:all:${today()}`, DAY);
   const said = rows.some((r) => r.role === "user");
-  const opened = v.ticketOpened(id, said);
+  const opened = v.ticketOpened(id, true);
   await tg.send(chat, opened.text, opened.markup);
   await bump(env, "tickets");
-  // Nothing said yet: the team hears of the ticket with its first message
-  // (toTeam). A press of the button alone, which many never follow with a
-  // word, used to send the team an empty ticket.
   if (said) await announce(c, user, id, rows);
+  // A screenshot opened it: the team hears of the ticket with it (toTeam).
+  if (first) await toTeam(c, { ...user, mode: "ticket", ticket_id: id }, first);
 }
 
 /** Tells the team's chat and the owner's mail of a ticket, with what was said; the person is told when neither took it. */
 async function announce(c, user, id, rows) {
-  const told = await tellTeam(c, id, card(id, user, rows, true, await langOf(c, user.chat_id)), teamKeys(id, user.chat_id));
+  const told = await tellTeam(c, id, card(id, user, rows, true, await langOf(c, user.chat_id), c.forum), teamKeys(id, user.chat_id));
   const mailed = await mailChat(c, user, rows, { human: true, ticket: id });
   // Neither the team's chat nor the mail took it: the person must not think someone knows.
   if (!(told && told.ok) && !mailed) await c.tg.send(user.chat_id, (await viewOf(c, user.chat_id)).TEAM_UNREACHABLE);
@@ -845,7 +908,7 @@ async function toTeam(c, user, m) {
   const first = !(await announced(env, ticket));
   if (first) {
     const rows = await conversation(env, chat);
-    sent = await tellTeam(c, ticket, card(ticket, user, rows, true, await langOf(c, chat)), teamKeys(ticket, chat));
+    sent = await tellTeam(c, ticket, card(ticket, user, rows, true, await langOf(c, chat), c.forum), teamKeys(ticket, chat));
     if (sent && sent.ok) {
       await mailChat(c, user, rows, { human: true, ticket });
       if (typeof m.text === "string") {
@@ -861,10 +924,12 @@ async function toTeam(c, user, m) {
   } else {
     // A picture, a file or a voice note is copied as it is, with the ticket in its caption where Telegram allows one.
     const caption = ["photo", "document", "video", "audio", "voice", "animation"].some((k) => m[k]);
-    if (caption) sent = await c.tg.copy(c.team, m.chat.id, m.message_id, { caption: `🎫 #${ticket} - ${who(user)}${m.caption ? `\n${m.caption}` : ""}`.slice(0, 1000), parse_mode: undefined });
+    const topic = await topicOf(c, ticket);
+    const there = topic ? { message_thread_id: topic } : {};
+    if (caption) sent = await c.tg.copy(c.team, m.chat.id, m.message_id, { caption: `🎫 #${ticket} - ${who(user)}${m.caption ? `\n${m.caption}` : ""}`.slice(0, 1000), parse_mode: undefined, ...there });
     else {
       await tellTeam(c, ticket, head);
-      sent = await c.tg.copy(c.team, m.chat.id, m.message_id);
+      sent = await c.tg.copy(c.team, m.chat.id, m.message_id, there);
     }
     if (sent && sent.ok && sent.result) await remind(c, ticket, sent.result.message_id);
   }
@@ -900,8 +965,13 @@ async function closeTicket(c, id, by, { tell = true } = {}) {
     const said = by === "team" ? v.ticketClosedByTeam(id) : by === "idle" ? v.ticketClosedIdle(id) : v.ticketClosedByUser(id);
     await tg.send(person, said.text, said.markup);
   }
+  // Its topic goes with it: the group's topics are the open tickets.
+  if (t.topic && c.team) {
+    const gone = await tg.call("deleteForumTopic", { chat_id: c.team, message_thread_id: t.topic });
+    if (!gone.ok) await tg.call("closeForumTopic", { chat_id: c.team, message_thread_id: t.topic });
+  }
   // A ticket the team never heard of (nothing was written in it) closes without a word to the team.
-  if (by !== "team" && (await announced(env, id))) await tellTeam(c, id, `✅ <b>Ticket #${id}</b> was closed ${by === "user" ? `by ${view.esc(who(user || {}))}` : "after three quiet days"}.`);
+  if (by !== "team" && (await announced(env, id))) await tellTeam(c, id, `✅ <b>Ticket #${id}</b>${user ? ` (${view.esc(who(user))})` : ""} was closed ${by === "user" ? "by the person" : "after three quiet days"}.`, undefined, { general: true });
   return true;
 }
 
@@ -929,9 +999,9 @@ async function endChat(c, user, told = false) {
 /** Every minute: a few chats that went quiet are summarized and forgotten, tickets nobody writes to are closed, old rows go. */
 export async function sweep(env, kit) {
   const began = Date.now();
-  const { token, name, team, url } = await config(env);
+  const { token, name, team, url, forum } = await config(env);
   if (!token) return;
-  const c = { env, tg: bot(env, token), team, name, kit, tags: new Map(), langs: new Map() };
+  const c = { env, tg: bot(env, token), team, forum, name, kit, tags: new Map(), langs: new Map() };
   const t = now();
   const over = () => Date.now() - began > SWEEP_BUDGET;
   await refreshHook(env, c.tg, url).catch(log("hook"));
@@ -954,6 +1024,13 @@ export async function sweep(env, kit) {
   for (const row of stale.results) {
     if (over()) break;
     await closeTicket(c, row.id, "idle").catch(log("sweep"));
+  }
+  // A ticket the team never heard of (opened before tickets waited for words,
+  // and nothing written since) goes quietly once its person has gone quiet.
+  const empty = await env.DB.prepare("SELECT id FROM tg_tickets t WHERE status = 'open' AND updated < ?1 AND NOT EXISTS (SELECT 1 FROM tg_relay r WHERE r.ticket_id = t.id) LIMIT 5").bind(t - IDLE).all();
+  for (const row of empty.results) {
+    if (over()) break;
+    await closeTicket(c, row.id, "idle", { tell: false }).catch(log("sweep"));
   }
   // A ticket's message ids are kept a while after it is closed, so that an answer to an old card says it is closed.
   await env.DB.batch([
@@ -1089,8 +1166,9 @@ async function onPair(c, m, arg) {
   await save(env, "telegram_owner_chat", String(chat));
   await drop(env, "telegram_pair_code");
   c.team = chat;
+  await setForum(c, !!m.chat.is_forum);
   await refreshTexts(env, tg, chat);
-  return tg.send(chat, view.PAIRED);
+  return tg.send(chat, c.forum ? view.PAIRED_TOPICS : view.PAIRED);
 }
 
 /** Commands and replies in the team's chat. True when it was for the team; false lets a private chat go on as a person's (so the owner can try the bot). */
@@ -1099,7 +1177,13 @@ async function onTeam(c, m) {
   const chat = m.chat.id;
   const text = typeof m.text === "string" ? m.text.trim() : "";
   const command = parseCommand(text, c.name);
-  const replied = m.reply_to_message ? await env.DB.prepare("SELECT ticket_id FROM tg_relay WHERE team_chat = ?1 AND message_id = ?2").bind(chat, m.reply_to_message.message_id).first() : null;
+  let replied = m.reply_to_message ? await env.DB.prepare("SELECT ticket_id FROM tg_relay WHERE team_chat = ?1 AND message_id = ?2").bind(chat, m.reply_to_message.message_id).first() : null;
+  // In a group with topics, whatever is written in a ticket's topic is for that ticket.
+  const topic = m.is_topic_message && m.message_thread_id ? m.message_thread_id : 0;
+  if (!replied && topic) {
+    const t = await env.DB.prepare("SELECT id FROM tg_tickets WHERE topic = ?1 AND status = 'open'").bind(topic).first();
+    if (t) replied = { ticket_id: t.id };
+  }
   const name = command ? command.name : "";
   const arg = command ? command.arg : "";
   const done = async (work) => {
@@ -1121,7 +1205,8 @@ async function onTeam(c, m) {
     const id = Number(arg) || (replied && replied.ticket_id);
     return done(closeTicket(c, id, "team").then((closed) => tg.send(chat, closed ? `✅ Ticket #${id} closed.` : `Ticket #${view.esc(arg || id)} is not open.`)));
   }
-  if (replied) return done(answerPerson(c, m, replied.ticket_id));
+  // A note about the topic itself (made, renamed, closed) answers nobody.
+  if (replied && (typeof m.text === "string" || KINDS.some(([k]) => m[k]))) return done(answerPerson(c, m, replied.ticket_id));
   return m.chat.type !== "private"; // a group's other talk is not for the bot; a private chat can try it
 }
 
@@ -1145,15 +1230,18 @@ async function answerPerson(c, m, id) {
 
 async function listTickets(c) {
   const { results } = await c.env.DB.prepare(
-    `SELECT t.id, t.updated, u.name, u.username,
+    `SELECT t.id, t.updated, t.topic, u.name, u.username,
             (SELECT content FROM tg_messages WHERE chat_id = t.chat_id AND role = 'user' ORDER BY id DESC LIMIT 1) AS last
      FROM tg_tickets t LEFT JOIN tg_users u ON u.chat_id = t.chat_id
-     WHERE t.status = 'open' ORDER BY t.updated DESC LIMIT 15`,
+     WHERE t.status = 'open' AND EXISTS (SELECT 1 FROM tg_relay r WHERE r.ticket_id = t.id) ORDER BY t.updated DESC LIMIT 15`,
   ).all();
   if (!results.length) return c.tg.send(c.team, "No open tickets. 🎉");
   const ago = (s) => (now() - s < 3600 ? `${Math.max(1, Math.round((now() - s) / 60))} min` : `${Math.round((now() - s) / 3600)} h`);
-  const lines = results.map((r) => `<b>#${r.id}</b> - ${view.esc(who(r))} - ${ago(r.updated)} ago${r.last ? `\n<i>${fit(oneLine(r.last, 90), 200)}</i>` : ""}`);
-  return c.tg.send(c.team, `🎫 <b>Open tickets (${results.length})</b>\n\n${lines.join("\n\n")}\n\n<i>Reply to a ticket's message to answer. /close 1042 closes one.</i>`);
+  // In a group with topics each number opens its topic.
+  const group = String(c.team).startsWith("-100") ? String(c.team).slice(4) : "";
+  const num = (r) => (r.topic && group ? `<a href="https://t.me/c/${group}/${r.topic}">#${r.id}</a>` : `#${r.id}`);
+  const lines = results.map((r) => `<b>${num(r)}</b> - ${view.esc(who(r))} - ${ago(r.updated)} ago${r.last ? `\n<i>${fit(oneLine(r.last, 90), 200)}</i>` : ""}`);
+  return c.tg.send(c.team, `🎫 <b>Open tickets (${results.length})</b>\n\n${lines.join("\n\n")}\n\n<i>${c.forum ? "Write in a ticket's topic to answer." : "Reply to a ticket's message to answer."} /close 1042 closes one.</i>`);
 }
 
 async function stats(c) {
@@ -1211,7 +1299,7 @@ async function onTeamButton(c, q, data, msg) {
     const lines = rows.map((r) => `<b>${r.role === "user" ? "Visitor" : r.role === "team" ? "Team" : "Assistant"}:</b> ${fit(r.content, 600)}`);
     let out = "";
     for (const l of lines.reverse()) if ((out + l).length < 3600) out = `${l}\n\n${out}`;
-    return tg.send(c.team, `📜 <b>Ticket #${id}</b>\n\n${out || "<i>Nothing kept.</i>"}`);
+    return tg.send(c.team, `📜 <b>Ticket #${id}</b>\n\n${out || "<i>Nothing kept.</i>"}`, undefined, msg.is_topic_message && msg.message_thread_id ? { message_thread_id: msg.message_thread_id } : {});
   }
   return tg.answer(q.id);
 }

@@ -119,6 +119,7 @@ export default {
     ticket_opened_chat: "🎫 <b>Tiket #{id} dibuka</b>\n\nTim kami sudah diberi tahu dan sudah menerima chat Anda sejauh ini. Tambahkan apa pun yang membantu: pesan persisnya, perangkat, dan jaringan Anda. Silakan sertakan tangkapan layar.\n\nBalasan mereka akan muncul di chat ini.",
     ticket_opened_new: "🎫 <b>Tiket #{id} dibuka</b>\n\nTim kami sudah diberi tahu. Tulis masalah Anda di sini: pesan persisnya, perangkat, dan jaringan Anda. Silakan sertakan tangkapan layar.\n\nBalasan mereka akan muncul di chat ini.",
     ticket_open: "Anda sudah memiliki <b>tiket #{id}</b> yang terbuka. Cukup tulis di sini dan tim kami akan melihatnya.",
+    ask_first: "🧑‍💼 <b>Ceritakan masalahnya</b>\n\nTulis dalam satu pesan: apa yang Anda lihat (pesan persisnya), perangkat dan jaringan Anda, serta nama pengguna akun Anda jika menyangkut akun. Saya langsung menjawab, dan jika tidak bisa saya selesaikan, pesan Anda diteruskan ke tim kami.\n\nTangkapan layar langsung dikirim ke tim kami.",
     ticket_closed_user: "✅ Senang masalahnya sudah teratasi! <b>Tiket #{id}</b> ditutup.\n\nBagaimana bantuan dari kami?",
     ticket_closed_team: "✅ <b>Tiket #{id} ditutup.</b> Jika ada hal lain, cukup tulis kepada saya atau buka menu.\n\nBagaimana bantuan dari kami?",
     ticket_closed_idle: "<b>Tiket #{id}</b> ditutup setelah tiga hari tanpa aktivitas. Tulis kepada saya kapan saja untuk memulai lagi.",
