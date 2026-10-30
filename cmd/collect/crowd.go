@@ -107,15 +107,32 @@ func (c crowdStats) keep(key uint64) bool {
 }
 
 // crowdOrder sorts passed servers: those confirmed from inside first, then
-// by delay.
+// by delay with what they carried counted in (speedLead): a server that
+// answers a little later and carries far more goes first.
 func crowdOrder(es []*entry, passed map[*entry]time.Duration, c crowdStats) {
+	score := func(e *entry) time.Duration { return passed[e] - speedLead(e.speed) }
 	sort.SliceStable(es, func(i, j int) bool {
 		a, b := c.tier(es[i].key), c.tier(es[j].key)
 		if a != b {
 			return a < b
 		}
-		return passed[es[i]] < passed[es[j]]
+		return score(es[i]) < score(es[j])
 	})
+}
+
+// speedLead is how much delay a server's measured speed makes up for.
+func speedLead(bps float64) time.Duration {
+	switch {
+	case bps >= 4<<20:
+		return 500 * time.Millisecond
+	case bps >= 2<<20:
+		return 350 * time.Millisecond
+	case bps >= 1<<20:
+		return 200 * time.Millisecond
+	case bps >= 512<<10:
+		return 80 * time.Millisecond
+	}
+	return 0
 }
 
 // writeReport writes this run's results in the crowd file form, for a

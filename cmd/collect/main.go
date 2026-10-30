@@ -307,6 +307,9 @@ type entry struct {
 	lane bool
 	dud  int
 	dead bool
+	// speed is the slowest real download through the server among the
+	// tests that passed it (bytes a second), 0 when none measured it.
+	speed float64
 }
 
 type meta struct {
@@ -353,6 +356,7 @@ func main() {
 	maxFresh := flag.Int("max-fresh", 60000, "most servers in fresh.txt; the rest go to the other files")
 	limit := flag.Int("limit", 0, "use only the first N sources (for tests)")
 	real := flag.Int("real", 8000, "connect through this many of the fresh servers with the cores in SING_BOX and XRAY; 0 skips")
+	flag.Float64Var(&speedMin, "speed-min", speedMin, "bytes a second a server must carry in a real download, at each of its two tests, to pass (0: no download)")
 	prev := flag.String("prev", "", "directory holding the last published lists, for new.txt")
 	hotFrom := flag.String("hot-from", "", "only rewrite hot.txt in -out from the servers listed in this file that pass the real test")
 	crowdPath := flag.String("crowd", "", "comma-separated reports about servers from inside the country (list/servers/crowd.json, iran.json): confirmed servers first in hot.txt, failing ones left out")
