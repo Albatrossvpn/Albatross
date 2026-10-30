@@ -207,6 +207,9 @@ type Running struct {
 	WarpPlus []*Process
 	Rejected []*node.Node // configs a core refused
 	Failed   []*node.Node // warp-plus methods that could not connect
+	// Skipped were set aside to find a config Xray refused without naming
+	// it; nothing was learned about them.
+	Skipped []*node.Node
 	release  func()       // lets go of the shared tor
 	released sync.Once
 }
@@ -272,8 +275,9 @@ type ConfigFunc func(s *Set) map[string]any
 // Run starts the cores for nodes. Nodes a core rejects are dropped and the
 // rest are started again, so one broken server never blocks the others.
 func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o BuildOptions, cfg ConfigFunc, probe string) (*Running, error) {
-	var rejected []*node.Node
+	var rejected, skipped []*node.Node
 	nodes = append([]*node.Node(nil), nodes...)
+	xrayUnnamed := 0
 	wp, ports, failed, nodes, release := r.startWarpPlus(ctx, nodes)
 	o.warpPorts = ports
 	stopWP := func() {
@@ -287,7 +291,7 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 	for attempt := 0; attempt < 200; attempt++ {
 		if len(nodes) == 0 {
 			stopWP()
-			return &Running{Rejected: rejected, Failed: failed}, fmt.Errorf("no usable servers")
+			return &Running{Rejected: rejected, Failed: failed, Skipped: skipped}, fmt.Errorf("no usable servers")
 		}
 		if err := ctx.Err(); err != nil {
 			stopWP()
@@ -316,10 +320,21 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 						i, _ := strconv.Atoi(m[1])
 						nodes, rejected = dropIdx(nodes, []int{i}, rejected)
 					} else {
-						// Xray quit for a reason that names no config (a port
-						// taken meanwhile, the phone killing it): a failure of
-						// this run, not of every server in it.
-						nodes, failed = dropIdx(nodes, set.xrayIdx, failed)
+						// Xray quit for a reason that names no config. Once is
+						// taken for this run's bad luck (a port taken meanwhile,
+						// the phone killing it) and tried again. Again, and one
+						// config it cannot build may be what fails: every other
+						// Xray server of the run went down with it, run after
+						// run, whole protocols with them. Half are set aside,
+						// untested, until the one is found and fails alone.
+						xrayUnnamed++
+						switch {
+						case xrayUnnamed == 1:
+						case len(set.xrayIdx) == 1:
+							nodes, failed = dropIdx(nodes, set.xrayIdx, failed)
+						default:
+							nodes, skipped = dropIdx(nodes, set.xrayIdx[len(set.xrayIdx)/2:], skipped)
+						}
 					}
 					continue
 				}
@@ -358,7 +373,7 @@ func (r *Runtime) Run(ctx context.Context, name string, nodes []*node.Node, o Bu
 			stopWP()
 			return nil, err
 		}
-		return &Running{Set: set, SingBox: sb, Xray: xr, WarpPlus: wp, Rejected: rejected, Failed: failed, release: release}, nil
+		return &Running{Set: set, SingBox: sb, Xray: xr, WarpPlus: wp, Rejected: rejected, Failed: failed, Skipped: skipped, release: release}, nil
 	}
 	stopWP()
 	return nil, fmt.Errorf("too many rejected servers")
