@@ -59,6 +59,10 @@ func methodsWanted(s Settings) (warp, tor bool) {
 	return false, false
 }
 
+// methodChoice says whether the chosen protocol is one of the built-in
+// methods ("warp" or "tor") rather than a kind of server in the pool.
+func methodChoice(protocol string) bool { return protocol == "warp" || protocol == "tor" }
+
 // chosenRetry is how soon a method the user chose is tried again while
 // nothing is connected: the choice is what they are waiting for.
 const chosenRetry = 5 * time.Minute
@@ -71,7 +75,7 @@ func (e *Engine) refreshWarp(warp, tor bool) {
 	target := e.target
 	searching := e.wantConnect && e.conn == nil
 	national := e.reg.Regime == regimeNational
-	chosen := e.settings.Protocol == "warp" || e.settings.Protocol == "tor"
+	chosen := methodChoice(e.settings.Protocol)
 	e.mu.Unlock()
 	if national {
 		return // WARP, Psiphon and Tor need foreign addresses

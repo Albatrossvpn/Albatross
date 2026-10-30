@@ -121,3 +121,23 @@ func TestMissingProtocols(t *testing.T) {
 		t.Errorf("wstunnel and warp are still missing: %v", none)
 	}
 }
+
+// With Tor or WARP chosen the pool has nothing to offer, so a scan that finds
+// nothing left to test must not ask for the long tail (ten megabytes a list,
+// on a phone's data); with any other choice it still does.
+func TestNoneLeftWantsTheLongTailOnlyForServers(t *testing.T) {
+	for _, p := range []string{"warp", "tor"} {
+		e := &Engine{settings: Settings{Protocol: p}}
+		e.noneLeft()
+		if !e.scan.exhausted.IsZero() {
+			t.Errorf("%s: the scan must not count as run dry", p)
+		}
+	}
+	for _, p := range []string{"", "vless", "tuic"} {
+		e := &Engine{settings: Settings{Protocol: p}}
+		e.noneLeft()
+		if e.scan.exhausted.IsZero() {
+			t.Errorf("%q: with nothing working, the scan run dry must be noted", p)
+		}
+	}
+}

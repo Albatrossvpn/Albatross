@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /list/
+Disallow: /update.json
+Disallow: /dns/
+
+Sitemap: https://albatrossvpn.online/sitemap.xml

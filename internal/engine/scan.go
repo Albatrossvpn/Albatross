@@ -570,7 +570,7 @@ func (e *Engine) pickBatch(size int) []candidate {
 	wantProto := protoCodes[protocol] // 0 = any
 	// The built-in methods are not servers of the pool: refreshWarp tests
 	// them, and the pool has nothing for a choice of them to try.
-	methodOnly := protocol == "warp" || protocol == "tor"
+	methodOnly := methodChoice(protocol)
 	haveXray := e.bin.Xray != ""
 	targetHasServers := false
 	// Protocols with a working server now; the others are stocked first,
