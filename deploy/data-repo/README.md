@@ -42,7 +42,7 @@ In alba-data, under Settings → Secrets and variables → Actions:
     - `TOKEN_SECRET`
     - `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
     - `SITE_DOMAIN`, `DOMESTIC_MIRROR`: secrets there, not variables, so they are masked in its logs.
-- **Variables:** `COLLECT_HERE=1` there and `COLLECT_IN_DATA_REPO=1` here, together. Only one collector may run, or the two race over the list keys.
+- **No variables:** there, collection and discovery start by themselves once `SOURCE_TOKEN` and `CLOUDFLARE_API_TOKEN` are set. Here they run only while the variable `COLLECT_IN_PRIVATE` is 1. Only one collector may run, or the two race over the list keys.
 
 ## Releasing
 
