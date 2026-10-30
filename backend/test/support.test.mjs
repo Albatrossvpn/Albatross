@@ -226,7 +226,7 @@ test("each page with the chat loads its style and script, and may reach the acco
     assert.ok(html.includes('href="/support.css"'), f);
     assert.ok(html.includes('<script src="/support.js" data-api="https://accounts.albatrossvpn.online" defer></script>'), f);
   }
-  assert.ok(page("../../site/public/_headers").includes("connect-src 'self' https://accounts.albatrossvpn.online;"));
+  assert.match(page("../../site/public/_headers"), /connect-src 'self' https:\/\/accounts\.albatrossvpn\.online[ ;]/);
   // The account pages call their own service only; the admin panel has no chat.
   assert.ok(page("../public/_headers").includes("connect-src 'self';"));
   assert.ok(!page("../public/admin.html").includes("support.js"));

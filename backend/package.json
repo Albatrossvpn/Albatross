@@ -5,7 +5,7 @@
   "description": "Account service for the Albatross apps: sign-up, sign-in, usage limits, user and admin panels (Cloudflare Worker + D1).",
   "scripts": {
     "dev": "wrangler dev",
-    "test": "node --test test/unit.test.mjs test/support.test.mjs test/telegram.test.mjs test/stars.test.mjs test/i18n.test.mjs",
+    "test": "node --test test/unit.test.mjs test/support.test.mjs test/telegram.test.mjs test/stars.test.mjs test/i18n.test.mjs test/site.test.mjs",
     "test:api": "node test/api.test.mjs",
     "deploy": "wrangler deploy"
   },
