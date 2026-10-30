@@ -2,34 +2,26 @@
   "download_url": "https://albatrossvpn.online/#download",
   "files": {
     "android-arm64-v8a": {
-      "sha256": "349ae90e8c85450903862220b2523aef432cebb6da4fb59f01799e4287b55c55",
+      "sha256": "08855b13453849d0a104dbcfef26f24c160657f6bd7f8347841715375cd25b94",
       "urls": [
-        "https://albatrossvpn.online/download/Albatross-1.1.0-android.apk",
-        "https://accounts.albatrossvpn.online/dl/v1.1.0/Albatross-1.1.0-android.apk",
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.1.0/Albatross-1.1.0-android.apk"
-      ]
-    },
-    "android-armeabi-v7a": {
-      "sha256": "349ae90e8c85450903862220b2523aef432cebb6da4fb59f01799e4287b55c55",
-      "urls": [
-        "https://albatrossvpn.online/download/Albatross-1.1.0-android.apk",
-        "https://accounts.albatrossvpn.online/dl/v1.1.0/Albatross-1.1.0-android.apk",
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.1.0/Albatross-1.1.0-android.apk"
+        "https://albatrossvpn.online/download/Albatross-1.2.1-android.apk",
+        "https://accounts.albatrossvpn.online/dl/v1.2.1/Albatross-1.2.1-android.apk",
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.2.1/Albatross-1.2.1-android.apk"
       ]
     },
     "windows": {
-      "sha256": "0c53521ae3912f99d4d3fcaf9b1c0b4a6144219c2a8f4a45e655c72fdae4eaf1",
+      "sha256": "6f2d382a6bf52555db27e78dbffb110b1f97890ebbe6c85b109157033f778818",
       "urls": [
-        "https://albatrossvpn.online/download/Albatross-Setup-1.1.0.exe",
-        "https://accounts.albatrossvpn.online/dl/v1.1.0/Albatross-Setup-1.1.0.exe",
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.1.0/Albatross-Setup-1.1.0.exe"
+        "https://albatrossvpn.online/download/Albatross-Setup-1.2.1.exe",
+        "https://accounts.albatrossvpn.online/dl/v1.2.1/Albatross-Setup-1.2.1.exe",
+        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.2.1/Albatross-Setup-1.2.1.exe"
       ]
     }
   },
-  "latest_version": "1.1.0",
-  "message": "Albatross 1.1.0 is required and this version no longer connects. If the app does not update by itself: 1) Uninstall Albatross. 2) Download the new version with Get the update, or open https://albatrossvpn.online/download/Albatross-1.1.0-android.apk in your browser (Windows: Albatross-Setup-1.1.0.exe from https://albatrossvpn.online/#download). 3) Install it and sign in with the username and password you were given. Later updates install from inside the app.",
-  "min_version": "1.1.0",
-  "require": "1.1.0",
-  "sig": "ZwGTbWF0dVPxe6XkXKPd56d04ApwuJ0sZS5JVVlnGsEGaDyaSbQbxbBrbZ0zIpR3695KoZ0LqHUIgkWzBIPaBQ==",
-  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiMzQ5YWU5MGU4Yzg1NDUwOTAzODYyMjIwYjI1MjNhZWY0MzJjZWJiNmRhNGZiNTlmMDE3OTllNDI4N2I1NWM1NSIsInVybHMiOlsiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy0xLjEuMC1hbmRyb2lkLmFwayIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4xLjAvQWxiYXRyb3NzLTEuMS4wLWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9BbGJhdHJvc3MvcmVsZWFzZXMvZG93bmxvYWQvdjEuMS4wL0FsYmF0cm9zcy0xLjEuMC1hbmRyb2lkLmFwayJdfSwiYW5kcm9pZC1hcm1lYWJpLXY3YSI6eyJzaGEyNTYiOiIzNDlhZTkwZThjODU0NTA5MDM4NjIyMjBiMjUyM2FlZjQzMmNlYmI2ZGE0ZmI1OWYwMTc5OWU0Mjg3YjU1YzU1IiwidXJscyI6WyJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvZG93bmxvYWQvQWxiYXRyb3NzLTEuMS4wLWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjEuMC9BbGJhdHJvc3MtMS4xLjAtYW5kcm9pZC5hcGsiLCJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL0FsYmF0cm9zcy9yZWxlYXNlcy9kb3dubG9hZC92MS4xLjAvQWxiYXRyb3NzLTEuMS4wLWFuZHJvaWQuYXBrIl19LCJ3aW5kb3dzIjp7InNoYTI1NiI6IjBjNTM1MjFhZTM5MTJmOTlkNGQzZmNhZjliMWMwYjRhNjE0NDIxOWMyYThmNGE0NWU2NTVjNzJmZGFlNGVhZjEiLCJ1cmxzIjpbImh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS9kb3dubG9hZC9BbGJhdHJvc3MtU2V0dXAtMS4xLjAuZXhlIiwiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjEuMC9BbGJhdHJvc3MtU2V0dXAtMS4xLjAuZXhlIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9BbGJhdHJvc3MvcmVsZWFzZXMvZG93bmxvYWQvdjEuMS4wL0FsYmF0cm9zcy1TZXR1cC0xLjEuMC5leGUiXX19LCJsYXRlc3RfdmVyc2lvbiI6IjEuMS4wIiwibWVzc2FnZSI6IkFsYmF0cm9zcyAxLjEuMCBpcyByZXF1aXJlZCBhbmQgdGhpcyB2ZXJzaW9uIG5vIGxvbmdlciBjb25uZWN0cy4gSWYgdGhlIGFwcCBkb2VzIG5vdCB1cGRhdGUgYnkgaXRzZWxmOiAxKSBVbmluc3RhbGwgQWxiYXRyb3NzLiAyKSBEb3dubG9hZCB0aGUgbmV3IHZlcnNpb24gd2l0aCBHZXQgdGhlIHVwZGF0ZSwgb3Igb3BlbiBodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvZG93bmxvYWQvQWxiYXRyb3NzLTEuMS4wLWFuZHJvaWQuYXBrIGluIHlvdXIgYnJvd3NlciAoV2luZG93czogQWxiYXRyb3NzLVNldHVwLTEuMS4wLmV4ZSBmcm9tIGh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS8jZG93bmxvYWQpLiAzKSBJbnN0YWxsIGl0IGFuZCBzaWduIGluIHdpdGggdGhlIHVzZXJuYW1lIGFuZCBwYXNzd29yZCB5b3Ugd2VyZSBnaXZlbi4gTGF0ZXIgdXBkYXRlcyBpbnN0YWxsIGZyb20gaW5zaWRlIHRoZSBhcHAuIiwibWluX3ZlcnNpb24iOiIxLjEuMCIsInJlcXVpcmUiOiIxLjEuMCJ9"
+  "latest_version": "1.2.1",
+  "message": "Server problems are fixed. Albatross 1.2.1 picks servers by a real speed test, not just ping, and drops servers that are slow or carry no data. You can now also buy and recharge data from the app. Please update.",
+  "min_version": "1.2.1",
+  "require": "1.2.1",
+  "sig": "QItVMi93Z8JviCNPCgVzcsXcqsTLA+GxqsWTIXxa5bMmrhQbQuPcmgLVDNf0cdsfELpEdA4FtsAazsBqG5GxBA==",
+  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiMDg4NTViMTM0NTM4NDlkMGExMDRkYmNmZWYyNmYyNGMxNjA2NTdmNmJkN2Y4MzQ3ODQxNzE1Mzc1Y2QyNWI5NCIsInVybHMiOlsiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy0xLjIuMS1hbmRyb2lkLmFwayIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4yLjEvQWxiYXRyb3NzLTEuMi4xLWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9BbGJhdHJvc3MvcmVsZWFzZXMvZG93bmxvYWQvdjEuMi4xL0FsYmF0cm9zcy0xLjIuMS1hbmRyb2lkLmFwayJdfSwid2luZG93cyI6eyJzaGEyNTYiOiI2ZjJkMzgyYTZiZjUyNTU1ZGIyN2U3OGRiZmZiMTEwYjFmOTc4OTBlYmJlNmM4NWIxMDkxNTcwMzNmNzc4ODE4IiwidXJscyI6WyJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvZG93bmxvYWQvQWxiYXRyb3NzLVNldHVwLTEuMi4xLmV4ZSIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4yLjEvQWxiYXRyb3NzLVNldHVwLTEuMi4xLmV4ZSIsImh0dHBzOi8vZ2l0aHViLmNvbS9BbGJhdHJvc3N2cG4vQWxiYXRyb3NzL3JlbGVhc2VzL2Rvd25sb2FkL3YxLjIuMS9BbGJhdHJvc3MtU2V0dXAtMS4yLjEuZXhlIl19fSwibGF0ZXN0X3ZlcnNpb24iOiIxLjIuMSIsIm1lc3NhZ2UiOiJTZXJ2ZXIgcHJvYmxlbXMgYXJlIGZpeGVkLiBBbGJhdHJvc3MgMS4yLjEgcGlja3Mgc2VydmVycyBieSBhIHJlYWwgc3BlZWQgdGVzdCwgbm90IGp1c3QgcGluZywgYW5kIGRyb3BzIHNlcnZlcnMgdGhhdCBhcmUgc2xvdyBvciBjYXJyeSBubyBkYXRhLiBZb3UgY2FuIG5vdyBhbHNvIGJ1eSBhbmQgcmVjaGFyZ2UgZGF0YSBmcm9tIHRoZSBhcHAuIFBsZWFzZSB1cGRhdGUuIiwibWluX3ZlcnNpb24iOiIxLjIuMSIsInJlcXVpcmUiOiIxLjIuMSJ9"
 }
