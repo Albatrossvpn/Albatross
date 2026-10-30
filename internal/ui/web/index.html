@@ -190,7 +190,8 @@
         </div>
         <div class="meter hidden" id="acc-data"><div class="meter-top"><span>Data</span><span id="acc-data-text"></span></div><div class="bar"><i id="acc-data-bar"></i></div></div>
         <div class="meter hidden" id="acc-time"><div class="meter-top"><span>Time</span><span id="acc-time-text"></span></div><div class="bar"><i id="acc-time-bar"></i></div></div>
-        <div class="member-foot"><span class="hint" id="acc-dates"></span><button class="link" id="logout-btn" type="button">Sign out</button></div>
+        <button class="btn vip wide hidden" id="acc-renew" type="button">Recharge</button>
+        <div class="member-foot"><span class="hint" id="acc-dates"></span><span class="foot-links"><button class="link hidden" id="acc-buy" type="button">Recharge</button><button class="link" id="logout-btn" type="button">Sign out</button></span></div>
       </div>
 
       <div class="card check-card" id="privacy-card">
@@ -275,8 +276,12 @@
       </div>
       <div class="cards-rail" id="tier-cards"></div>
       <table class="compare" id="compare"></table>
-      <p class="hint center">Plans are sold where you got your account. Your account, its data and devices carry over.</p>
       <button class="btn vip wide big hidden" type="button" id="plans-cta"></button>
+      <div class="shop hidden" id="shop">
+        <div class="shop-head"><h3>Buy data</h3><span class="shop-pay">Telegram Stars</span></div>
+        <div class="shop-list" id="shop-list"></div>
+      </div>
+      <p class="hint center" id="plans-hint">Plans are sold where you got your account. Your account, its data and devices carry over.</p>
     </section>
 
     <!-- Diagnostics: opened by tapping the version number seven times -->
@@ -389,6 +394,7 @@
       <div class="form-error" id="login-error" role="alert"></div>
       <div class="login-progress hidden" id="login-progress" aria-live="polite"><span class="spin"></span><span id="login-progress-text"></span></div>
       <button class="btn primary wide big" type="submit" id="login-btn">Sign in</button>
+      <button class="link login-buy hidden" type="button" id="login-buy">No account? Buy one in Telegram</button>
     </form>
   </div>
 

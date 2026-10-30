@@ -75,6 +75,37 @@ type Info struct {
 	Features    []string          `json:"features"`
 	Plans       map[string]string `json:"plans,omitempty"`
 	PlanDevices map[string]int    `json:"plan_devices,omitempty"`
+	// Store is what can be bought, and where (nil: nothing is on sale).
+	Store *Store `json:"store,omitempty"`
+}
+
+// Store is the data on sale in the service's Telegram bot, paid there in
+// Stars: its packages, and the limits of a plan of one's own.
+type Store struct {
+	Bot      string    `json:"bot"`
+	Days     int       `json:"days"` // how long a month of a plan lasts (0: no end)
+	Packages []Package `json:"packages"`
+	Custom   *Custom   `json:"custom,omitempty"`
+}
+
+// Package is one package: GB a month, its price in Stars, the plan it
+// brings with its devices, and the percent it saves.
+type Package struct {
+	GB      int    `json:"gb"`
+	Stars   int    `json:"stars"`
+	Plan    string `json:"plan"`
+	Devices int    `json:"devices"`
+	Save    int    `json:"save"`
+}
+
+// Custom bounds a plan the buyer builds: GB a month, how many months, and
+// the discounts ([at, percent], largest first) for size and for length.
+type Custom struct {
+	MinGB          int      `json:"min_gb"`
+	MaxGB          int      `json:"max_gb"`
+	Months         []int    `json:"months"`
+	SizeDiscounts  [][2]int `json:"size_discounts"`
+	MonthDiscounts [][2]int `json:"month_discounts"`
 }
 
 // Why returns the reason this account cannot connect now, or "" if it can.
@@ -162,6 +193,9 @@ type Client struct {
 
 	mu sync.Mutex
 	st stored
+	// shop is the store as the service shows it to anyone, for a copy
+	// nobody is signed in to (FetchStore).
+	shop *Store
 	// last is the index in URLs of the address that answered last, tried
 	// first, so an address that is blocked costs its timeout only once. It
 	// is saved with the session (stored.Base).
@@ -245,6 +279,32 @@ func (c *Client) Login(ctx context.Context, username, password string) (Info, er
 	err := c.saveLocked()
 	c.mu.Unlock()
 	return out.Account, err
+}
+
+// Store returns what is on sale: the signed-in account's store, or the
+// one FetchStore found. Nil when nothing is (or it is not known yet).
+func (c *Client) Store() *Store {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.st.Token != "" {
+		return c.st.Info.Store
+	}
+	return c.shop
+}
+
+// FetchStore asks the service what is on sale, without an account, for
+// Store to offer before anyone signs in.
+func (c *Client) FetchStore(ctx context.Context) (*Store, error) {
+	var out struct {
+		Stars *Store `json:"stars"`
+	}
+	if err := c.call(ctx, http.MethodGet, "support/info", "", nil, &out); err != nil {
+		return nil, err
+	}
+	c.mu.Lock()
+	c.shop = out.Stars
+	c.mu.Unlock()
+	return out.Stars, nil
 }
 
 // Logout forgets the session.

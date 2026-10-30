@@ -435,3 +435,41 @@ func TestDeviceHeadersAndReason(t *testing.T) {
 		t.Fatalf("plan fields lost: %+v", info)
 	}
 }
+
+// The store comes with the account, as the service shows it, and before
+// anyone signs in from the service's public information.
+func TestStore(t *testing.T) {
+	store := `{"bot":"AlbatrossHelp_bot","days":30,"packages":[{"gb":10,"stars":9,"plan":"Silver","devices":2,"save":5}],` +
+		`"custom":{"min_gb":5,"max_gb":500,"months":[1,3,6,12],"size_discounts":[[100,20],[10,5]],"month_discounts":[[12,30]]}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/support/info":
+			fmt.Fprintf(w, `{"telegram":"AlbatrossHelp_bot","stars":%s}`, store)
+		case "/api/v1/login":
+			fmt.Fprintf(w, `{"token":"t1","account":{"username":"ada","allowed":true,"store":%s}}`, store)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	c, _ := newTestClient(t, srv.URL)
+	if c.Store() != nil {
+		t.Fatal("a store before anything was asked")
+	}
+	s, err := c.FetchStore(context.Background())
+	if err != nil || s == nil || c.Store() != s || s.Bot != "AlbatrossHelp_bot" || s.Packages[0].Stars != 9 || s.Custom.MaxGB != 500 || s.Custom.SizeDiscounts[1] != [2]int{10, 5} {
+		t.Fatalf("public store: %+v, %v", s, err)
+	}
+	if _, err := c.Login(context.Background(), "ada", "pw"); err != nil {
+		t.Fatal(err)
+	}
+	if s := c.Store(); s == nil || s.Packages[0].Plan != "Silver" || s.Custom.Months[3] != 12 {
+		t.Fatalf("the account's store: %+v", s)
+	}
+	// What the service says of the account counts: nothing on sale is none.
+	store = "null"
+	if _, err := c.Login(context.Background(), "ada", "pw"); err != nil || c.Store() != nil {
+		t.Fatalf("selling stopped, still offered: %+v, %v", c.Store(), err)
+	}
+}

@@ -104,6 +104,9 @@ type Engine struct {
 	planned, planOwn, planEdge bool
 	// loginStep is what signing in is doing now, for the UI ("" when not).
 	loginStep string
+	// storeAsked is when the store was last asked for without an account
+	// (unix seconds), so the sign-in screen can offer buying one.
+	storeAsked atomic.Int64
 	// httpsOK is when a server last passed a test with a genuine
 	// certificate, which shows this device checks certificates correctly
 	// (see distrust).

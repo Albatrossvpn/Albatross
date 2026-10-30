@@ -607,3 +607,24 @@ textarea:focus { border-color: #2f5fe0; box-shadow: 0 0 0 3px rgba(47, 95, 224, 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { -webkit-animation-duration: .01s !important; animation-duration: .01s !important; -webkit-animation-iteration-count: 1 !important; animation-iteration-count: 1 !important; }
 }
+
+/* The store: the bot's packages, paid there with Telegram Stars. */
+.shop { margin-top: 18px; }
+.shop-head { display: flex; align-items: baseline; justify-content: space-between; margin: 0 2px 8px; }
+.shop-head h3 { margin: 0; font-size: 15px; }
+.shop-pay { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #8a6424; }
+.shop-list { display: flex; flex-direction: column; gap: 8px; }
+.shop-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border-radius: 16px; border: 1px solid rgba(196, 154, 72, 0.28); background: #fff; color: #0f1b3d; font: inherit; text-align: left; cursor: pointer; box-shadow: 0 10px 24px -20px rgba(15, 27, 61, 0.35); }
+.shop-item:active { transform: scale(.99); }
+.si-gb { min-width: 62px; font-family: "Manrope", sans-serif; font-size: 20px; font-weight: 800; white-space: nowrap; }
+.si-gb small { margin-left: 3px; font-size: 11px; font-weight: 700; color: #5b6684; }
+.si-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.si-mid small { font-size: 12px; color: #5b6684; }
+.si-price { display: flex; flex-direction: column; align-items: flex-end; font-size: 15px; font-weight: 800; white-space: nowrap; }
+.si-save { margin-top: 3px; padding: 1px 7px; border-radius: 9px; background: #fbf5e6; color: #8a6424; font-size: 10.5px; font-weight: 800; }
+.shop-item.own { border-color: #c49a48; background: linear-gradient(160deg, #1d2333, #05070d); color: #f1d9a0; }
+.shop-item.own .si-gb, .shop-item.own .si-price { color: #e8c46e; }
+.shop-item.own small { color: #c9b98f; }
+.foot-links { display: flex; gap: 14px; }
+#acc-renew { margin-top: 12px; }
+.login-buy { align-self: center; color: #2f5fe0; }
