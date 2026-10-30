@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Albatrossvpn/vp/internal/node"
@@ -42,6 +43,13 @@ var webQueries = []string{
 	`免费节点 v2ray 订阅`, `免费 vless 节点`, `免费 clash 订阅 每日更新`, `免费 hysteria2 节点`, `免费 trojan 节点`,
 	`free v2ray telegram channel`, `v2ray configs github.io free`, `free proxies workers.dev vless`,
 	`free ssr subscription`, `free socks5 proxy list vless`, `naive proxy free config`,
+	// site: pulls the channels, repositories and hosts where lists live
+	// straight out of every engine; readPages then reads each one.
+	`site:t.me vless vmess config`, `site:t.me اشتراک v2ray`, `site:t.me 免费 节点`, `site:t.me free config`,
+	`site:t.me hysteria2 tuic`, `site:t.me reality vless`,
+	`site:github.io vless vmess sub`, `site:github.com v2ray subscription`, `site:gist.github.com vmess vless`,
+	`"pages.dev" vless vmess sub`, `"workers.dev" vless subscription`, `"vercel.app" v2ray sub`,
+	`site:gitlab.com v2ray subscription`, `site:gitee.com v2ray 订阅`, `site:rentry.co vless vmess`,
 }
 
 // webPerRun is how many queries each engine gets per run.
@@ -228,6 +236,72 @@ func (d *discoverer) searchReddit(ctx context.Context, q string) ([]string, erro
 	return out, nil
 }
 
+// searxInstances are public SearXNG servers that answer JSON. SearXNG asks
+// many engines at once (Google, Bing, Yandex, Brave, Qwant and more) and
+// hands back one list, so one query reaches what no single engine would.
+// Each run takes the next instance, so no one of them is leaned on.
+var searxInstances = []string{
+	"https://searx.be", "https://baresearch.org", "https://search.inetol.net",
+	"https://priv.au", "https://opnxng.com", "https://search.rhscz.eu",
+	"https://searx.tiekoetter.com", "https://search.hbubli.cc",
+}
+
+var searxNext atomic.Int64
+
+// searchSearx queries a SearXNG instance for JSON results.
+func (d *discoverer) searchSearx(ctx context.Context, q string) ([]string, error) {
+	base := searxInstances[int(searxNext.Add(1))%len(searxInstances)]
+	u := base + "/search?format=json&safesearch=0&q=" + url.QueryEscape(q)
+	b, status, err := d.apiGet(ctx, u, 4<<20)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", status)
+	}
+	var res struct {
+		Results []struct {
+			URL string `json:"url"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(b, &res); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, r := range res.Results {
+		if strings.HasPrefix(r.URL, "http") {
+			out = append(out, r.URL)
+		}
+	}
+	return out, nil
+}
+
+var mojeekResultRe = regexp.MustCompile(`<a[^>]*class="ob"[^>]*href="(https?://[^"]+)"`)
+
+// searchMojeek reads Mojeek, an engine with its own index (not Google's or
+// Bing's), so it surfaces small sites the others miss.
+func (d *discoverer) searchMojeek(ctx context.Context, q string) ([]string, error) {
+	b, status, err := d.webGet(ctx, "https://www.mojeek.com/search?q="+url.QueryEscape(q), 2<<20)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d", status)
+	}
+	return parseMojeek(string(b)), nil
+}
+
+func parseMojeek(page string) []string {
+	var out []string
+	for _, m := range mojeekResultRe.FindAllStringSubmatch(page, -1) {
+		h := html.UnescapeString(m[1])
+		if strings.HasPrefix(h, "http") && !strings.Contains(h, "mojeek.com") {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
 // gitlabFiles searches GitLab's projects for a word and returns the raw
 // addresses of their list-like files.
 func (d *discoverer) gitlabFiles(ctx context.Context, q string) ([]string, error) {
@@ -343,6 +417,7 @@ func (d *discoverer) webSearch(ctx context.Context, hour int) (pages, files []st
 		fn   func(context.Context, string) ([]string, error)
 	}{
 		{"duckduckgo", d.searchDDG}, {"bing", d.searchBing}, {"marginalia", d.searchMarginalia}, {"reddit", d.searchReddit},
+		{"searx", d.searchSearx}, {"mojeek", d.searchMojeek},
 	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
