@@ -136,3 +136,27 @@ test("the administrator sign-in is held to a total across all addresses", async 
   assert.equal(ok.status, 200);
   assert.ok((await ok.json()).token);
 });
+
+test("nothing is served over plain HTTP", async () => {
+  const bucket = { list: async () => ({ objects: [] }), head: async () => null, get: async () => null };
+  const viaEdge = { headers: { "CF-Ray": "8d2f0c3a1b2c3d4e-DXB" } };
+  for (const [worker, host, path, env] of [
+    [accounts, "accounts.albatrossvpn.online", "/account", accountsEnv()],
+    [accounts, "accounts.albatrossvpn.online", "/api/v1/public", accountsEnv()],
+    [website, "albatrossvpn.online", "/download/Albatross-1.1.0-android.apk", { FILES: bucket, ASSETS: { fetch: async () => new Response("asset") } }],
+  ]) {
+    const res = await worker.fetch(new Request(`http://${host}${path}`, viaEdge), env, { waitUntil() {} });
+    assert.equal(res.status, 301, path);
+    assert.equal(res.headers.get("Location"), `https://${host}${path}`);
+    assert.deepEqual(missing(res), [], path);
+  }
+  // A POST is sent on with its method kept (308), not turned into a GET.
+  const post = await accounts.fetch(new Request("http://accounts.albatrossvpn.online/api/v1/login", { method: "POST", body: "{}", ...viaEdge }), accountsEnv(), { waitUntil() {} });
+  assert.equal(post.status, 308);
+  // HTTPS through the edge is served; so is a request that did not come through
+  // the edge (`wrangler dev` and the tests show the production host over HTTP).
+  const secure = await accounts.fetch(new Request("https://accounts.albatrossvpn.online/api/v1/public", viaEdge), accountsEnv(), { waitUntil() {} });
+  assert.equal(secure.status, 200);
+  const local = await accounts.fetch(new Request("http://accounts.albatrossvpn.online/api/v1/public"), accountsEnv(), { waitUntil() {} });
+  assert.equal(local.status, 200);
+});

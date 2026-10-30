@@ -45,3 +45,21 @@ export function securityTxt(request, contact) {
   ].join("\n");
   return new Response(text, { headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=3600" } });
 }
+
+/**
+ * A redirect to the same address over HTTPS for a request that came over
+ * plain HTTP through Cloudflare's edge (it adds CF-Ray; `wrangler dev` and the
+ * tests, which present the production host over HTTP, do not), else null. A
+ * page, an API call or an installer fetched over HTTP can be read and changed
+ * on the way (HSTS protects only a browser that has already been here over
+ * HTTPS). The Workers answer first for the pages that matter most (the
+ * sign-in and account pages, the API, the downloads), so none is served in the
+ * clear; Cloudflare's "Always Use HTTPS" covers the rest.
+ */
+export function httpsRedirect(request) {
+  const url = new URL(request.url);
+  if (url.protocol !== "http:" || !request.headers.has("CF-Ray")) return null;
+  url.protocol = "https:";
+  const safe = request.method === "GET" || request.method === "HEAD";
+  return new Response(null, { status: safe ? 301 : 308, headers: { Location: url.toString(), "Cache-Control": "no-store" } });
+}

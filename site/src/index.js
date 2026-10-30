@@ -6,7 +6,7 @@
 // never reach GitHub themselves. /list/<path> serves the app's own files
 // from the same storage, one more address for the apps.
 import { FILE_NAME, serveFile, serveList } from "../../backend/src/files.js";
-import { armor, securityTxt } from "../../backend/src/headers.js";
+import { armor, httpsRedirect, securityTxt } from "../../backend/src/headers.js";
 
 const MANIFEST = [
   "https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json",
@@ -17,7 +17,11 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     // What the Worker answers itself carries the security headers; the static
-    // pages carry theirs from public/_headers.
+    // pages carry theirs from public/_headers. The release files in
+    // particular are never served over plain HTTP, where they could be
+    // swapped on the way.
+    const insecure = httpsRedirect(request);
+    if (insecure) return armor(insecure);
     if (url.pathname === "/.well-known/security.txt") return armor(securityTxt(request, "support@albatrossvpn.online"));
     if (url.pathname === "/update.json") return armor((await serveList(request, env.FILES, "main/update.json")) || (await manifest()));
     if (url.pathname.startsWith("/list/")) {

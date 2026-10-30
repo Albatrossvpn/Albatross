@@ -5,7 +5,7 @@ import {
   versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, tierForQuota, tierOf, verify, verifyPassword,
 } from "./lib.js";
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
-import { armor, securityTxt } from "./headers.js";
+import { armor, httpsRedirect, securityTxt } from "./headers.js";
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
 import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
@@ -73,7 +73,10 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     // What the service answers itself carries the security headers; the
-    // static pages carry theirs from public/_headers.
+    // static pages carry theirs from public/_headers. Nothing is served over
+    // plain HTTP (the pages that matter reach this code first, wrangler.toml).
+    const insecure = httpsRedirect(request);
+    if (insecure) return armor(insecure);
     if (url.pathname === "/.well-known/security.txt") return armor(securityTxt(request, contactOf(env)));
     if (url.pathname.startsWith("/list/")) return armor(await mirror(request, url, env));
     if (url.pathname.startsWith("/dl/")) return armor(await download(request, url, env));

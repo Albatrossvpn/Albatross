@@ -1256,13 +1256,17 @@ func (e *Engine) statsLoop() {
 		if !watched && n%12 != 0 {
 			continue
 		}
-		total, untested, dead, okN, live, worked := e.pool.StatsByProto()
+		total, untested, dead, okN, live, worked, failed := e.pool.StatsByProto()
 		e.mu.Lock()
 		e.poolStats = [4]int{total, untested, dead, okN}
 		e.protoStats = map[string][2]int{}
+		e.protoFailed = map[string]int{}
 		for name, code := range protoCodes {
 			if live[code] > 0 {
 				e.protoStats[name] = [2]int{live[code], worked[code]}
+			}
+			if failed[code] > 0 {
+				e.protoFailed[name] = failed[code]
 			}
 		}
 		cut := time.Now().Add(-time.Minute)

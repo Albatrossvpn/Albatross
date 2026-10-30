@@ -149,6 +149,7 @@ type Engine struct {
 	attempt     context.CancelFunc // cancels the attempt in progress; under mu
 	poolStats   [4]int             // total, untested, dead, ok; refreshed by statsLoop
 	protoStats  map[string][2]int  // by protocol: servers not known dead, and those that worked
+	protoFailed map[string]int     // by protocol: servers tried that failed
 	scan        scanState
 	logs        []LogLine
 	localDNS    string

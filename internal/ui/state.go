@@ -126,6 +126,10 @@ type protocol struct {
 	engine.ProtocolChoice
 	Servers int `json:"servers,omitempty"`
 	Working int `json:"working,omitempty"`
+	// Failed counts the servers tried that failed; Missing says this device
+	// cannot run the protocol at all.
+	Failed  int  `json:"failed,omitempty"`
+	Missing bool `json:"missing,omitempty"`
 }
 
 func publicSettingsOf(s engine.Settings) publicSettings {
@@ -144,9 +148,13 @@ func publicState(s engine.Snapshot) state {
 		Share: s.Share, SharePAC: s.SharePAC,
 		Notice: s.Notice, HelpAvailable: s.HelpAvailable, Helping: s.Helping, CrowdAvailable: s.CrowdAvailable,
 	}
+	missing := map[string]bool{}
+	for _, v := range s.ProtocolMissing {
+		missing[v] = true
+	}
 	for _, p := range engine.ProtocolChoices() {
 		c := s.ProtocolServers[p.Value]
-		out.Protocols = append(out.Protocols, protocol{p, c[0], c[1]})
+		out.Protocols = append(out.Protocols, protocol{p, c[0], c[1], s.ProtocolFailed[p.Value], missing[p.Value]})
 	}
 	for _, c := range s.Countries {
 		out.Servers += c.Servers

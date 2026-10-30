@@ -29,6 +29,10 @@ var sidecars = map[string]string{
 // Sidecar names the helper program a node runs on, or "" for cores.
 func (n *Node) Sidecar() string { return sidecars[n.Proto] }
 
+// SidecarOf names the helper program a protocol runs on, or "" for the
+// protocols the cores run themselves.
+func SidecarOf(proto string) string { return sidecars[proto] }
+
 // AmneziaWG holds the obfuscation parameters of an AmneziaWG peer.
 type AmneziaWG struct {
 	Jc   int    `json:"jc"`   // junk packets before each handshake

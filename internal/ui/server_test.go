@@ -246,3 +246,29 @@ func TestConnLabel(t *testing.T) {
 		}
 	}
 }
+
+// A protocol with no servers says why: it has none, it has only ones that
+// failed, or this device cannot run it at all.
+func TestProtocolNotes(t *testing.T) {
+	st := publicState(engine.Snapshot{
+		ProtocolServers: map[string][2]int{"vless": {40, 9}},
+		ProtocolFailed:  map[string]int{"brook": 3},
+		ProtocolMissing: []string{"snell"},
+	})
+	got := map[string]protocol{}
+	for _, p := range st.Protocols {
+		got[p.Value] = p
+	}
+	if p := got["vless"]; p.Servers != 40 || p.Working != 9 || p.Failed != 0 || p.Missing {
+		t.Errorf("vless: %+v", p)
+	}
+	if p := got["brook"]; p.Servers != 0 || p.Failed != 3 || p.Missing {
+		t.Errorf("brook has only failed servers: %+v", p)
+	}
+	if p := got["snell"]; !p.Missing {
+		t.Errorf("snell cannot run here: %+v", p)
+	}
+	if p := got["wstunnel"]; p.Servers != 0 || p.Failed != 0 || p.Missing {
+		t.Errorf("wstunnel simply has none: %+v", p)
+	}
+}

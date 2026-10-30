@@ -87,3 +87,37 @@ func TestSearchMessage(t *testing.T) {
 		t.Errorf("tor: %q", got)
 	}
 }
+
+// A protocol is missing on a device when the program it runs on is not
+// installed there; the built-in methods count by their own programs.
+func TestMissingProtocols(t *testing.T) {
+	e := &Engine{}
+	none := map[string]bool{}
+	for _, v := range e.missingProtocols() {
+		none[v] = true
+	}
+	for _, v := range []string{"warp", "tor", "naive", "juicity", "mieru", "brook", "wstunnel", "amneziawg", "ssr", "snell"} {
+		if !none[v] {
+			t.Errorf("%s needs a program a bare engine does not have", v)
+		}
+	}
+	for _, v := range []string{"", "vless", "vmess", "trojan", "shadowsocks", "hysteria2", "hysteria", "tuic", "anytls", "wireguard", "openvpn", "ssh", "socks", "http"} {
+		if none[v] {
+			t.Errorf("%s runs on sing-box or Xray, never a helper", v)
+		}
+	}
+	e.bin.Sidecars = map[string]string{"brook": "/x/brook", "mihomo": "/x/mihomo"}
+	e.bin.Tor = "/x/tor"
+	none = map[string]bool{}
+	for _, v := range e.missingProtocols() {
+		none[v] = true
+	}
+	for _, v := range []string{"brook", "snell", "ssr", "tor"} {
+		if none[v] {
+			t.Errorf("%s has its program here", v)
+		}
+	}
+	if !none["wstunnel"] || !none["warp"] {
+		t.Errorf("wstunnel and warp are still missing: %v", none)
+	}
+}

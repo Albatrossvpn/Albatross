@@ -1274,8 +1274,9 @@ var privacyNotes = [
 // What the protocol sheet says under a protocol: how many servers it has.
 function protocolNote(p) {
   if (p.value === "") return "Picks the best one for you";
+  if (p.missing) return "Not included on this device";
   if (p.value === "warp" || p.value === "tor") return "Built in";
-  if (!p.servers) return "No servers yet";
+  if (!p.servers) return p.failed ? "None worked yet (" + num(p.failed) + " tried)" : "No servers yet";
   return num(p.servers) + (p.servers === 1 ? " server" : " servers") + (p.working ? " · " + num(p.working) + " worked" : "");
 }
 
