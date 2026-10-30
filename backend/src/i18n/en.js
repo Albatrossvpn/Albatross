@@ -157,7 +157,7 @@ export default {
     too_many_lookups: "That is a lot of usernames for now. Please wait a little.",
     checkout_topup: "Added to the account <code>{account}</code>: what is left of its data stays, and the days start again.",
     checkout_new: "A new account, made as soon as you pay; its username and password come in this chat.",
-    checkout: "🧾 <b>Your order</b>\n\n<b>{gb} GB</b> - ⭐{stars}\n{plan}, {valid}\n{what}\n\nBy paying you agree to the terms (tap Terms to read them). Telegram takes the payment in Stars; I never see your payment details.",
+    checkout: "🧾 <b>Your order</b>\n\n<b>{gb} GB</b> - ⭐{stars}\n{plan}, {valid}\n{what}\n\nBy paying you agree to the terms (tap Terms to read them). Telegram takes the payment in Stars; I never see your payment details.\n\n⭐ No Stars yet? When you tap Pay, Telegram offers to buy them; a friend can also gift you Stars.",
     btn_pay: "✅ I agree - pay ⭐{stars}",
     terms: "📄 <b>Terms of buying data</b>\n\n- You buy data for the Albatross VPN service, paid in Telegram Stars. Telegram takes the payment; we never see your payment details.\n- A package gives the data shown, {valid_for}. Data you have not used when the package ends is gone. Adding a package to an account adds it to what is left and starts the days again.\n- A new account's username and password are sent in this chat right after the payment. Keep them private; if you lose the password, ask our team.\n- If we cannot deliver what you paid for, the payment is refunded automatically. Once data has been used, a payment is not refunded.\n- Telegram and Telegram support cannot help with purchases in this bot. For any problem with a payment, send /paysupport.",
     terms_valid: "valid for {days} days from the payment",
