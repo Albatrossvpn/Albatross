@@ -305,6 +305,7 @@ function showStars(s) {
   $("#t-stars-price").value = s.stars_price_toman;
   $("#t-stars-usd").value = s.stars_usd_toman;
   $("#t-stars-worth").value = s.stars_usd_per_1000;
+  $("#t-stars-buy").value = s.stars_buy_usd_per_1000;
   $("#t-stars-days").value = s.stars_valid_days;
   $("#t-stars-size").value = s.stars_size_discounts ?? "";
   $("#t-stars-months").value = s.stars_month_discounts ?? "";
@@ -344,6 +345,7 @@ $("#settings-form").addEventListener("submit", async (e) => {
     stars_price_toman: String(Math.round(num($("#t-stars-price").value))),
     stars_usd_toman: String(Math.round(num($("#t-stars-usd").value))),
     stars_usd_per_1000: String(Math.round(num($("#t-stars-worth").value))),
+    stars_buy_usd_per_1000: String(Math.round(num($("#t-stars-buy").value))),
     stars_valid_days: String(Math.round(num($("#t-stars-days").value))),
     stars_size_discounts: $("#t-stars-size").value.trim(),
     stars_month_discounts: $("#t-stars-months").value.trim(),

@@ -7,6 +7,7 @@ import test, { afterEach } from "node:test";
 import { sweep } from "../src/telegram.js";
 import { verifyPassword } from "../src/lib.js";
 import * as sales from "../src/sales.js";
+import { languagePicker } from "../src/telegram-content.js";
 import { SARA, TEAM, datas, labels, press, real, telegram, text, world } from "./tg-helpers.mjs";
 
 afterEach(() => (globalThis.fetch = real));
@@ -107,12 +108,13 @@ test("with selling on, the packages cost what 10,000 toman a GB at 270,000 toman
   await w.send(press(SARA, "sn:10"));
   const pay = w.api.of("editMessageText").pop().reply_markup.inline_keyboard[0][0];
   assert.ok(pay.callback_data.startsWith("sp:") && pay.style === "primary", JSON.stringify(pay));
-  assert.ok(store.text.includes("<b>10 GB</b> - ⭐29 - Silver, devices: 2") && store.text.includes("<b>100 GB</b> - ⭐285 - Gold, devices: 4") && store.text.includes("<b>5 GB</b> - ⭐15 - Bronze, devices: 1"));
+  // Each price also in the buyer's money: what the Stars cost a buyer, $0.02 each.
+  assert.ok(store.text.includes("<b>10 GB</b> - ⭐29 (≈ $0.58) - Silver, devices: 2") && store.text.includes("<b>100 GB</b> - ⭐285 (≈ $5.70) - Gold, devices: 4") && store.text.includes("<b>5 GB</b> - ⭐15 (≈ $0.30) - Bronze, devices: 1"), store.text);
   assert.ok(store.text.includes("valid 30 days"));
   // The plans screen says what each plan has and how it is earned, and sells.
   await w.send(press(SARA, "p"));
   const plans = w.api.of("editMessageText").pop();
-  for (const line of ["Bronze</b> - under 10 GB - 1 device", "Silver</b> - 10 GB and more - 2 devices", "Gold</b> - 100 GB and more - 4 devices", "VIP</b> - no data limit - unlimited devices", "VIP is given by our team", "• 25 GB - ⭐72 - Silver"]) assert.ok(plans.text.includes(line), line);
+  for (const line of ["Bronze</b> - under 10 GB - 1 device", "Silver</b> - 10 GB and more - 2 devices", "Gold</b> - 100 GB and more - 4 devices", "VIP</b> - no data limit - unlimited devices", "VIP is given by our team", "• 25 GB - ⭐72 (≈ $1.44) - Silver"]) assert.ok(plans.text.includes(line), line);
   assert.ok(labels(plans.reply_markup).includes("⭐ Buy data"));
   // The menu of commands has what Telegram asks of a bot that sells.
   await sweep(w.env, w.kit);
@@ -595,4 +597,43 @@ test("an account bought here that runs low is reminded once, with a recharge one
   await w.env.DB.prepare("UPDATE users SET used_bytes = quota_bytes * 9 / 10, period_start = period_start + 1 WHERE username = ?1").bind(username).run();
   await sweep(w.env, w.kit);
   assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === SARA && c.text.includes("running low")).length, 2);
+});
+
+test("a link from the app recharges its account without asking the username, through the choice of a language too", async () => {
+  const w = await shop();
+  await pay(w, SARA, await order(w, SARA, { gb: 10 }));
+  const { username } = credentials(w, SARA);
+  const b32 = (s) => { const abc = "abcdefghijklmnopqrstuvwxyz234567"; let bits = 0, v = 0, out = ""; for (const b of new TextEncoder().encode(s)) { v = (v << 8) | b; bits += 8; while (bits >= 5) { out += abc[(v >>> (bits - 5)) & 31]; bits -= 5; } } if (bits > 0) out += abc[(v << (5 - bits)) & 31]; return out; };
+  const link = `rn${b32(username)}`;
+  // The language picker carries the link through.
+  assert.ok(datas(languagePicker(link).markup).includes(`l:fa:${link}`));
+  await w.send(text(SARA + 7, `/start ${link}`));
+  await w.send(press(SARA + 7, "b:10:1"));
+  await w.send(press(SARA + 7, "sr:10:1"));
+  const id = lastOrder(w);
+  const row = await w.row("SELECT kind, target, gb FROM stars_orders WHERE id = ?1", id);
+  assert.deepEqual({ ...row }, { kind: "topup", target: username, gb: 10 });
+  // A link that names no account that can be recharged asks for the username as usual.
+  await w.send(text(SARA + 8, "/start rnmfrgg"));
+  await w.send(press(SARA + 8, "sr:10:1"));
+  assert.equal((await w.row("SELECT mode FROM tg_users WHERE chat_id = ?1", SARA + 8)).mode, "topup");
+});
+
+test("a price is shown in the money of the buyer's language: the toman at the owner's rate, the rest at the day's rates once known", async () => {
+  const { moneyIn } = await import("../src/telegram-content.js");
+  const m = { starUsd: 0.02, toman: 270000, rates: { AFN: 70, TJS: 10.9, EUR: 0.92, RUB: 92 } };
+  assert.equal(moneyIn("en", 50, m), "≈ $1");
+  assert.equal(moneyIn("fa", 50, m), "≈ 270,000 تومان · 70 افغانی · 10.9 سامانی");
+  assert.equal(moneyIn("fr", 50, m), "≈ €0.92", "the dirham has no rate yet");
+  assert.equal(moneyIn("ru", 5, m), "≈ 9.20 ₽");
+  assert.equal(moneyIn("vi", 50, m), "", "no rate, no line");
+  // The rates are fetched hourly and kept; a failed fetch keeps the last ones.
+  const fx = await import("../src/fx.js");
+  const w = await shop();
+  assert.equal(await fx.refreshRates(w.env, async () => new Response(JSON.stringify({ result: "success", rates: { USD: 1, EUR: 0.9, IRR: 42000, AFN: 71 } }))), true);
+  assert.deepEqual(await fx.ratesOf(w.env), { EUR: 0.9, AFN: 71 }, "the rial is never taken from it");
+  assert.equal(await fx.refreshRates(w.env, async () => new Response("down", { status: 503 })), false);
+  assert.deepEqual(await fx.ratesOf(w.env), { EUR: 0.9, AFN: 71 });
+  await w.send(text(SARA, "/buy"));
+  assert.ok(w.lastText(SARA).text.includes("(≈ $"), w.lastText(SARA).text);
 });

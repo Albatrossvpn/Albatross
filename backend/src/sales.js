@@ -31,6 +31,7 @@ export const SALES_DEFAULTS = {
   stars_price_toman: "10000", // what 1 GB costs, in toman
   stars_usd_toman: "270000", // what a dollar costs, in toman
   stars_usd_per_1000: "13", // what 1,000 Stars are worth to the seller, in dollars (Telegram pays out about 13)
+  stars_buy_usd_per_1000: "20", // what 1,000 Stars cost a buyer, in dollars: the money a price is shown in
   stars_valid_days: "30", // days a month of a plan lasts; 0: it never ends
   // Less per GB for more data a month, and for more months: "GB:percent" and
   // "months:percent", the largest step reached counts.
@@ -42,6 +43,7 @@ export const SALES_RANGE = {
   stars_price_toman: [1, 10_000_000],
   stars_usd_toman: [1000, 100_000_000],
   stars_usd_per_1000: [1, 100],
+  stars_buy_usd_per_1000: [1, 100],
   stars_valid_days: [0, 3650],
 };
 
@@ -66,6 +68,7 @@ export async function config(env) {
     priceToman: Number(s.stars_price_toman),
     usdToman: Number(s.stars_usd_toman),
     starsPer1000: Number(s.stars_usd_per_1000),
+    buyPer1000: Number(s.stars_buy_usd_per_1000),
     days: Number(s.stars_valid_days),
     sizeSteps: parseSteps(s.stars_size_discounts) || parseSteps(SALES_DEFAULTS.stars_size_discounts),
     monthSteps: parseSteps(s.stars_month_discounts) || parseSteps(SALES_DEFAULTS.stars_month_discounts),

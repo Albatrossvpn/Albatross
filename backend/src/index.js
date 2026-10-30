@@ -9,6 +9,7 @@ import { armor, httpsRedirect, securityTxt } from "./headers.js";
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
 import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
+import { refreshRates } from "./fx.js";
 import { MAX_GB, MIN_GB, MONTHS, SALES_DEFAULTS, SALES_RANGE, catalog as salesCatalog, config as salesConfig, parseSteps } from "./sales.js";
 import { SWEEP_CRON, check as telegramCheck, connect as telegramConnect, disconnect as telegramDisconnect, heal as telegramHeal, repair as telegramRepair, sweep as telegramSweep, webhook as telegramWebhook } from "./telegram.js";
 
@@ -68,7 +69,7 @@ export default {
   // Hourly: users' reports about servers, summed for the collector, and a look at the bot's webhook.
   async scheduled(event, env, ctx) {
     if (event.cron === SWEEP_CRON) ctx.waitUntil(telegramSweep(env, supportKit(env)));
-    else ctx.waitUntil(Promise.allSettled([publishCrowdServers(env), telegramHeal(env)]));
+    else ctx.waitUntil(Promise.allSettled([publishCrowdServers(env), telegramHeal(env), refreshRates(env)]));
   },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -435,6 +436,14 @@ const upsertDevice = (env, user, d, t, until) => env.DB.prepare(
      active_until = CASE WHEN ?5 < 0 THEN active_until ELSE ?5 END`,
 ).bind(user.id, d.id, d.name, t, until).run();
 
+/** The store, for the apps' own "Buy" (starsInfo): where and what an account can buy; null while nothing is on sale. */
+async function storeOf(env) {
+  return starsInfo(await settings(env), await salesConfig(env));
+}
+
+/** An account as an app is told of it: with the store, so the app can offer its packages. */
+const forApp = async (env, a) => ({ ...a, store: await storeOf(env) });
+
 /**
  * The account as a caller sees it. A device is told whether a slot is
  * free for it (and remembered, holding nothing); the website is told how
@@ -503,7 +512,7 @@ async function login(request, env) {
   }
   // The username's count stays, so the other addresses guessing at it stay slowed.
   await forget(env, k.from);
-  return json({ token: await session(env, user), account: await viewOf(env, user, deviceOf(request), now()) });
+  return json({ token: await session(env, user), account: await forApp(env, await viewOf(env, user, deviceOf(request), now())) });
 }
 
 async function verifyTurnstile(request, env, token) {
@@ -700,7 +709,7 @@ async function usage(request, env) {
   // Sessions are renewed while they are in use.
   const renewed = payload.exp - t < SESSION / 2 ? await session(env, fresh) : token;
   const d = deviceOf(request);
-  return json({ token: renewed, account: d ? await claimSlot(env, fresh, d, t) : accountOf(fresh, t, { plans: await plansOf(env) }) });
+  return json({ token: renewed, account: await forApp(env, d ? await claimSlot(env, fresh, d, t) : accountOf(fresh, t, { plans: await plansOf(env) })) });
 }
 
 async function changePassword(request, env) {
@@ -719,7 +728,7 @@ async function changePassword(request, env) {
     .bind(await hashPassword(new_password), user.id).run();
   await forgetDevices(env, user.id);
   const fresh = await userById(env, user.id);
-  return json({ token: await session(env, fresh), account: await viewOf(env, fresh, deviceOf(request), now()) });
+  return json({ token: await session(env, fresh), account: await forApp(env, await viewOf(env, fresh, deviceOf(request), now())) });
 }
 
 // ---------- Administrator ----------
@@ -1000,7 +1009,7 @@ async function adminSaveSettings(request, env) {
       v = JSON.stringify(planFeatures(c));
     } else if (k.startsWith("download_")) {
       if (v && !/^https:\/\//.test(v)) throw new HttpError(400, "Download links must start with https://");
-    } else if (k === "support_mail_status" || k === "telegram_bot_username" || k === "telegram_owner_chat") {
+    } else if (k === "support_mail_status" || k === "telegram_bot_username" || k === "telegram_owner_chat" || k === "fx_rates" || k === "fx_at") {
       continue;
     } else if (k === "support_notify_to") {
       if (v && !/^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(v)) throw new HttpError(400, "That is not an email address.");

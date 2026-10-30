@@ -22,6 +22,39 @@ const link = (text, url) => ({ text, url });
 // rest keep the app's own style.
 const BUY_STYLE = "primary";
 const buy = (b) => ({ ...b, style: BUY_STYLE });
+/**
+ * The money a language's buyers think in: a price in Stars is shown in it
+ * too, as what those Stars cost a buyer (sales.js buyPer1000). "IRT" is the
+ * Iranian toman, at the owner's own rate; the others at the day's rates
+ * (fx.js). A language spoken where several are used shows the commonest.
+ */
+const CURRENCIES = { en: ["USD"], fa: ["IRT", "AFN", "TJS"], zh: ["CNY"], ru: ["RUB"], ar: ["SAR", "EGP", "IQD"], tr: ["TRY"], ur: ["PKR"], vi: ["VND"], id: ["IDR"], es: ["USD", "EUR", "MXN"], fr: ["EUR", "MAD"] };
+const MONEY = {
+  USD: ["$", ""], EUR: ["€", ""], IRT: ["", " تومان"], AFN: ["", " افغانی"], TJS: ["", " سامانی"], CNY: ["¥", ""], RUB: ["", " ₽"], SAR: ["", " SAR"],
+  EGP: ["", " EGP"], IQD: ["", " IQD"], TRY: ["₺", ""], PKR: ["Rs ", ""], VND: ["", " ₫"], IDR: ["Rp ", ""], MXN: ["MX$", ""], MAD: ["", " MAD"],
+};
+function amountIn(v, code) {
+  let digits = v < 10 ? 2 : v < 100 ? 1 : 0;
+  if (code === "IRT") {
+    v = v >= 10000 ? Math.round(v / 1000) * 1000 : Math.round(v / 100) * 100;
+    digits = 0;
+  }
+  const [pre, post] = MONEY[code];
+  // A whole amount drops its zeros: "70", not "70.0"; cents stay "$0.10".
+  const whole = Number.isInteger(Math.round(v * 10 ** digits) / 10 ** digits);
+  return pre + v.toLocaleString("en-US", { minimumFractionDigits: whole ? 0 : digits, maximumFractionDigits: digits }) + post;
+}
+/** What `stars` cost a buyer in the money of language `code`, "≈ $0.10"; "" without a rate. `m` is { starUsd, toman, rates }. */
+export function moneyIn(code, stars, m) {
+  if (!m || !(m.starUsd > 0) || !(stars > 0)) return "";
+  const usd = stars * m.starUsd;
+  const parts = (CURRENCIES[code] || CURRENCIES.en).map((c) => {
+    const rate = c === "USD" ? 1 : c === "IRT" ? m.toman : (m.rates || {})[c];
+    return rate > 0 ? amountIn(usd * rate, c) : "";
+  }).filter(Boolean);
+  return parts.length ? `≈ ${parts.join(" · ")}` : "";
+}
+
 /** The medal of a package's plan, on its button: every language reads it. */
 const MEDALS = { bronze: "🥉", silver: "🥈", gold: "🥇", vip: "💎" };
 const WEBSITE_LINE = `🌐 <a href="${SITE}">albatrossvpn.online</a>`;
@@ -35,6 +68,29 @@ export const DEVICES = {
   mac: { name: "a Mac" },
 };
 
+/**
+ * A link from the app to recharge its account: "rn" and the username in
+ * base32 (lowercase, no padding), since a link's start may hold only
+ * letters, digits, _ and -, and Telegram lowers its case on the way.
+ */
+export const RENEW = /^rn[a-z2-7]{5,52}$/;
+
+/** The username a RENEW link names, or "". */
+export function renewTarget(topic) {
+  if (!RENEW.test(topic)) return "";
+  const abc = "abcdefghijklmnopqrstuvwxyz234567";
+  let bits = 0, value = 0, out = "";
+  for (const ch of topic.slice(2)) {
+    value = (value << 5) | abc.indexOf(ch);
+    bits += 5;
+    if (bits >= 8) {
+      out += String.fromCharCode((value >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return out;
+}
+
 /** The topics a link into the bot can open (t.me/<bot>?start=buy), and that a language choice carries on to. */
 export const TOPICS = ["connect", "install", "plans", "account", "downloads", "buy", "human"];
 
@@ -44,7 +100,7 @@ const gbOf = (bytes) => `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB`;
 /** The language picker. It is read before any language is chosen, so it is in all of them; `topic` is carried through the choice, `hint` is the language of the person's Telegram. */
 export function languagePicker(topic = "", hint = "") {
   const { packs, title } = picker(hint);
-  const suffix = TOPICS.includes(topic) ? `:${topic}` : "";
+  const suffix = TOPICS.includes(topic) || RENEW.test(topic) ? `:${topic}` : "";
   const rows = [];
   for (let i = 0; i < packs.length; i += 2) rows.push(packs.slice(i, i + 2).map((p) => btn(`${p.flag} ${p.name}`, `l:${p.code}${suffix}`)));
   return { text: title, markup: keys(...rows) };
@@ -75,6 +131,11 @@ function build(code) {
   const DOWNLOAD_PAGE = `${SITE}/#download`;
 
   const validText = (days) => (days > 0 ? t("valid_days", { days }) : t("valid_forever"));
+  // A price in Stars and, in brackets, what it comes to in this language's money.
+  const priced = (stars, money) => {
+    const m = moneyIn(code, stars, money);
+    return m ? ` (${m})` : "";
+  };
   const untilText = (unix) => (unix > 0 ? t("until", { date: dateOf(unix) }) : t("until_forever"));
   const planLine = (p) => `${p.plan}, ${p.devices ? t("devices_n", { n: p.devices }) : t("devices_unlimited")}`;
 
@@ -162,7 +223,7 @@ function build(code) {
    */
   function plans(shop = null) {
     const buy = shop
-      ? t("plans_buy_sales", { lines: shop.catalog.map((p) => `• ${p.gb} GB - ⭐${p.stars} - ${p.plan}`).join("\n"), valid: validText(shop.days) })
+      ? t("plans_buy_sales", { lines: shop.catalog.map((p) => `• ${p.gb} GB - ⭐${p.stars}${priced(p.stars, shop.money)} - ${p.plan}`).join("\n"), valid: validText(shop.days) })
       : t("plans_buy_manual");
     return {
       text: t("plans", { buy }),
@@ -247,11 +308,11 @@ function build(code) {
     // ---------- Buying data with Telegram Stars ----------
 
     /** The packages, with the Stars each costs and the plan it earns. `cat` is sales.js catalog. */
-    store(cat, days) {
+    store(cat, days, money = null) {
       const rows = [];
       for (let i = 0; i < cat.length; i += 2) rows.push(cat.slice(i, i + 2).map((p) => buy(btn(`${MEDALS[p.tier] || "⭐"} ${p.gb} GB · ⭐${p.stars}`, `b:${p.gb}:1`))));
       return {
-        text: t("store", { lines: cat.map((p) => `• <b>${p.gb} GB</b> - ⭐${p.stars} - ${planLine(p)}`).join("\n"), valid: validText(days) }),
+        text: t("store", { lines: cat.map((p) => `• <b>${p.gb} GB</b> - ⭐${p.stars}${priced(p.stars, money)} - ${planLine(p)}`).join("\n"), valid: validText(days) }),
         markup: keys(...rows, [buy(btn(t("btn_build"), "b:10:3"))], [btn(t("btn_what_plans"), "p"), btn(t("btn_terms"), "st")], [WEBSITE, MENU_BUTTON]),
       };
     },
@@ -261,7 +322,7 @@ function build(code) {
      * the months, and its price, worked out at once; then a new account or
      * one that exists. `limits` is { min, max, step } of the data a month.
      */
-    builder(p, limits) {
+    builder(p, limits, money = null) {
       const down = p.gb - limits.stepDown, up = p.gb + limits.stepUp;
       const months = limits.months.map((m) => {
         const label = t("months_short", { n: m });
@@ -269,7 +330,7 @@ function build(code) {
       });
       const save = p.save > 0 ? `\n${t("builder_save", { save: p.save })}` : "";
       return {
-        text: t("builder", { gb: p.gb, months: t("months_short", { n: p.months }), total: p.total, valid: validText(p.days), plan: `${MEDALS[p.tier] || ""} ${planLine(p)}`.trim(), stars: p.stars }) + save,
+        text: t("builder", { gb: p.gb, months: t("months_short", { n: p.months }), total: p.total, valid: validText(p.days), plan: `${MEDALS[p.tier] || ""} ${planLine(p)}`.trim(), stars: p.stars }).replace(`⭐${p.stars}</b>`, `⭐${p.stars}</b>${priced(p.stars, money)}`) + save,
         markup: keys(
           [btn(down >= limits.min ? `➖ ${limits.stepDown} GB` : "·", down >= limits.min ? `b:${down}:${p.months}` : `b:${p.gb}:${p.months}`),
             btn(`📦 ${p.gb} GB`, `b:${p.gb}:${p.months}`),
@@ -288,10 +349,10 @@ function build(code) {
     TOO_MANY_LOOKUPS: { text: t("too_many_lookups"), markup: keys([BACK_TO_PACKAGES]) },
 
     /** The order, before the payment: what it is, for whom, and the terms to agree to. */
-    checkout(o, p, days) {
+    checkout(o, p, days, money = null) {
       const what = o.kind === "topup" ? t("checkout_topup", { account: esc(o.target) }) : t("checkout_new");
       return {
-        text: t("checkout", { gb: o.gb, stars: o.stars, plan: planLine(p), valid: validText(p.days ?? days), what }),
+        text: t("checkout", { gb: o.gb, stars: o.stars, plan: planLine(p), valid: validText(p.days ?? days), what }).replace(`⭐${o.stars}`, `⭐${o.stars}${priced(o.stars, money)}`),
         markup: keys([buy(btn(t("btn_pay", { stars: o.stars }), `sp:${o.id}`))], [btn(t("btn_terms"), "st"), BACK_TO_PACKAGES]),
       };
     },

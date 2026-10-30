@@ -262,7 +262,7 @@ test("a link into the bot (/start buy) is remembered through the choice of a lan
   await w.send(press(SARA + 1, "l:vi:plans", 71));
   const plans = w.api.of("editMessageText").pop();
   assert.equal(plans.message_id, 71);
-  assert.ok(plans.text.startsWith(screens("vi").t("plans").split("\n")[0]) && plans.text.includes("• 25 GB - ⭐72 - Silver"));
+  assert.ok(plans.text.startsWith(screens("vi").t("plans").split("\n")[0]) && plans.text.includes("• 25 GB - ⭐72 - Silver"), "no rate for the dong yet: the Stars alone");
   assert.ok(datas(plans.reply_markup).includes("s"), "and its buy button");
   // A person asking for the team gets a ticket after the choice.
   await w.send(text(SARA + 2, "/start human"));
