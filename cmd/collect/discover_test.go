@@ -229,3 +229,33 @@ func TestGistsForksAndPastes(t *testing.T) {
 		t.Fatalf("paste sites: %v", subs)
 	}
 }
+
+// SearXNG's JSON, Mojeek's HTML, and the site: queries that reach the
+// channels and hosts the plain queries miss.
+func TestMoreEngines(t *testing.T) {
+	// Mojeek: result links are pulled out, its own pages left out.
+	mj := parseMojeek(`<ul class="results-standard"><li><a class="ob" href="https://configs.example.org/sub.txt">Free</a></li>` +
+		`<li><a class="ob" href="https://www.mojeek.com/about">Mojeek</a></li></ul>`)
+	if len(mj) != 1 || mj[0] != "https://configs.example.org/sub.txt" {
+		t.Fatalf("mojeek: %v", mj)
+	}
+	// SearXNG JSON, whichever instance the rotation picks.
+	d := newDiscoverer("", nil)
+	body := `{"results":[{"url":"https://a.example.com/sub"},{"url":"https://t.me/s/freenodes"}]}`
+	routes := map[string]string{}
+	for _, inst := range searxInstances {
+		routes[inst+"/search?format=json&safesearch=0&q=test"] = body
+	}
+	d.client = &http.Client{Transport: fakeTransport(routes)}
+	got, err := d.searchSearx(context.Background(), "test")
+	if err != nil || len(got) != 2 || got[0] != "https://a.example.com/sub" {
+		t.Fatalf("searx: %v %v", got, err)
+	}
+	// The site: operators are in the queries, so every engine reaches them.
+	joined := strings.Join(webQueries, "\n")
+	for _, want := range []string{"site:t.me", "site:gist.github.com", "pages.dev", "site:gitee.com"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing query operator %q", want)
+		}
+	}
+}
