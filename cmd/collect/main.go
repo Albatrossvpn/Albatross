@@ -28,7 +28,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -342,8 +341,6 @@ type meta struct {
 	Lanes map[string]int `json:"lanes,omitempty"`
 }
 
-var schemeRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]{1,20})://[^\s"'<>]{8,}`)
-
 func main() {
 	out := flag.String("out", "servers", "output directory")
 	keysIn := flag.String("keys", "", "the list keys handed out so far (JSON), read to keep the recent ones")
@@ -449,15 +446,19 @@ func main() {
 			} else {
 				node.EachText(res.Text, func(n *node.Node) { nodes = append(nodes, n) })
 			}
-			links := schemeRe.FindAllStringSubmatch(res.Text, -1)
+			// Counted on the links as the parser takes them apart, so a link
+			// stuck to an escape or a word ("\\nvless://", "Germanyvmess://")
+			// counts under its own scheme.
+			links := node.ExtractLinks(res.Text)
 			mu.Lock()
 			defer mu.Unlock()
-			for _, m := range links {
+			for _, l := range links {
 				h := fnv.New64a()
-				h.Write([]byte(m[0]))
+				h.Write([]byte(l))
 				if k := h.Sum64(); !seenLinks[k] {
 					seenLinks[k] = true
-					schemes[strings.ToLower(m[1])]++
+					scheme, _, _ := strings.Cut(l, "://")
+					schemes[strings.ToLower(scheme)]++
 				}
 			}
 			reached++
