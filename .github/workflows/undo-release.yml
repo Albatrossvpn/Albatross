@@ -1,0 +1,64 @@
+name: Undo a release
+
+# Run by hand to take a release back after a commit returned update.json on
+# main to the release before it: installed copies and the website read the
+# manifest from the project's own storage first, and the deploy only ever
+# moves that copy forward, so this stores main's older one there. The
+# release on GitHub stays (it cannot be changed); it is marked a
+# pre-release, so it is not the latest.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version update.json on main names now (the one going back to), e.g. 1.1.0"
+        required: true
+      withdraw:
+        description: "The release taken back, e.g. v1.2.0"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: require-update
+  cancel-in-progress: false
+
+jobs:
+  undo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+      - name: Store main's manifest
+        env:
+          ADMIN_USER: ${{ secrets.ADMIN_USER }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WANT: ${{ inputs.version }}
+        run: |
+          have="$(jq -r .latest_version update.json)"
+          [ "$have" = "$WANT" ] || { echo "::error::update.json on main names $have, not $WANT."; exit 1; }
+          go run ./cmd/signupdate verify update.json > "$RUNNER_TEMP/out.txt" 2>&1 || { echo "::error::update.json on main is not signed."; exit 1; }
+          bash deploy/files/publish-lists.sh "$(bash build/account-url.sh | cut -d, -f1)" main update.json >> "$RUNNER_TEMP/out.txt" 2>&1 ||
+            { echo "::error::update.json could not be stored."; exit 1; }
+          echo "- update.json is back at $WANT." >> "$GITHUB_STEP_SUMMARY"
+      - name: Not the latest release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: ${{ inputs.withdraw }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::$TAG is not a vX.Y.Z tag."; exit 1; }
+          gh release edit "$TAG" --prerelease --latest=false --repo "$GITHUB_REPOSITORY" > /dev/null ||
+            echo "::warning::$TAG could not be marked a pre-release; the manifest no longer offers it either way."

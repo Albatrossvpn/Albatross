@@ -154,7 +154,7 @@ export default {
     too_many_lookups: "你一下子查询了太多用户名，请稍等一会儿。",
     checkout_topup: "充入账户 <code>{account}</code>：该账户剩余的流量会保留，有效期重新开始计算。",
     checkout_new: "新账户，支付后立即创建；用户名和密码会发到这个聊天里。",
-    checkout: "🧾 <b>你的订单</b>\n\n<b>{gb} GB</b> - ⭐{stars}\n{plan}，{valid}\n{what}\n\n支付即表示你同意条款（点击“条款”可阅读）。付款由 Telegram 以 Stars 收取；我不会看到你的付款信息。",
+    checkout: "🧾 <b>你的订单</b>\n\n<b>{gb} GB</b> - ⭐{stars}\n{plan}，{valid}\n{what}\n\n支付即表示你同意条款（点击“条款”可阅读）。付款由 Telegram 以 Stars 收取；我不会看到你的付款信息。\n\n⭐ 还没有 Stars？点击支付时 Telegram 会提供购买；朋友也可以送你 Stars。",
     btn_pay: "✅ 同意并支付 ⭐{stars}",
     terms: "📄 <b>购买流量条款</b>\n\n- 你购买的是 Albatross VPN 服务的流量，使用 Telegram Stars 支付。付款由 Telegram 收取；我们不会看到你的付款信息。\n- 每个流量包提供所示的流量，{valid_for}。流量包到期时未用完的流量将作废。把流量包充入账户时，会与账户剩余的流量相加，并重新开始计算有效期。\n- 新账户的用户名和密码会在支付后立即发到这个聊天里。请妥善保密；如果丢失密码，请联系客服团队。\n- 如果我们无法交付你所购买的内容，款项会自动退还。流量一旦被使用，款项不予退还。\n- Telegram 及其官方支持都无法协助处理通过这个机器人进行的购买。如有任何付款问题，请发送 /paysupport。",
     terms_valid: "自付款之日起 {days} 天内有效",
