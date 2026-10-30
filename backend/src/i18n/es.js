@@ -118,6 +118,7 @@ export default {
     ticket_opened_chat: "🎫 <b>Ticket #{id} abierto</b>\n\nNuestro equipo recibió el aviso y tiene tu chat hasta ahora. Agrega todo lo que pueda ayudar: el mensaje exacto, tu dispositivo y tu red. Las capturas de pantalla son bienvenidas.\n\nLa respuesta del equipo llegará a este chat.",
     ticket_opened_new: "🎫 <b>Ticket #{id} abierto</b>\n\nNuestro equipo recibió el aviso. Escribe aquí tu problema: el mensaje exacto, tu dispositivo y tu red. Las capturas de pantalla son bienvenidas.\n\nLa respuesta del equipo llegará a este chat.",
     ticket_open: "Ya tienes abierto el <b>ticket #{id}</b>. Solo escribe aquí y nuestro equipo lo verá.",
+    ask_first: "🧑‍💼 <b>Cuéntame qué pasa</b>\n\nEscríbelo en un solo mensaje: qué ves (el mensaje exacto), tu dispositivo y tu red, y el nombre de usuario de tu cuenta si es sobre tu cuenta. Respondo al momento y, si no puedo resolverlo, llega a nuestro equipo.\n\nUna captura de pantalla va directa a nuestro equipo.",
     ticket_closed_user: "✅ ¡Me alegra que se haya resuelto! El <b>ticket #{id}</b> está cerrado.\n\n¿Qué te pareció nuestra ayuda?",
     ticket_closed_team: "✅ <b>El ticket #{id} está cerrado.</b> Si surge algo más, escríbeme o abre el menú.\n\n¿Qué te pareció nuestra ayuda?",
     ticket_closed_idle: "El <b>ticket #{id}</b> se cerró tras tres días sin actividad. Escríbeme cuando quieras para empezar de nuevo.",

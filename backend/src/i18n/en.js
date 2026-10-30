@@ -121,6 +121,7 @@ export default {
     ticket_opened_chat: "🎫 <b>Ticket #{id} opened</b>\n\nOur team has been notified and has your chat so far. Add anything that helps: the exact message, your device and network. Screenshots are welcome.\n\nTheir reply will arrive in this chat.",
     ticket_opened_new: "🎫 <b>Ticket #{id} opened</b>\n\nOur team has been notified. Write your problem here: the exact message, your device and network. Screenshots are welcome.\n\nTheir reply will arrive in this chat.",
     ticket_open: "You already have <b>ticket #{id}</b> open. Just write here and our team will see it.",
+    ask_first: "🧑‍💼 <b>Tell me what is wrong</b>\n\nWrite it in one message: what you see (the exact message), your device and network, and your account's username if it is about your account. I answer at once, and if I cannot solve it, it goes to our team.\n\nA screenshot goes straight to our team.",
     ticket_closed_user: "✅ Glad it is sorted! <b>Ticket #{id}</b> is closed.\n\nHow was our help?",
     ticket_closed_team: "✅ <b>Ticket #{id} is closed.</b> If something else comes up, just write to me or open the menu.\n\nHow was our help?",
     ticket_closed_idle: "<b>Ticket #{id}</b> was closed after three quiet days. Write to me any time to start again.",

@@ -115,3 +115,12 @@ export async function world({ answer = "Update the app first.", team = true, mai
   return w;
 }
 
+
+/** The person asks for the team and says what is wrong, and the assistant cannot help (it hands over): the ticket opens with their words. */
+export async function toTeamWith(w, chat, words) {
+  const was = w.env.answer;
+  w.env.answer = "Our team will answer you here.\n[[HUMAN]]";
+  await w.send(text(chat, "/human"));
+  await w.send(text(chat, words));
+  w.env.answer = was;
+}

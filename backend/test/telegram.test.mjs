@@ -6,7 +6,7 @@ import test, { afterEach } from "node:test";
 import { d1 } from "./d1.mjs";
 import { PACKS } from "../src/i18n/index.js";
 import { check, connect, disconnect, heal, repair, sweep, webhook } from "../src/telegram.js";
-import { ADMIN_REQUEST, HOOK_URL, SARA, SECRET, TEAM, TOKEN, datas, labels, media, nextMessage, nextUpdate, press, real, secretOf, telegram, text, world } from "./tg-helpers.mjs";
+import { ADMIN_REQUEST, HOOK_URL, SARA, SECRET, TEAM, TOKEN, datas, labels, media, nextMessage, nextUpdate, press, real, secretOf, telegram, text, toTeamWith, world } from "./tg-helpers.mjs";
 
 afterEach(() => (globalThis.fetch = real));
 
@@ -61,7 +61,7 @@ test("the webhook answers only Telegram: the secret first (nothing is read witho
 
 test("a token of another bot replaces the old one and forgets what belonged to it; a new token of the same bot keeps everything", async () => {
   const w = await world();
-  await w.send(text(SARA, "/human"));
+  await toTeamWith(w, SARA, "It does not connect");
   // The same bot with a token made anew in BotFather: nothing is lost, and the old token is not used.
   const same = telegram();
   assert.deepEqual(await connect(w.env, ADMIN_REQUEST(), "123456789:" + "B".repeat(35)), { username: "AlbatrossSupportBot" });
@@ -425,10 +425,15 @@ test("talking to the team opens a numbered ticket: the person is told, the team'
 
 test("two presses of the button at once open one ticket, and a claim that never finished lets go", async () => {
   const w = await world();
+  // Before a word the button opens nothing: it asks what is wrong, and the assistant answers that first.
+  await w.send(press(SARA, "h"));
+  assert.ok(w.lastText(SARA).text.includes("Tell me what is wrong"));
+  assert.equal((await w.row("SELECT COUNT(*) AS n FROM tg_tickets")).n, 0);
+  await w.send(text(SARA, "It does not connect"));
+  assert.deepEqual(labels(w.lastText(SARA).reply_markup), ["🧑‍💼 Talk to our team", "👍 Helpful", "👎 Not helpful"], "the way to the team stays under the answer");
+  assert.equal((await w.row("SELECT COUNT(*) AS n FROM tg_tickets")).n, 0);
   await Promise.all([w.send(press(SARA, "h")), w.send(press(SARA, "h"))]);
   assert.equal((await w.row("SELECT COUNT(*) AS n FROM tg_tickets")).n, 1);
-  assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === TEAM).length, 0, "no card before a word is written");
-  await w.send(text(SARA, "It does not connect"));
   assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === TEAM).length, 1, "one card");
   // A person whose ticket is being opened (a claim made a moment ago) opens nothing else.
   const t = Math.floor(Date.now() / 1000);
@@ -446,22 +451,28 @@ test("two presses of the button at once open one ticket, and a claim that never 
 test("while a ticket is open the person's words, pictures and files reach the team, with the ticket on them; the model stays out of it", async () => {
   const w = await world();
   await w.send(text(SARA, "/human"));
-  assert.ok(w.lastText(SARA).text.includes("Write your problem here"));
+  assert.ok(w.lastText(SARA).text.includes("Tell me what is wrong"));
+  assert.equal((await w.row("SELECT COUNT(*) AS n FROM tg_tickets")).n, 0, "no ticket before a word");
   w.api.calls.length = 0;
-  const first = text(SARA, "It says <no server>");
-  await w.send(first);
-  // The first words come on the ticket's card: the team never gets an empty one.
+  w.env.answer = "Our team will answer you here.\n[[HUMAN]]";
+  await w.send(text(SARA, "It says <no server>"));
+  // The assistant could not help: the ticket opens with the person's words on its card.
+  assert.ok(w.api.of("sendMessage").some((c) => c.chat_id === SARA && c.text === "Our team will answer you here."));
+  assert.ok(w.lastText(SARA).text.includes("Ticket #1001 opened"));
   const card = w.lastText(TEAM);
   assert.ok(card.text.startsWith("🎫 <b>Ticket #1001</b> - new") && card.text.includes("<b>Visitor:</b> It says &lt;no server&gt;"), card.text);
   assert.deepEqual(datas(card.reply_markup), ["o:c:1001", "o:b:4242", "o:f:1001"]);
-  assert.equal(w.api.of("setMessageReaction")[0].message_id, first.message.message_id);
-  assert.equal(w.api.of("setMessageReaction")[0].reaction[0].emoji, "👀");
-  // Later words come on their own.
-  await w.send(text(SARA, "Still <nothing>"));
+  // Later words come on their own, and the person sees they arrived.
+  w.api.calls.length = 0;
+  const asked = w.env.asked.length;
+  const later = text(SARA, "Still <nothing>");
+  await w.send(later);
   assert.equal(w.lastText(TEAM).text, "🎫 <b>#1001</b> - Sara (@sara_tg)\nStill &lt;nothing&gt;");
-  // The model only summed the ticket up for the owner's mail; it answered nothing in the chat.
+  assert.equal(w.api.of("setMessageReaction")[0].message_id, later.message.message_id);
+  assert.equal(w.api.of("setMessageReaction")[0].reaction[0].emoji, "👀");
+  // While the ticket is open the model answers nothing; the owner got one mail.
   assert.equal(w.env.sent.length, 1);
-  assert.equal(w.env.asked.length, 1);
+  assert.equal(w.env.asked.length, asked);
   assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === SARA).length, 0);
   await w.send(media(SARA, { photo: [{ file_id: "p" }], caption: "the screen" }));
   const copy = w.api.of("copyMessage")[0];
@@ -474,13 +485,13 @@ test("while a ticket is open the person's words, pictures and files reach the te
   // A GIF is also a document, and a place also a location: the more exact kind is named.
   await w.send(media(SARA, { animation: { file_id: "a" }, document: { file_id: "a" } }));
   await w.send(media(SARA, { venue: { title: "Cafe" }, location: { latitude: 1, longitude: 2 } }));
-  assert.deepEqual((await w.rows("SELECT content FROM tg_messages ORDER BY id")).map((r) => r.content), ["It says <no server>", "Still <nothing>", "[photo] the screen", "[sticker]", "[GIF]", "[place]"]);
+  assert.deepEqual((await w.rows("SELECT content FROM tg_messages WHERE role = 'user' ORDER BY id")).map((r) => r.content), ["It says <no server>", "Still <nothing>", "[photo] the screen", "[sticker]", "[GIF]", "[place]"]);
+  assert.equal(w.env.asked.length, asked, "the model stays out of an open ticket");
 });
 
 test("the team answers a ticket by replying to its message; photos and files go too; closing tells the person and forgets the chat", async () => {
   const w = await world();
-  await w.send(text(SARA, "/human"));
-  await w.send(text(SARA, "No server found"));
+  await toTeamWith(w, SARA, "No server found");
   const noteId = (await w.rows("SELECT message_id FROM tg_relay ORDER BY at DESC, message_id DESC"))[0].message_id;
   w.api.calls.length = 0;
   const reply = text(TEAM, "Please update to 1.1.0 & tell me if it helps", { reply_to_message: { message_id: noteId } });
@@ -518,8 +529,7 @@ test("the team answers a ticket by replying to its message; photos and files go 
 
 test("a person who blocked the bot is not a silent failure for the team", async () => {
   const w = await world();
-  await w.send(text(SARA, "/human"));
-  await w.send(text(SARA, "hello team"));
+  await toTeamWith(w, SARA, "hello team");
   const noteId = (await w.rows("SELECT message_id FROM tg_relay ORDER BY message_id DESC"))[0].message_id;
   const api = telegram({ sendMessage: (p) => (p.chat_id === SARA ? { ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" } : { ok: true, result: { message_id: 900 } }) });
   await w.send(text(TEAM, "are you there?", { reply_to_message: { message_id: noteId } }));
@@ -529,25 +539,24 @@ test("a person who blocked the bot is not a silent failure for the team", async 
 
 test("the person can close their own ticket, with the button or /close, rate the help, and the team is told", async () => {
   const w = await world();
-  await w.send(text(SARA, "/human"));
-  await w.send(text(SARA, "It does not connect"));
+  await toTeamWith(w, SARA, "It does not connect");
   w.api.calls.length = 0;
   await w.send(press(SARA, "tc:1001"));
   assert.ok(w.lastText(SARA).text.includes("Glad it is sorted") && w.lastText(SARA).text.includes("How was our help?"));
   assert.deepEqual(labels(w.lastText(SARA).reply_markup), ["1⭐", "2⭐", "3⭐", "4⭐", "5⭐", "📋 Menu"]);
-  assert.ok(w.lastText(TEAM).text.includes("Ticket #1001") && w.lastText(TEAM).text.includes("closed by Sara (@sara_tg)"));
+  assert.ok(w.lastText(TEAM).text.includes("Ticket #1001</b> (Sara (@sara_tg)) was closed by the person"), w.lastText(TEAM).text);
   await w.send(press(SARA, "r:4", 80));
   assert.ok(w.api.of("editMessageText").pop().text.includes("rated our help 4 out of 5"));
   await w.send(press(SARA, "r:9", 80));
   await w.send(text(TEAM, "/stats"));
   assert.ok(w.lastText(TEAM).text.includes("Rating of the help: 4.0 out of 5 (1)"), w.lastText(TEAM).text);
-  await w.send(text(SARA, "/human"));
+  await toTeamWith(w, SARA, "Another problem");
   assert.ok(w.lastText(SARA).text.includes("Ticket #1002 opened"), "numbers go on");
   await w.send(text(SARA, "/close"));
   assert.equal((await w.row("SELECT closed_by FROM tg_tickets WHERE id = 1002")).closed_by, "user");
   // Tickets are limited per person.
   for (let i = 0; i < 5; i++) {
-    await w.send(text(SARA, "/human"));
+    await toTeamWith(w, SARA, `Problem ${i}`);
     await w.send(text(SARA, "/close"));
   }
   assert.ok(w.api.of("sendMessage").some((c) => c.text.startsWith("You have opened several tickets today, so I cannot open another one right now")));
@@ -556,10 +565,10 @@ test("the person can close their own ticket, with the button or /close, rate the
 
 test("a button of an old ticket never closes a newer one, nor somebody else's", async () => {
   const w = await world();
-  await w.send(text(SARA, "/human"));
+  await toTeamWith(w, SARA, "Help");
   await w.send(press(SARA, "tc:1001"));
-  await w.send(text(SARA, "/human"));
-  await w.send(text(11, "/human"));
+  await toTeamWith(w, SARA, "Help again");
+  await toTeamWith(w, 11, "Help me too");
   w.api.calls.length = 0;
   await w.send(press(SARA, "tc:1001"));
   assert.ok(w.lastText(SARA).text.includes("already closed"));
@@ -571,10 +580,11 @@ test("a button of an old ticket never closes a newer one, nor somebody else's", 
 
 test("a ticket the team closes while its person still has the old state goes on as an ordinary chat", async () => {
   const w = await world();
-  await w.send(text(SARA, "/human"));
+  await toTeamWith(w, SARA, "Help");
   // The ticket was closed behind the chat's back (as if the second statement of closing never ran).
   await w.env.DB.prepare("UPDATE tg_tickets SET status = 'closed', chat_id = 0 WHERE id = 1001").run();
   w.api.calls.length = 0;
+  w.env.asked.length = 0;
   await w.send(text(SARA, "Is anybody there?"));
   assert.equal(w.env.asked.length, 1, "the assistant answers");
   assert.equal((await w.row("SELECT mode, ticket_id FROM tg_users WHERE chat_id = ?1", SARA)).ticket_id, 0);
@@ -605,8 +615,9 @@ test("a team chat that cannot be reached is not a silent loss: the owner is mail
   const w = await world();
   const api = telegram({ sendMessage: (p) => (p.chat_id === TEAM ? { ok: false, error_code: 403, description: "Forbidden: bot was kicked from the group chat" } : { ok: true, result: { message_id: 900 } }) });
   await w.send(text(SARA, "/human"));
-  assert.equal(w.env.sent.length, 0, "a ticket nobody wrote in is sent nowhere");
+  assert.equal(w.env.sent.length, 0, "nothing is sent before the person writes");
   api.calls.length = 0;
+  w.env.answer = "Our team will answer you here.\n[[HUMAN]]";
   await w.send(text(SARA, "The error is 12"));
   await w.send(text(SARA, "Still the same"));
   assert.equal(api.of("setMessageReaction").length, 0, "nothing was delivered, so nothing is confirmed");
@@ -616,8 +627,7 @@ test("a team chat that cannot be reached is not a silent loss: the owner is mail
   // Neither the chat nor the mail: the person is not told someone knows.
   const lost = await world({ mail: false });
   const api2 = telegram({ sendMessage: (p) => (p.chat_id === TEAM ? { ok: false, error_code: 403, description: "Forbidden" } : { ok: true, result: { message_id: 900 } }) });
-  await lost.send(text(SARA, "/human"));
-  await lost.send(text(SARA, "Help"));
+  await toTeamWith(lost, SARA, "Help");
   assert.ok(api2.of("sendMessage").some((c) => c.chat_id === SARA && c.text.startsWith("I could not reach our team")));
 });
 
@@ -626,15 +636,13 @@ test("a team group that became a supergroup is followed, by the service message 
   await w.send({ update_id: nextUpdate(), message: { message_id: 1, chat: { id: TEAM, type: "group" }, migrate_to_chat_id: -100777 } });
   assert.equal(await w.setting("telegram_owner_chat"), "-100777");
   w.api.calls.length = 0;
-  await w.send(text(SARA, "/human"));
-  await w.send(text(SARA, "Help"));
+  await toTeamWith(w, SARA, "Help");
   assert.equal(w.lastText(-100777).text.includes("Ticket #1001"), true, "the card goes to the new chat");
   assert.equal((await w.row("SELECT team_chat FROM tg_relay LIMIT 1")).team_chat, -100777);
   // Telegram's own refusal names the new chat as well.
   const v = await world();
   const api = telegram({ sendMessage: (p) => (p.chat_id === TEAM ? { ok: false, error_code: 400, description: "Bad Request: group chat was upgraded to a supergroup chat", parameters: { migrate_to_chat_id: -100888 } } : { ok: true, result: { message_id: 900 } }) });
-  await v.send(text(SARA, "/human"));
-  await v.send(text(SARA, "Help"));
+  await toTeamWith(v, SARA, "Help");
   assert.equal(await v.setting("telegram_owner_chat"), "-100888");
   assert.ok(api.of("sendMessage").some((c) => c.chat_id === -100888 && c.text.includes("Ticket #1001")));
 });
@@ -645,8 +653,7 @@ test("an administrator who writes anonymously in the team's group is the team: p
   const anonymous = (words, extra = {}) => ({ update_id: nextUpdate(), message: { message_id: nextMessage(), from: { id: 1087968824, is_bot: true, first_name: "Group", username: "GroupAnonymousBot" }, sender_chat: { id: GROUP, type: "supergroup" }, chat: { id: GROUP, type: "supergroup" }, text: words, ...extra } });
   await w.send(anonymous(`/pair ${await w.setting("telegram_pair_code")}`));
   assert.equal(await w.setting("telegram_owner_chat"), String(GROUP));
-  await w.send(text(SARA, "/human"));
-  await w.send(text(SARA, "Help"));
+  await toTeamWith(w, SARA, "Help");
   const card = w.lastText(GROUP);
   assert.ok(card.text.includes("Ticket #1001"));
   const noteId = (await w.row("SELECT message_id FROM tg_relay")).message_id;
@@ -729,8 +736,7 @@ test("every minute a few of the chats that went quiet are summarized and forgott
   await w.send(text(SARA, "How do I update?"));
   await w.send(text(11, "Where do I download?"));
   await w.send(text(12, "Only looking at the menu"));
-  await w.send(text(13, "/human"));
-  await w.send(text(13, "I need help"));
+  await toTeamWith(w, 13, "I need help");
   const old = Math.floor(Date.now() / 1000) - 2 * 3600;
   await w.env.DB.prepare("UPDATE tg_users SET updated = ?1 WHERE chat_id IN (?2, ?3, ?4, ?5)").bind(old, SARA, 11, 13, 12).run();
   await w.env.DB.prepare("DELETE FROM tg_messages WHERE chat_id = 12").run();
@@ -849,8 +855,7 @@ test("the team lists tickets, reads the day's numbers, shows a ticket's chat and
 
 test("the team can block by replying to a ticket's message", async () => {
   const w = await world();
-  await w.send(text(SARA, "/human"));
-  await w.send(text(SARA, "Help"));
+  await toTeamWith(w, SARA, "Help");
   const noteId = (await w.row("SELECT message_id FROM tg_relay")).message_id;
   await w.send(text(TEAM, "/block", { reply_to_message: { message_id: noteId } }));
   assert.equal((await w.row("SELECT blocked FROM tg_users WHERE chat_id = ?1", SARA)).blocked, 1);
@@ -949,4 +954,146 @@ test("a link that names its source counts a new person once a day, and /stats li
   await w.send(text(TEAM, "/stats"));
   assert.ok(w.lastText(TEAM).text.includes("ad_fa1 2 (today 2), ad_zh1 1"), w.lastText(TEAM).text);
   assert.ok(!w.lastText(TEAM).text.includes("ad_zh1 1 (today"));
+});
+
+// ---------- The assistant first ----------
+
+test("asking for the team, the person says what is wrong first: the assistant answers it, and only what it cannot solve becomes a ticket", async () => {
+  const w = await world({ answer: "Update the app, then choose the fastest location." });
+  await w.send(press(SARA, "h"));
+  assert.ok(w.lastText(SARA).text.includes("Tell me what is wrong"));
+  assert.equal((await w.row("SELECT mode FROM tg_users WHERE chat_id = ?1", SARA)).mode, "ask");
+  // A question the assistant can answer: answered, no ticket, and the team stays one tap away.
+  await w.send(text(SARA, "How do I update the app?"));
+  const answer = w.lastText(SARA);
+  assert.equal(answer.text, "Update the app, then choose the fastest location.");
+  assert.deepEqual(datas(answer.reply_markup), ["h", "fb:u:1", "fb:d:1"]);
+  assert.equal((await w.row("SELECT COUNT(*) AS n FROM tg_tickets")).n, 0);
+  assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === TEAM).length, 0, "the team is not bothered");
+  assert.equal((await w.row("SELECT mode FROM tg_users WHERE chat_id = ?1", SARA)).mode, "", "the next question is an ordinary one");
+  // Still stuck: one tap, and the team gets the whole story at once.
+  await w.send(press(SARA, "h"));
+  const card = w.lastText(TEAM);
+  assert.ok(card.text.includes("Ticket #1001") && card.text.includes("How do I update the app?") && card.text.includes("<b>Assistant:</b> Update the app"), card.text);
+});
+
+test("what the assistant cannot answer, or a screenshot, opens the ticket at once; so does an assistant that is away", async () => {
+  const w = await world({ answer: "Our team will answer you about the payment.\n[[HUMAN]]" });
+  await w.send(text(SARA, "/human"));
+  await w.send(text(SARA, "I paid but got no account"));
+  assert.ok(w.api.of("sendMessage").some((c) => c.chat_id === SARA && c.text === "Our team will answer you about the payment."), "the assistant's words, without the marker");
+  assert.ok(w.lastText(SARA).text.includes("Ticket #1001 opened"));
+  assert.ok(w.lastText(TEAM).text.includes("I paid but got no account"));
+  // A screenshot cannot be read by the assistant: it opens the ticket and goes to the team.
+  const s = await world();
+  await s.send(text(SARA, "/human"));
+  await s.send(media(SARA, { photo: [{ file_id: "p" }], caption: "this error" }));
+  assert.ok(s.api.of("sendMessage").some((c) => c.chat_id === SARA && c.text.includes("Ticket #1001 opened")));
+  assert.ok(s.lastText(TEAM).text.includes("Ticket #1001"), "the card");
+  assert.equal(s.api.of("copyMessage").filter((c) => c.chat_id === TEAM).length, 1, "and the screenshot");
+  assert.equal(s.env.asked.length, 1, "the model only wrote the mail's summary");
+  // The assistant is away: what the person wrote goes to the team as it is.
+  const d = await world();
+  await d.send(text(SARA, "/human"));
+  d.env.aiDown = true;
+  await d.send(text(SARA, "Nothing works"));
+  assert.ok(d.lastText(SARA).text.includes("Ticket #1001 opened"));
+  assert.ok(d.lastText(TEAM).text.includes("Nothing works"));
+});
+
+test("a ticket the team never heard of is closed quietly once its person goes quiet, and /tickets lists only real ones", async () => {
+  const w = await world();
+  await toTeamWith(w, SARA, "It does not connect");
+  // One opened the old way, with nothing written in it.
+  const t = Math.floor(Date.now() / 1000);
+  await w.env.DB.prepare("INSERT INTO tg_tickets (id, chat_id, opened, updated) VALUES (1002, 11, ?1, ?1)").bind(t - 3600).run();
+  await w.env.DB.prepare("INSERT INTO tg_users (chat_id, updated, mode, ticket_id) VALUES (11, ?1, 'ticket', 1002)").bind(t - 3600).run();
+  await w.send(text(TEAM, "/tickets"));
+  const list = w.lastText(TEAM).text;
+  assert.ok(list.includes("Open tickets (1)") && list.includes("#1001") && !list.includes("#1002"), list);
+  w.api.calls.length = 0;
+  await sweep(w.env, w.kit);
+  assert.equal((await w.row("SELECT status FROM tg_tickets WHERE id = 1002")).status, "closed");
+  assert.equal((await w.row("SELECT status FROM tg_tickets WHERE id = 1001")).status, "open", "a real one stays");
+  assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === 11 || c.chat_id === TEAM).length, 0, "nobody is told");
+});
+
+// ---------- A topic for each ticket ----------
+
+/** A team group with Topics, paired; its members write as `member`, in a topic with `inTopic`. */
+async function forumWorld() {
+  const w = await world({ team: false });
+  const GROUP = -1001234567;
+  let next = 40;
+  w.api.overrides.createForumTopic = () => ({ ok: true, result: { message_thread_id: next++, name: "t", icon_color: 0x6fb9f0 } });
+  const chat = { id: GROUP, type: "supergroup", is_forum: true, title: "Albatross team" };
+  const member = (words, extra = {}) => ({ update_id: nextUpdate(), message: { message_id: nextMessage(), from: { id: 5, first_name: "Owner" }, chat, ...(typeof words === "string" ? { text: words } : {}), ...extra } });
+  const inTopic = (topic, words, extra = {}) => member(words, { is_topic_message: true, message_thread_id: topic, reply_to_message: { message_id: topic, forum_topic_created: { name: "t" } }, ...extra });
+  await w.send(member(`/pair ${await w.setting("telegram_pair_code")}`));
+  return { w, GROUP, member, inTopic };
+}
+
+test("in a team group with Topics each ticket gets its own topic: the person's messages go there, and writing there answers them", async () => {
+  const { w, GROUP, member, inTopic } = await forumWorld();
+  assert.equal(await w.setting("telegram_team_forum"), "1");
+  assert.ok(w.lastText(GROUP).text.includes("Each ticket gets its own topic"));
+  await toTeamWith(w, SARA, "It does not connect");
+  const made = w.api.of("createForumTopic");
+  assert.equal(made.length, 1);
+  assert.deepEqual({ chat: made[0].chat_id, name: made[0].name }, { chat: GROUP, name: "#1001 · Sara (@sara_tg)" });
+  const card = w.lastText(GROUP);
+  assert.equal(card.message_thread_id, 40, "the card is in the ticket's topic");
+  assert.ok(card.text.includes("Write in this topic to answer"));
+  assert.equal((await w.row("SELECT topic FROM tg_tickets WHERE id = 1001")).topic, 40);
+  // The person's next words and screenshots go to the same topic, which is made once.
+  await w.send(text(SARA, "Still nothing"));
+  assert.equal(w.lastText(GROUP).message_thread_id, 40);
+  await w.send(media(SARA, { photo: [{ file_id: "p" }] }));
+  assert.equal(w.api.of("copyMessage").pop().message_thread_id, 40);
+  assert.equal(w.api.of("createForumTopic").length, 1);
+  // A second ticket, a second topic.
+  await toTeamWith(w, 11, "Help me too");
+  assert.equal((await w.row("SELECT topic FROM tg_tickets WHERE id = 1002")).topic, 41);
+  // The team writes in the topic, no reply needed: the person gets it.
+  await w.send(inTopic(40, "Please update the app"));
+  assert.equal(w.lastText(SARA).text, "💬 <b>Albatross team</b>\nPlease update the app");
+  await w.send(inTopic(40, null, { photo: [{ file_id: "q" }] }));
+  assert.equal(w.api.of("copyMessage").pop().chat_id, SARA);
+  // A note about the topic itself answers nobody; nor does talk in the General chat.
+  const before = w.api.of("sendMessage").filter((c) => c.chat_id === SARA).length;
+  await w.send(inTopic(40, null, { forum_topic_edited: { name: "renamed" } }));
+  await w.send(member("lunch?"));
+  assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === SARA).length, before);
+  // /tickets links each one to its topic.
+  await w.send(member("/tickets"));
+  assert.ok(w.lastText(GROUP).text.includes('<a href="https://t.me/c/1234567/40">#1001</a>'), w.lastText(GROUP).text);
+  // /close in the topic closes that ticket, and its topic goes.
+  await w.send(inTopic(40, "/close"));
+  assert.equal((await w.row("SELECT status FROM tg_tickets WHERE id = 1001")).status, "closed");
+  assert.deepEqual(w.api.of("deleteForumTopic").map((c) => c.message_thread_id), [40]);
+  assert.ok(w.lastText(SARA).text.includes("Ticket #1001 is closed"));
+  // The person closes theirs: the topic goes, and the General chat says so.
+  await w.send(press(11, "tc:1002"));
+  assert.deepEqual(w.api.of("deleteForumTopic").map((c) => c.message_thread_id), [40, 41]);
+  const note = w.lastText(GROUP);
+  assert.ok(note.text.includes("Ticket #1002") && note.text.includes("closed by the person") && !note.message_thread_id, note.text);
+});
+
+test("without the right to manage topics, tickets arrive in the General chat as before, and the team is told how to fix it once", async () => {
+  const { w, GROUP } = await forumWorld();
+  w.api.overrides.createForumTopic = () => ({ ok: false, error_code: 400, description: "Bad Request: not enough rights to manage topics" });
+  await toTeamWith(w, SARA, "It does not connect");
+  await toTeamWith(w, 11, "Help");
+  const sent = w.api.of("sendMessage").filter((c) => c.chat_id === GROUP);
+  assert.equal(sent.filter((c) => c.text.includes("right to <b>manage topics</b>")).length, 1, "told once");
+  const cards = sent.filter((c) => c.text.includes("🎫 <b>Ticket #"));
+  assert.equal(cards.length, 2);
+  assert.ok(cards.every((c) => !c.message_thread_id), "in the General chat");
+  // Replying to the card still answers.
+  const cardId = (await w.row("SELECT message_id FROM tg_relay WHERE ticket_id = 1001")).message_id;
+  await w.send({ update_id: nextUpdate(), message: { message_id: nextMessage(), from: { id: 5, first_name: "Owner" }, chat: { id: GROUP, type: "supergroup", is_forum: true }, text: "Try again", reply_to_message: { message_id: cardId } } });
+  assert.ok(w.lastText(SARA).text.includes("Try again"));
+  // A group that turns Topics off is followed: no more topics are asked for.
+  await w.send({ update_id: nextUpdate(), message: { message_id: nextMessage(), from: { id: 5, first_name: "Owner" }, chat: { id: GROUP, type: "supergroup" }, text: "/stats" } });
+  assert.equal(await w.setting("telegram_team_forum"), "");
 });
