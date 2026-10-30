@@ -188,6 +188,13 @@ func (l *netLearn) recordLine(bps float64) {
 	t.Line = max(bps, t.Line*0.95)
 }
 
+// lineBps is the line speed in bytes a second, 0 when unknown.
+func (l *netLearn) lineBps() float64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.table().Line
+}
+
 // lineMbps is the line speed in megabits per second, 0 when unknown.
 func (l *netLearn) lineMbps() int {
 	l.mu.Lock()

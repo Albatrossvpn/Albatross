@@ -16,16 +16,21 @@ import (
 
 // Server is a server that has worked at least once.
 type Server struct {
-	Key       string    `json:"key"`
-	Link      string    `json:"link"`
-	Name      string    `json:"name"`
-	Proto     string    `json:"proto"`
-	Transport string    `json:"transport,omitempty"`
-	Security  string    `json:"security,omitempty"`
-	Engine    string    `json:"engine"`
-	Country   string    `json:"country"`
-	ExitIP    string    `json:"exit_ip"`
-	Delay     int       `json:"delay"` // milliseconds, last successful test
+	Key       string `json:"key"`
+	Link      string `json:"link"`
+	Name      string `json:"name"`
+	Proto     string `json:"proto"`
+	Transport string `json:"transport,omitempty"`
+	Security  string `json:"security,omitempty"`
+	Engine    string `json:"engine"`
+	Country   string `json:"country"`
+	ExitIP    string `json:"exit_ip"`
+	Delay     int    `json:"delay"` // milliseconds, last successful test
+	// Speed is what a real download through the server came to (bytes a
+	// second), measured at SpeedAt; a delay alone says nothing of what a
+	// server carries.
+	Speed     float64   `json:"speed,omitempty"`
+	SpeedAt   time.Time `json:"speed_at,omitempty"`
 	TestedAt  time.Time `json:"tested_at"`
 	LastOK    time.Time `json:"last_ok"`
 	Fails     int       `json:"fails"` // consecutive failures since LastOK
@@ -126,8 +131,8 @@ func (s *Server) usable(now time.Time) bool {
 	return s.Fails < 3 && now.Sub(s.LastOK) < 6*time.Hour
 }
 
-// rank orders servers for connecting: low delay, recently confirmed and
-// rarely failing first.
+// rank orders servers for connecting: measured fast, low delay, recently
+// confirmed and rarely failing first.
 func (s *Server) rank(now time.Time) float64 {
 	r := float64(s.Delay)
 	age := now.Sub(s.LastOK)
@@ -141,7 +146,40 @@ func (s *Server) rank(now time.Time) float64 {
 	if s.Fragment {
 		r += 150
 	}
-	return r
+	return r + s.speedRank(now)
+}
+
+// speedKept is how long a measured speed counts in rank.
+const speedKept = 6 * time.Hour
+
+// speedRank is what the server's measured speed adds to its rank: a server
+// that carried next to nothing goes behind every one that was not
+// measured, and a fast one goes ahead of servers that only answer sooner.
+func (s *Server) speedRank(now time.Time) float64 {
+	if s.SpeedAt.IsZero() || now.Sub(s.SpeedAt) > speedKept {
+		return 0
+	}
+	switch v := s.Speed; {
+	case v < unusable/3:
+		return 4000
+	case v < unusable:
+		return 1500
+	case v < 2*usable:
+		return 0
+	case v < fastEnough:
+		return -300
+	}
+	return -600
+}
+
+// noteSpeed records a measured speed on the server. Results are averaged
+// with a recent one, so one unlucky download does not bury a good server
+// and one lucky one does not lift a bad one. The caller holds Engine.mu.
+func (s *Server) noteSpeed(bps float64, now time.Time) {
+	if !s.SpeedAt.IsZero() && now.Sub(s.SpeedAt) < time.Hour {
+		bps = (s.Speed + bps) / 2
+	}
+	s.Speed, s.SpeedAt = bps, now
 }
 
 // nationalCapable reports whether the server can work where only domestic

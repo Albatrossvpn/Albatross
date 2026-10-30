@@ -72,6 +72,10 @@ type connection struct {
 	waiting    time.Time // when data went out with nothing back since
 	stalls     int       // stalls since stallsFrom (stalledOften)
 	stallsFrom time.Time
+	winStart   time.Time   // the window starved looks at
+	winUpSecs  int         // seconds of the window that sent requests
+	winDown    int64       // bytes the window brought back
+	starvedAt  time.Time   // when starved last fired
 	dnsAt      time.Time   // last check of the names through the server (dnsCheck)
 	dnsFails   int         // failed name checks in a row
 	dnsMoves   []time.Time // switches made because names failed (dnsSwitches)
@@ -864,6 +868,12 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		if err := c.use(actx, best); err == nil {
 			c.keep(actx, best)
 			r = bestR
+		}
+	}
+	if r.OK && e.gateSpeed(actx, c) {
+		// Started on a faster member: its exit is what the user sees.
+		if r2 := tester.Probe(actx, proxy, probeTime(c.activeMember())); r2.OK {
+			r = r2
 		}
 	}
 	if !r.OK {

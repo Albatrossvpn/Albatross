@@ -458,6 +458,13 @@ func (e *Engine) newTester() tester.Tester {
 	t.LocalDNS, t.TunnelDNS = e.localDNS, tunnel
 	t.Mobile = e.opt.Mobile
 	t.LineMbps = e.net.lineMbps()
+	// Every server that answers must also carry a real download (scanSpeed).
+	t.SpeedBytes, t.SpeedTimeout, t.SpeedNeed, t.SpeedConcurrency = 512<<10, 8*time.Second, unusable, 2
+	if e.opt.Mobile {
+		// A phone's data is paid for; a quarter of a megabyte still gets
+		// past the first kilobytes filtering lets through.
+		t.SpeedBytes, t.SpeedConcurrency = 256<<10, 1
+	}
 	return t
 }
 

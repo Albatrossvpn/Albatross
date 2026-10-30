@@ -1027,11 +1027,15 @@ func (e *Engine) unpoison(cands []candidate) []candidate {
 
 // realTest tests candidates in chunks and returns the ones that failed.
 // Rejected and working servers are recorded here; failures are left to
-// the caller, which may retry them.
+// the caller, which may retry them. A server that answers but carries less
+// than unusable fails too (slowFails), with no retry: the tricks that get
+// a blocked handshake through do not make a server faster.
 func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidate {
 	var failed []candidate
 	var mu sync.Mutex
 	for _, part := range chunks(cands, chunk) {
+		var slow []slowResult
+		fast := false
 		if e.ctx.Err() != nil {
 			return nil
 		}
@@ -1050,7 +1054,20 @@ func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidat
 			case r.Rejected:
 				e.pool.Update(c.key, func(p *pool.Entry) { p.State = pool.StateRejected; p.LastTest = pool.Minutes(time.Now()) })
 				e.forget(c.key)
+			case r.OK && r.SpeedTested && r.Speed < unusable:
+				mu.Lock()
+				slow = append(slow, slowResult{c, r})
+				mu.Unlock()
 			case r.OK:
+				if r.SpeedTested {
+					mu.Lock()
+					fast = true
+					mu.Unlock()
+					if p := c.node.Proto; p != "hysteria2" && p != "hysteria" {
+						// As noteLine: Hysteria sends at the speed asked for.
+						e.net.recordLine(r.Speed)
+					}
+				}
 				e.recordOK(c, r)
 			case r.Tampered && e.distrust(c.key, c.node.Name):
 			default:
@@ -1062,8 +1079,36 @@ func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidat
 		if err != nil && e.ctx.Err() == nil {
 			e.logf("warn", "Batch test failed: %v", err)
 		}
+		e.slowFails(slow, fast)
 	}
 	return failed
+}
+
+// slowResult is a server that answered its probe but carried too little.
+type slowResult struct {
+	c candidate
+	r tester.Result
+}
+
+// slowFails records the servers of one batch that answered but carried less
+// than unusable. They fail when this network is known to carry more: another
+// server of the batch did, or the line was measured faster before. When
+// none did, the network itself may be what is slow (Iran throttles all
+// encrypted traffic at times), and failing every server would leave nothing
+// to connect to; they are kept, with their speed, which puts them behind
+// any server measured faster (Server.speedRank).
+func (e *Engine) slowFails(slow []slowResult, fast bool) {
+	if len(slow) == 0 || e.ctx.Err() != nil {
+		return
+	}
+	strict := fast || e.net.lineBps() >= 2*unusable
+	for _, x := range slow {
+		if strict {
+			e.recordFail(x.c, "too slow")
+			continue
+		}
+		e.recordOK(x.c, x.r)
+	}
 }
 
 // chunks splits candidates so one core holds a bounded number of nodes and
@@ -1131,6 +1176,9 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	}
 	s.node = n
 	s.Delay = int(r.Delay / time.Millisecond)
+	if r.SpeedTested {
+		s.noteSpeed(r.Speed, now)
+	}
 	if r.Country != "" {
 		s.Country = r.Country
 	}
