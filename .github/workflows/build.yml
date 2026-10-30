@@ -373,7 +373,7 @@ jobs:
           # carry it, so this only shows that it got in at all; the test
           # job checks that each name still exists.
           if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            for abi in arm64-v8a armeabi-v7a; do
+            for abi in $BUILD_ABIS; do
               n="$(unzip -p "$apk" "lib/$abi/libgojni.so" | grep -acF -- "$ACCOUNT_URL" || true)"
               echo "$abi engine: account service address found ${n:-0} times"
               [ "${n:-0}" -gt 0 ] || { echo "::error::The $abi engine has no account service address."; exit 1; }
