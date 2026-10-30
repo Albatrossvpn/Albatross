@@ -169,6 +169,10 @@ text = text.replace("      version: ${{ steps.version.outputs.version }}\n",
 text = text.replace('          echo "version=$v" >> "$GITHUB_OUTPUT"\n',
                     '          echo "version=$v" >> "$GITHUB_OUTPUT"\n          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"\n', 1)
 text = text.replace("github.event_name != 'workflow_dispatch' || inputs.force_update", "inputs.force_update")
+# A release without the key to the own servers would leave Gold and VIP
+# users without them: there it is an error, not a warning.
+text = text.replace('[ -n "$OWN_KEY" ] || echo "::warning::The OWN_KEY secret is not set: this release cannot open the project\'s own servers."',
+                    '[ -n "$OWN_KEY" ] || { echo "::error::The OWN_KEY secret is not set: this release could not open the project\'s own servers."; exit 1; }')
 # The account comes from the token when its secret is not set (the Mask step).
 text = text.replace("${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", "${{ secrets.CLOUDFLARE_ACCOUNT_ID || env.CF_ACCOUNT }}")
 # Kept as secrets there, so they are masked in the public log.

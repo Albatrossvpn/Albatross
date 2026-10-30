@@ -782,9 +782,10 @@ test("telegram: the webhook answers only Telegram, a person gets the menu, the t
   const paired = (await call("GET", "admin/settings", { token: admin })).body;
   assert.equal(paired.telegram_owner_chat, "900");
   assert.equal(paired.telegram_pair_code, "", "a code works once");
-  // A person opens a ticket: the team's chat gets it.
+  // A person opens a ticket: the team's chat gets it with the first words written in it.
   tgCalls.length = 0;
   await post(said(42, "/human"));
+  await post(said(42, "It does not connect"));
   const card = await sent(900);
   assert.ok(card.text.includes("Ticket #1001") && card.reply_markup.inline_keyboard[0].length === 3, JSON.stringify(card));
   assert.deepEqual(sql("SELECT mode, ticket_id FROM tg_users WHERE chat_id = 42"), [{ mode: "ticket", ticket_id: 1001 }]);
