@@ -18,10 +18,11 @@ const BASE = {
 const PAGE = "default-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 const DATA = "default-src 'none'; frame-ancestors 'none'";
 
-/** The response with the security headers a handler did not set itself. */
-export function armor(response) {
+/** The response with the security headers a handler did not set itself;
+ * `own` overrides some of them for one site. */
+export function armor(response, own = {}) {
   const out = new Response(response.body, response);
-  for (const [name, value] of Object.entries(BASE)) if (!out.headers.has(name)) out.headers.set(name, value);
+  for (const [name, value] of Object.entries({ ...BASE, ...own })) if (!out.headers.has(name)) out.headers.set(name, value);
   if (!out.headers.has("Content-Security-Policy")) {
     out.headers.set("Content-Security-Policy", /^text\/html/i.test(out.headers.get("Content-Type") || "") ? PAGE : DATA);
   }
@@ -52,9 +53,9 @@ export function securityTxt(request, contact) {
  * tests, which present the production host over HTTP, do not), else null. A
  * page, an API call or an installer fetched over HTTP can be read and changed
  * on the way (HSTS protects only a browser that has already been here over
- * HTTPS). The Workers answer first for the pages that matter most (the
- * sign-in and account pages, the API, the downloads), so none is served in the
- * clear; Cloudflare's "Always Use HTTPS" covers the rest.
+ * HTTPS). The account service answers first for its pages and its API,
+ * so no password or token travels in the clear. The public website, on
+ * purpose, answers over HTTP too (site/src/index.js).
  */
 export function httpsRedirect(request) {
   const url = new URL(request.url);

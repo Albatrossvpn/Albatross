@@ -85,13 +85,21 @@ test("the static headers of both sites are strict", () => {
   for (const [name, base] of [["website", SITE], ["accounts", ACCOUNTS]]) {
     const text = read(base, "_headers");
     for (const h of [
-      "Strict-Transport-Security: max-age=31536000; includeSubDomains", "X-Content-Type-Options: nosniff", "X-Frame-Options: DENY",
+      "X-Content-Type-Options: nosniff", "X-Frame-Options: DENY",
       "Referrer-Policy: no-referrer", "X-Permitted-Cross-Domain-Policies: none",
     ]) assert.ok(text.includes(h), `${name}: ${h}`);
     const csp = text.match(/Content-Security-Policy: (.+)/)[1];
-    for (const d of ["object-src 'none'", "base-uri 'none'", "frame-ancestors 'none'", "upgrade-insecure-requests"]) assert.ok(csp.includes(d), `${name}: ${d}`);
+    for (const d of ["object-src 'none'", "base-uri 'none'", "frame-ancestors 'none'"]) assert.ok(csp.includes(d), `${name}: ${d}`);
     assert.doesNotMatch(csp, /unsafe-inline|unsafe-eval/, name);
   }
+  // The account service is HTTPS only; the website works over plain HTTP too,
+  // so it neither pins browsers to HTTPS nor upgrades what its pages load.
+  const accountsCsp = read(ACCOUNTS, "_headers");
+  assert.match(accountsCsp, /Strict-Transport-Security: max-age=31536000; includeSubDomains/);
+  assert.match(accountsCsp, /upgrade-insecure-requests/);
+  const siteHeaders = read(SITE, "_headers");
+  assert.match(siteHeaders, /Strict-Transport-Security: max-age=0\n/);
+  assert.doesNotMatch(siteHeaders, /upgrade-insecure-requests/);
   const accountsHeaders = read(ACCOUNTS, "_headers");
   assert.match(accountsHeaders, /Cross-Origin-Opener-Policy: same-origin/);
   for (const p of ["/account", "/account.html", "/admin", "/admin.html"]) {
@@ -137,13 +145,19 @@ test("the administrator sign-in is held to a total across all addresses", async 
   assert.ok((await ok.json()).token);
 });
 
-test("nothing is served over plain HTTP", async () => {
+test("the account service is never served over plain HTTP; the website is", async () => {
   const bucket = { list: async () => ({ objects: [] }), head: async () => null, get: async () => null };
   const viaEdge = { headers: { "CF-Ray": "8d2f0c3a1b2c3d4e-DXB" } };
+  for (const path of ["/download/", "/update.json", "/list/nothing"]) {
+    const env = { FILES: bucket, ASSETS: { fetch: async () => new Response("asset") } };
+    const res = await website.fetch(new Request(`http://albatrossvpn.online${path}`, viaEdge), env, { waitUntil() {} });
+    assert.notEqual(res.status, 301, path);
+    assert.notEqual(res.status, 308, path);
+    assert.equal(res.headers.get("Strict-Transport-Security"), "max-age=0", path);
+  }
   for (const [worker, host, path, env] of [
     [accounts, "accounts.albatrossvpn.online", "/account", accountsEnv()],
     [accounts, "accounts.albatrossvpn.online", "/api/v1/public", accountsEnv()],
-    [website, "albatrossvpn.online", "/download/Albatross-1.1.0-android.apk", { FILES: bucket, ASSETS: { fetch: async () => new Response("asset") } }],
   ]) {
     const res = await worker.fetch(new Request(`http://${host}${path}`, viaEdge), env, { waitUntil() {} });
     assert.equal(res.status, 301, path);

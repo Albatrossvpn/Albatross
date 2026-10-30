@@ -57,7 +57,10 @@ jobs:
               *) echo "::warning::$1 stays $have: $out"; failed=1 ;;
             esac
           }
-          want always_use_https on
+          # Off on purpose: the public website also answers over plain HTTP,
+          # which may get through where HTTPS is blocked. The account service
+          # sends HTTP visitors to HTTPS itself (backend/src/headers.js).
+          want always_use_https off
           want automatic_https_rewrites on
           want min_tls_version 1.2
           want tls_1_3 on

@@ -6,7 +6,10 @@
 // never reach GitHub themselves. /list/<path> serves the app's own files
 // from the same storage, one more address for the apps.
 import { FILE_NAME, serveFile, serveList } from "../../backend/src/files.js";
-import { armor, httpsRedirect, securityTxt } from "../../backend/src/headers.js";
+import { armor, securityTxt } from "../../backend/src/headers.js";
+
+const OPEN = { "Strict-Transport-Security": "max-age=0" };
+const serve = (response) => armor(response, OPEN);
 
 const MANIFEST = [
   "https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json",
@@ -17,31 +20,30 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     // What the Worker answers itself carries the security headers; the static
-    // pages carry theirs from public/_headers. The release files in
-    // particular are never served over plain HTTP, where they could be
-    // swapped on the way.
-    const insecure = httpsRedirect(request);
-    if (insecure) return armor(insecure);
-    if (url.pathname === "/.well-known/security.txt") return armor(securityTxt(request, "support@albatrossvpn.online"));
-    if (url.pathname === "/update.json") return armor((await serveList(request, env.FILES, "main/update.json")) || (await manifest()));
+    // pages carry theirs from public/_headers. The website answers over plain
+    // HTTP as well as HTTPS (where HTTPS is blocked, HTTP may still get
+    // through), so it asks no browser to insist on HTTPS. The account service,
+    // where passwords are typed, stays HTTPS only.
+    if (url.pathname === "/.well-known/security.txt") return serve(securityTxt(request, "support@albatrossvpn.online"));
+    if (url.pathname === "/update.json") return serve((await serveList(request, env.FILES, "main/update.json")) || (await manifest()));
     if (url.pathname.startsWith("/list/")) {
       const r = await serveList(request, env.FILES, url.pathname.slice("/list/".length));
-      return armor(r || new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }));
+      return serve(r || new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }));
     }
     const m = /^\/download\/([^/]*)$/.exec(url.pathname);
     if (!m) return env.ASSETS.fetch(request);
     if (request.method !== "GET" && request.method !== "HEAD") {
-      return armor(new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } }));
+      return serve(new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } }));
     }
-    if (!m[1]) return armor(await index(env.FILES));
+    if (!m[1]) return serve(await index(env.FILES));
     let name;
     try {
       name = decodeURIComponent(m[1]);
     } catch {
-      return armor(new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }));
+      return serve(new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }));
     }
     const r = await serveFile(request, env.FILES, name);
-    return armor(r || new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }));
+    return serve(r || new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }));
   },
 };
 

@@ -73,7 +73,7 @@ What the code already does: every answer a Worker builds carries HSTS, `nosniff`
 What only you can do:
 
 - Keep `ADMIN_PASSWORD` at 16 or more random characters (the deploy workflow warns when it is shorter), and turn on two-step sign-in for your Cloudflare, GitHub and domain-registrar accounts. Lock the domain at the registrar.
-- In Cloudflare, SSL/TLS → Edge Certificates → **Always Use HTTPS** (covers the static files the Workers do not see). The *Harden the Cloudflare zone* workflow does this and a few related settings when `CLOUDFLARE_API_TOKEN` may edit the zone's settings; it says which setting it could not change.
+- Leave Cloudflare's **Always Use HTTPS** off: the public website answers over plain HTTP too (it may get through where HTTPS is blocked), and the account service sends HTTP visitors to HTTPS itself. The *Harden the Cloudflare zone* workflow sets this and the TLS settings when `CLOUDFLARE_API_TOKEN` may edit the zone's settings; it says which setting it could not change.
 - Turn on DNSSEC (Cloudflare → DNS → Settings) and add the DS record it shows at the registrar.
 
 ### Optional: Turnstile on sign-up
