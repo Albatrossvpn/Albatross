@@ -1394,7 +1394,12 @@ async function salesReport(c) {
   const last = await env.DB.prepare("SELECT id, kind, gb, stars, username, status FROM stars_payments ORDER BY id DESC LIMIT 8").all();
   const lines = last.results.map((r) => `<b>P${r.id}</b> - ${r.kind === "test" ? "test" : `${r.gb} GB`} ⭐${r.stars}${r.username ? ` - <code>${view.esc(r.username)}</code>` : ""} - ${r.status}`);
   const shop = await shopOf(env);
-  return c.tg.send(c.team, `💰 <b>Sales</b> (${shop ? "on sale" : "selling is off"})\nToday (UTC): ${n.sales || 0} sold for ⭐${n.stars || 0}, ${n.refunds || 0} refunded\n\n${lines.join("\n") || "<i>No payments yet.</i>"}\n\n<i>/refund P12 gives one back.</i>`);
+  // The Stars are the bot's: Telegram keeps them in its balance, and its owner
+  // withdraws them (Fragment, in TON) 21 days after each payment.
+  const bal = await c.tg.call("getMyStarBalance", {}).catch(() => null);
+  const amount = bal && bal.ok && bal.result && Number.isFinite(Number(bal.result.amount)) ? Number(bal.result.amount) : null;
+  const balance = amount === null ? "" : `\nThe bot's balance: ⭐${amount} (withdrawn from the bot's profile in Telegram, through Fragment, 21 days after each payment)`;
+  return c.tg.send(c.team, `💰 <b>Sales</b> (${shop ? "on sale" : "selling is off"})\nToday (UTC): ${n.sales || 0} sold for ⭐${n.stars || 0}, ${n.refunds || 0} refunded${balance}\n\n${lines.join("\n") || "<i>No payments yet.</i>"}\n\n<i>/refund P12 gives one back.</i>`);
 }
 
 /** /teststars: an invoice of 1 Star to the person who asked, to see that selling works end to end (it can be refunded). */

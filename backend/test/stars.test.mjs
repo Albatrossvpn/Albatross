@@ -432,6 +432,13 @@ test("/sales shows today's numbers and the last payments to the team only", asyn
   assert.ok(w.lastText(SARA).text.startsWith("I do not know that command"));
 });
 
+test("/sales shows the bot's Stars balance as Telegram reports it", async () => {
+  const w = await shop();
+  w.api.overrides.getMyStarBalance = { ok: true, result: { amount: 1234, nanostar_amount: 0 } };
+  await w.send(text(TEAM, "/sales"));
+  assert.ok(w.lastText(TEAM).text.includes("The bot's balance: ⭐1234"), w.lastText(TEAM).text);
+});
+
 test("/teststars sends an invoice of one Star that makes no account, works while selling is off, and can be given back", async () => {
   const w = await shop({ on: false });
   await w.send(text(TEAM, "/teststars"));
