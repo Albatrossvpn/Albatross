@@ -22,6 +22,8 @@ concurrency:
 
 jobs:
   discover:
+    # As collect.yml: in alba-data once COLLECT_IN_DATA_REPO is 1.
+    if: vars.COLLECT_IN_DATA_REPO != '1'
     runs-on: ubuntu-latest
     timeout-minutes: 58
     steps:

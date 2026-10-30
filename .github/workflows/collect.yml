@@ -28,6 +28,11 @@ concurrency:
 
 jobs:
   collect:
+    # Collections run in the public repository alba-data once its
+    # secrets are in place and this variable is 1 there and here: a public
+    # repository's minutes are free, and two collectors would race over the
+    # list keys.
+    if: vars.COLLECT_IN_DATA_REPO != '1'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:

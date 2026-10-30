@@ -441,7 +441,7 @@ func Mirrors(u string) []string {
 	// api.github.com stayed open through Iran's allowlist periods while
 	// github.com and raw were closed. Anonymous use allows 60 requests an
 	// hour per address, so only the app's own files go this way.
-	if strings.EqualFold(owner+"/"+repo, ownRepo) {
+	if isOwnRepo(owner, repo) {
 		out = append(out, fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", owner, repo, path, branch))
 		for _, w := range strings.Split(WorkerMirror, ",") {
 			if w = strings.TrimRight(strings.TrimSpace(w), "/"); w != "" {
@@ -487,13 +487,23 @@ func IsWorker(u string) bool {
 	return false
 }
 
-// ownRepo is the app's own repository, where the collector publishes.
-const ownRepo = "Albatrossvpn/Albatross"
+// ownRepos are the app's own repositories: its code and update manifest,
+// and the public one the collector publishes the sealed lists to.
+var ownRepos = []string{"Albatrossvpn/Albatross", "Albatrossvpn/alba-data"}
+
+func isOwnRepo(owner, repo string) bool {
+	for _, r := range ownRepos {
+		if strings.EqualFold(owner+"/"+repo, r) {
+			return true
+		}
+	}
+	return false
+}
 
 // isOwn says whether u is one of the app's own files on GitHub.
 func isOwn(u string) bool {
 	m := rawGitHubRe.FindStringSubmatch(u)
-	return m != nil && strings.EqualFold(m[1]+"/"+m[2], ownRepo)
+	return m != nil && isOwnRepo(m[1], m[2])
 }
 
 // ownGitHubWait is the most each GitHub or CDN try of an own file may take.
