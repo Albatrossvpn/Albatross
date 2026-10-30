@@ -17,6 +17,7 @@
 import { DAY, TIERS, b64u, checkUsername, safeEqual, tag, tierOf } from "./lib.js";
 import { DEFAULT, PACKS, has, pack } from "./i18n/index.js";
 import * as sales from "./sales.js";
+import * as fx from "./fx.js";
 import { allowed, cleanMessages, mailOwner, oneLine, reply, stamp, today } from "./support.js";
 import * as view from "./telegram-content.js";
 
@@ -638,6 +639,14 @@ async function startTopic(c, user, topic, put) {
   const v = await viewOf(c, user.chat_id);
   if (topic === "human" || topic === "team") return openTicket(c, user);
   if (topic === "buy") return showStore(c, user, put);
+  const renew = view.renewTarget(topic);
+  if (renew) {
+    // From the app: the store, for that account. "Add to my account" then
+    // needs no username (onStoreButton), as long as the account can be.
+    const account = checkUsername(renew) ? await sales.accountFor(c.env, renew) : null;
+    if (account && account.fits) await setMode(c.env, user.chat_id, "renew", account.username);
+    return showStore(c, user, put);
+  }
   const shop = await shopOf(c.env);
   const screens = { connect: () => v.connectPicker(), install: () => v.installPicker(), plans: () => v.plans(shop), account: () => v.ACCOUNT_INFO, downloads: () => v.DOWNLOADS };
   return put(Object.hasOwn(screens, topic) ? screens[topic]() : v.menu(user.name, !!shop));
@@ -1242,13 +1251,16 @@ async function remindRenewals(c, t) {
 /** The packages on sale now, with the settings; null while selling is off. */
 async function shopOf(env) {
   const cfg = await sales.config(env);
-  return cfg.enabled ? { cfg, catalog: sales.catalog(cfg), days: cfg.days } : null;
+  if (!cfg.enabled) return null;
+  // What a price comes to in the buyer's money (telegram-content.js moneyIn).
+  const money = { starUsd: cfg.buyPer1000 / 1000, toman: cfg.usdToman, rates: await fx.ratesOf(env) };
+  return { cfg, catalog: sales.catalog(cfg), days: cfg.days, money };
 }
 
 async function showStore(c, user, put = (s) => c.tg.send(user.chat_id, s.text, s.markup)) {
   const v = await viewOf(c, user.chat_id);
   const shop = await shopOf(c.env);
-  return put(shop ? v.store(shop.catalog, shop.days) : v.STORE_OFF);
+  return put(shop ? v.store(shop.catalog, shop.days, shop.money) : v.STORE_OFF);
 }
 
 /** Orders a person may make: ten an hour, three hundred a day in all. */
@@ -1279,18 +1291,28 @@ async function onStoreButton(c, user, kind, arg, edit, show, extra = "") {
   switch (kind) {
     case "s":
     case "b":
-      return edit(p ? v.builder(p, limitsOf(p.gb)) : v.store(shop.catalog, shop.days));
+      return edit(p ? v.builder(p, limitsOf(p.gb), shop.money) : v.store(shop.catalog, shop.days, shop.money));
     case "st":
       return show(v.terms(shop.days));
     case "sn": {
-      if (!p) return edit(v.store(shop.catalog, shop.days));
+      if (!p) return edit(v.store(shop.catalog, shop.days, shop.money));
       if (!(await mayOrder(c, await idTag(c, chat)))) return tg.send(chat, v.SLOW_DOWN);
-      return edit(v.checkout(await makeOrder(c, user, shop, p, "new"), p, shop.days));
+      return edit(v.checkout(await makeOrder(c, user, shop, p, "new"), p, shop.days, shop.money));
     }
-    case "sr":
-      if (!p) return edit(v.store(shop.catalog, shop.days));
+    case "sr": {
+      if (!p) return edit(v.store(shop.catalog, shop.days, shop.money));
+      if (user.mode === "renew" && user.device) {
+        // The account the app came from: no need to ask its name.
+        const account = await sales.accountFor(env, user.device);
+        if (account && account.fits) {
+          if (!(await mayOrder(c, await idTag(c, chat)))) return tg.send(chat, v.SLOW_DOWN);
+          await setMode(env, chat, "");
+          return edit(v.checkout(await makeOrder(c, user, shop, p, "topup", account.username), p, shop.days, shop.money));
+        }
+      }
       await setMode(env, chat, "topup", `${p.gb}:${p.months}`);
       return edit(v.askAccount(p));
+    }
     default: // "sp": the person agreed, and the invoice is sent
       return sendInvoice(c, user, Number(arg));
   }
@@ -1307,7 +1329,7 @@ async function onAccountName(c, user, text) {
   const p = shop && sales.plan(shop.cfg, Number(gb), Number(months || 1));
   if (!p) {
     await setMode(env, chat, "");
-    return send(shop ? v.store(shop.catalog, shop.days) : v.STORE_OFF);
+    return send(shop ? v.store(shop.catalog, shop.days, shop.money) : v.STORE_OFF);
   }
   const name = text.trim().toLowerCase();
   if (!checkUsername(name)) return send(v.NOT_A_USERNAME);
@@ -1319,7 +1341,7 @@ async function onAccountName(c, user, text) {
   if (!account.fits) return send(v.CANNOT_RECHARGE);
   if (!(await mayOrder(c, t))) return tg.send(chat, v.SLOW_DOWN);
   await setMode(env, chat, "");
-  return send(v.checkout(await makeOrder(c, user, shop, p, "topup", account.username), p, shop.days));
+  return send(v.checkout(await makeOrder(c, user, shop, p, "topup", account.username), p, shop.days, shop.money));
 }
 
 /** The order's invoice, in Stars (no provider and no key: Telegram's own currency, XTR). */
