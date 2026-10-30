@@ -80,7 +80,7 @@ OPEN = """      - name: Open from the cache
 def checkout(indent, extra):
     pad = " " * indent
     lines = [f"{pad}- uses: actions/checkout@v7", f"{pad}  with:", f"{pad}    repository: {PRIVATE}",
-             f"{pad}    token: ${{{{ secrets.SOURCE_TOKEN }}}}"]
+             f"{pad}    token: ${{{{ secrets.SOURCE_TOKEN || secrets.MYALBA }}}}"]
     if "ref" not in extra:
         lines.append(f"{pad}    ref: ${{{{ inputs.ref }}}}")
     lines += [f"{pad}    {k}: {v}" for k, v in extra.items()]
@@ -156,8 +156,8 @@ while i < len(body):
 text = "\n".join(out) + "\n"
 # The release is this repository's: its commit, its releases, its manifest.
 text = text.replace("target_commitish: ${{ github.sha }}", "target_commitish: ${{ needs.build.outputs.sha }}\n          repository: " + PRIVATE)
-text = text.replace("${{ secrets.RELEASE_TOKEN || github.token }}", "${{ secrets.SOURCE_TOKEN }}")
-text = text.replace("          GH_TOKEN: ${{ secrets.SOURCE_TOKEN }}\n", "          GH_TOKEN: ${{ secrets.SOURCE_TOKEN }}\n          RELEASE_REPO: " + PRIVATE + "\n")
+text = text.replace("${{ secrets.RELEASE_TOKEN || github.token }}", "${{ secrets.SOURCE_TOKEN || secrets.MYALBA }}")
+text = text.replace("          GH_TOKEN: ${{ secrets.SOURCE_TOKEN || secrets.MYALBA }}\n", "          GH_TOKEN: ${{ secrets.SOURCE_TOKEN || secrets.MYALBA }}\n          RELEASE_REPO: " + PRIVATE + "\n")
 text = text.replace("      version: ${{ steps.version.outputs.version }}\n",
                     "      version: ${{ steps.version.outputs.version }}\n      sha: ${{ steps.version.outputs.sha }}\n", 1)
 text = text.replace('          echo "version=$v" >> "$GITHUB_OUTPUT"\n',
