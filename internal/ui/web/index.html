@@ -164,7 +164,7 @@
         <defs><linearGradient id="gauge-grad" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2f5fe0"/><stop offset="1" stop-color="#d6ab55"/></linearGradient></defs>
         <path class="g-track" d="M45 180A120 120 0 1 1 255 180"/>
         <path class="g-fill" id="g-fill" d="M45 180A120 120 0 1 1 255 180"/>
-        <g class="g-marks"><text x="52" y="204">0</text><text x="30" y="110">10</text><text x="78" y="40">50</text><text x="150" y="20">100</text><text x="222" y="40">250</text><text x="270" y="110">500</text><text x="248" y="204">1G</text></g>
+        <g class="g-marks"><text x="69.5" y="166.4" dy=".35em">0</text><text x="59.6" y="104.8" dy=".35em">10</text><text x="91.3" y="51.1" dy=".35em">50</text><text x="150.0" y="29.9" dy=".35em">100</text><text x="208.7" y="51.1" dy=".35em">250</text><text x="240.4" y="104.8" dy=".35em">500</text><text x="230.5" y="166.4" dy=".35em">1G</text></g>
         <text class="g-value" id="g-value" x="150" y="150">—</text>
         <text class="g-label" id="g-label" x="150" y="178">Mb/s</text>
       </svg>
@@ -201,64 +201,39 @@
         <ul class="checks" id="pc-list"></ul>
       </div>
 
-      <div class="tiles">
-        <label class="tile-toggle" data-feature="adblock"><input type="checkbox" id="set-block_ads"><span class="ti"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg></span><span class="t-body"><b>Ad &amp; tracker blocker</b><small>Ads, trackers, pop-ups and harmful sites, in every app</small></span><span class="switch"></span></label>
-        <label class="tile-toggle"><input type="checkbox" id="set-secure_only"><span class="ti"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><span class="t-body"><b>Block unencrypted</b><small>Refuses traffic a server could read</small></span><span class="switch"></span></label>
-        <label class="tile-toggle mobile-only" data-feature="bypass_apps"><input type="checkbox" id="set-bypass_apps"><span class="ti"><svg viewBox="0 0 24 24"><path d="M4 10 12 4l8 6"/><path d="M6 10v8M10 10v8M14 10v8M18 10v8M4 20h16"/></svg></span><span class="t-body"><b>Local apps outside</b><small>Banks, payment, taxi and shopping apps of your country skip the VPN</small></span><span class="switch"></span></label>
-        <label class="tile-toggle desktop-only" data-feature="tun"><input type="checkbox" id="set-tun"><span class="ti"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span><span class="t-body"><b>Protect the whole device</b><small>Every app and game; needs administrator rights</small></span><span class="switch"></span></label>
-        <label class="tile-toggle mobile-only" data-feature="gps"><input type="checkbox" id="set-override_gps"><span class="ti"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg></span><span class="t-body"><b>Override GPS</b><small>Apps that read GPS see your VPN's country</small></span><span class="switch"></span></label>
-        <label class="tile-toggle" data-feature="lan"><input type="checkbox" id="set-allow_lan"><span class="ti"><svg viewBox="0 0 24 24"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01"/></svg></span><span class="t-body"><b>Share with devices</b><small id="share-note">Phones, laptops and TVs on your Wi-Fi or hotspot use this connection</small></span><span class="switch"></span></label>
+      <h3 class="set-head">Protection</h3>
+      <div class="card group">
+        <label class="toggle" data-feature="adblock"><span class="ri"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></svg></span><span class="t-body"><b>Ad &amp; tracker blocker</b><small>Ads, trackers and harmful sites, in every app</small></span><input type="checkbox" id="set-block_ads"><span class="switch"></span></label>
+        <label class="toggle"><span class="ri"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg></span><span class="t-body"><b>Block unencrypted</b><small>Refuses traffic a server could read</small></span><input type="checkbox" id="set-secure_only"><span class="switch"></span></label>
+        <label class="toggle desktop-only" data-feature="tun"><span class="ri"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></span><span class="t-body"><b>Protect the whole device</b><small>Every app and game; needs administrator rights</small></span><input type="checkbox" id="set-tun"><span class="switch"></span></label>
+        <button class="row mobile-only" id="row-killswitch"><span class="ri"><svg viewBox="0 0 24 24"><path d="M13 3 5 14h6l-1 7 8-11h-6z"/></svg></span><span class="t-body"><b>Kill switch</b><small>No internet without the VPN (the system's Always-on VPN)</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        <label class="toggle mobile-only" data-feature="gps"><span class="ri"><svg viewBox="0 0 24 24"><path d="M12 21s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg></span><span class="t-body"><b>Override GPS</b><small>Apps that read GPS see your VPN's country</small></span><input type="checkbox" id="set-override_gps"><span class="switch"></span></label>
       </div>
       <button class="row follow hidden" id="gps-setup"><span class="t-body"><small>GPS override needs a one-time setup. Tap to finish.</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
 
+      <h3 class="set-head">Connection</h3>
       <div class="card group">
-        <button class="row" id="row-protocol" data-feature="protocols">
-          <span class="ri"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span>
-          <span class="t-body"><b>Protocol</b><small id="protocol-value">Automatic</small></span>
-          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
-        <button class="row" id="row-bypass">
-          <span class="ri"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
-          <span class="t-body"><b>Bypass local sites</b><small id="bypass-value">Off</small></span>
-          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
-        <button class="row mobile-only" id="row-killswitch">
-          <span class="ri"><svg viewBox="0 0 24 24"><path d="M13 3 5 14h6l-1 7 8-11h-6z"/></svg></span>
-          <span class="t-body"><b>Kill switch</b><small>Block connections without VPN: opens the system's Always-on VPN</small></span>
-          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
-        <button class="row" id="row-support" data-feature="support">
-          <span class="ri gold"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 16 0v5a2 2 0 0 1-2 2h-2v-6h4M4 13h4v6H6a2 2 0 0 1-2-2z"/></svg></span>
-          <span class="t-body"><b>Direct support</b><small>A direct line to our team</small></span>
-          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
-        <button class="row" id="row-share">
-          <span class="ri"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="m8.2 10.8 7.6-3.6M8.2 13.2l7.6 3.6"/></svg></span>
-          <span class="t-body"><b>Share servers with a friend</b><small>Pass working servers on by Bluetooth or any messenger, even without internet</small></span>
-          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
-        <button class="row mobile-only" id="row-share-app">
-          <span class="ri"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></span>
-          <span class="t-body"><b>Share the app</b><small>Send this app's installer to a friend's phone</small></span>
-          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
-        <button class="row desktop-only" id="row-save-installer">
-          <span class="ri"><svg viewBox="0 0 24 24"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg></span>
-          <span class="t-body"><b>Save the installer</b><small>Put this app's Windows installer in Downloads, to pass on by USB or any messenger when the website is blocked</small></span>
-          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
-        <button class="row" id="row-privacy">
-          <span class="ri"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg></span>
-          <span class="t-body"><b>Privacy</b><small>What is protected and what is not</small></span>
-          <svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
-        </button>
+        <button class="row" id="row-protocol" data-feature="protocols"><span class="ri"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span><span class="t-body"><b>Protocol</b><small id="protocol-value">Automatic</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="row" id="row-bypass"><span class="ri"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span><span class="t-body"><b>Bypass local sites</b><small id="bypass-value">Off</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        <label class="toggle mobile-only" data-feature="bypass_apps"><span class="ri"><svg viewBox="0 0 24 24"><path d="M4 10 12 4l8 6"/><path d="M6 10v8M10 10v8M14 10v8M18 10v8M4 20h16"/></svg></span><span class="t-body"><b>Local apps outside</b><small>Banks, payment, taxi and shopping apps of your country skip the VPN</small></span><input type="checkbox" id="set-bypass_apps"><span class="switch"></span></label>
+        <label class="toggle"><span class="ri"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.9a8 8 0 1 0 11.4 0"/></svg></span><span class="t-body"><b>Auto-connect</b><small>Connect when the app starts</small></span><input type="checkbox" id="set-auto_connect"><span class="switch"></span></label>
+        <label class="toggle desktop-only"><span class="ri"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 21h8"/></svg></span><span class="t-body"><b>Start with system</b><small>Open the app when you sign in</small></span><input type="checkbox" id="set-start_with_system"><span class="switch"></span></label>
       </div>
 
+      <h3 class="set-head">Sharing</h3>
       <div class="card group">
-        <label class="toggle"><input type="checkbox" id="set-auto_connect"><span class="t-body"><b>Auto-connect</b><small>Connect when the app starts</small></span><span class="switch"></span></label>
-        <label class="toggle desktop-only"><input type="checkbox" id="set-start_with_system"><span class="t-body"><b>Start with system</b><small>Open the app when you sign in</small></span><span class="switch"></span></label>
-        <label class="toggle hidden" id="crowd-row"><input type="checkbox" id="set-share_stats"><span class="t-body"><b>Learn from other users</b><small>Shares which kinds of server work on your network, as counts only, with no addresses or sites</small></span><span class="switch"></span></label>
-        <label class="toggle desktop-only hidden" id="help-row"><input type="checkbox" id="set-help_others"><span class="t-body"><b>Help others get online</b><small id="help-note">Lets people in censored countries reach Tor through this computer.</small></span><span class="switch"></span></label>
+        <label class="toggle" data-feature="lan"><span class="ri"><svg viewBox="0 0 24 24"><path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01"/></svg></span><span class="t-body"><b>Share with devices</b><small id="share-note">Phones, laptops and TVs on your Wi-Fi or hotspot use this connection</small></span><input type="checkbox" id="set-allow_lan"><span class="switch"></span></label>
+        <button class="row" id="row-share"><span class="ri"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="m8.2 10.8 7.6-3.6M8.2 13.2l7.6 3.6"/></svg></span><span class="t-body"><b>Share servers with a friend</b><small>By Bluetooth or any messenger, even without internet</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="row mobile-only" id="row-share-app"><span class="ri"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></span><span class="t-body"><b>Share the app</b><small>Send this app's installer to a friend's phone</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="row desktop-only" id="row-save-installer"><span class="ri"><svg viewBox="0 0 24 24"><path d="M12 4v12M6 11l6 6 6-6M5 20h14"/></svg></span><span class="t-body"><b>Save the installer</b><small>Put the Windows installer in Downloads, to pass on when the website is blocked</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        <label class="toggle desktop-only hidden" id="help-row"><span class="ri"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 0 1 0 18"/></svg></span><span class="t-body"><b>Help others get online</b><small id="help-note">Lets people in censored countries reach Tor through this computer.</small></span><input type="checkbox" id="set-help_others"><span class="switch"></span></label>
+        <label class="toggle hidden" id="crowd-row"><span class="ri"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg></span><span class="t-body"><b>Learn from other users</b><small>Shares which kinds of server work on your network, as counts only, with no addresses or sites</small></span><input type="checkbox" id="set-share_stats"><span class="switch"></span></label>
+      </div>
+
+      <h3 class="set-head">Help</h3>
+      <div class="card group">
+        <button class="row" id="row-support" data-feature="support"><span class="ri gold"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 16 0v5a2 2 0 0 1-2 2h-2v-6h4M4 13h4v6H6a2 2 0 0 1-2-2z"/></svg></span><span class="t-body"><b>Direct support</b><small>A direct line to our team</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="row" id="row-privacy"><span class="ri"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5h1"/></svg></span><span class="t-body"><b>Privacy</b><small>What is protected and what is not</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
       </div>
 
       <div class="card about">
@@ -294,7 +269,7 @@
   <nav class="tabs">
     <button data-view="home" class="active"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.9a8 8 0 1 0 11.4 0"/></svg><span>Connect</span></button>
     <button data-view="locations"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg><span>Locations</span></button>
-    <button data-view="speed"><svg viewBox="0 0 24 24"><path d="M4 17a8 8 0 1 1 16 0"/><path d="m12 17 4-5"/></svg><span>Speed</span></button>
+    <button data-view="speed"><svg viewBox="0 0 24 24"><path d="M3.5 18a9.5 9.5 0 1 1 17 0"/><path d="m12 13.8 3.6-3.6"/></svg><span>Speed</span></button>
     <button data-view="settings"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9 7 7M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>Settings</span></button>
   </nav>
 
@@ -387,14 +362,22 @@
     <form class="login-card" id="login-form">
       <img src="icon.svg" alt="" width="72" height="72">
       <div class="wordmark">ALBATROSS</div>
-      <h1>Welcome back</h1>
-      <p>Sign in with the username and password you were given.</p>
+      <h1>Welcome</h1>
+      <p>Sign in with your Albatross username and password.</p>
       <input id="login-user" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Username" required>
       <input id="login-pass" type="password" autocomplete="current-password" placeholder="Password" required>
       <div class="form-error" id="login-error" role="alert"></div>
       <div class="login-progress hidden" id="login-progress" aria-live="polite"><span class="spin"></span><span id="login-progress-text"></span></div>
       <button class="btn primary wide big" type="submit" id="login-btn">Sign in</button>
-      <button class="link login-buy hidden" type="button" id="login-buy">No account? Buy one in Telegram</button>
+      <div class="login-new hidden" id="login-new">
+        <h2>No account yet?</h2>
+        <ol>
+          <li>Open our Telegram bot and tap <b>Buy data</b>.</li>
+          <li>Choose a package and pay with Telegram Stars.</li>
+          <li>Your username and password arrive in the chat at once. Sign in here.</li>
+        </ol>
+        <button class="btn vip wide" type="button" id="login-buy">Buy an account in Telegram</button>
+      </div>
     </form>
   </div>
 

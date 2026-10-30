@@ -19,3 +19,11 @@ func TestRenewURL(t *testing.T) {
 		t.Fatal("bot name check")
 	}
 }
+
+// Before the service has said what is on sale, the sign-in screen still
+// offers the build's bot; once it says nothing is, it offers none.
+func TestBuyBeforeTheStoreIsKnown(t *testing.T) {
+	if !botName.MatchString(SupportBot) {
+		t.Fatalf("the build's bot is no bot name: %q", SupportBot)
+	}
+}

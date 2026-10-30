@@ -472,4 +472,9 @@ func TestStore(t *testing.T) {
 	if _, err := c.Login(context.Background(), "ada", "pw"); err != nil || c.Store() != nil {
 		t.Fatalf("selling stopped, still offered: %+v, %v", c.Store(), err)
 	}
+	// Signed out, the service says nothing is on sale: known, and empty.
+	c.Logout()
+	if s, err := c.FetchStore(context.Background()); err != nil || s == nil || s.Bot != "" || c.Store() == nil {
+		t.Fatalf("nothing on sale: %+v, %v", s, err)
+	}
 }
