@@ -1,0 +1,66 @@
+name: Harden the Cloudflare zone
+
+# Turns on the zone settings that keep the website and the account service
+# on HTTPS, by hand only: plain HTTP used to be answered with the page itself
+# (HSTS only helps a browser that has already been here over HTTPS), so
+# "Always Use HTTPS" redirects it. Each setting is read first and written only
+# when it differs; the log says which were already right, which were changed
+# and which the token was not allowed to change (the token needs the Zone
+# Settings edit right: dash.cloudflare.com, My Profile, API Tokens). Nothing
+# secret is printed.
+on:
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: The project's domain in the Cloudflare account
+        required: false
+        type: string
+        default: albatrossvpn.online
+
+permissions:
+  contents: read
+
+jobs:
+  harden:
+    if: github.repository == 'Albatrossvpn/Albatross' && github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      DOMAIN: ${{ inputs.domain }}
+    steps:
+      - name: Settings
+        run: |
+          set -uo pipefail
+          [ -n "$CF_TOKEN" ] || { echo "::error::The repository secret CLOUDFLARE_API_TOKEN is not set."; exit 1; }
+          case "$DOMAIN" in ""|*[!a-z0-9.-]*) echo "::error::The domain is letters, digits, dots and dashes."; exit 1 ;; esac
+          api() { # method path [json]
+            curl -sS --max-time 30 -X "$1" "https://api.cloudflare.com/client/v4$2" \
+              -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" ${3:+--data "$3"}
+          }
+          field() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1], {"d": d}))' "$1"; }
+          zone="$(api GET "/zones?name=$DOMAIN" | field '(d.get("result") or [{}])[0].get("id", "")')"
+          [ -n "$zone" ] || { echo "::error::No zone $DOMAIN in this Cloudflare account, or the token cannot read zones."; exit 1; }
+          echo "zone $DOMAIN found"
+          failed=0
+          want() { # setting value
+            local have
+            have="$(api GET "/zones/$zone/settings/$1" | field '(d.get("result") or {}).get("value", "unknown")')"
+            if [ "$have" = "$2" ]; then
+              echo "ok      $1 is already $2"
+              return
+            fi
+            local out
+            out="$(api PATCH "/zones/$zone/settings/$1" "{\"value\":\"$2\"}" | field '"%s %s" % (d.get("success"), "; ".join(e.get("message", "") for e in d.get("errors") or []))')"
+            case "$out" in
+              True*) echo "changed $1: $have -> $2" ;;
+              *) echo "::warning::$1 stays $have: $out"; failed=1 ;;
+            esac
+          }
+          want always_use_https on
+          want automatic_https_rewrites on
+          want min_tls_version 1.2
+          want tls_1_3 on
+          want opportunistic_encryption on
+          want 0rtt off
+          [ "$failed" = 0 ] || { echo "::error::Some settings could not be changed; see the warnings above."; exit 1; }

@@ -32,6 +32,9 @@ jobs:
             [ -n "${!v}" ] || { echo "::error::The secret $v is not set (see backend/README.md)"; exit 1; }
           done
           [ ${#TOKEN_SECRET} -ge 32 ] || { echo "::error::TOKEN_SECRET must have at least 32 characters"; exit 1; }
+          # The administrator's password is the one way into the panel and the
+          # release tools: a short one is a risk worth a line in every run.
+          [ ${#ADMIN_PASSWORD} -ge 16 ] || echo "::warning::ADMIN_PASSWORD has only ${#ADMIN_PASSWORD} characters; use 16 or more (random letters and digits) and set it again in the repository secrets."
         env:
           TOKEN_SECRET: ${{ secrets.TOKEN_SECRET }}
           ADMIN_USER: ${{ secrets.ADMIN_USER }}
