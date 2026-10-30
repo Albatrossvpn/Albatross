@@ -1125,8 +1125,9 @@ func (e *Engine) noteSpeed(c *connection, m *member, bps float64) {
 // worth using: pages through it crawl and videos do not play. The scan
 // fails servers below it (when the line is known to do better), and the
 // member in use is left for one above it even before stayAtLeast. A member
-// a download fails through counts as 0.
-const unusable = 96 << 10
+// a download fails through counts as 0. About 1 Mb/s: what a video needs
+// to play at all.
+const unusable = 128 << 10
 
 // settleFor is how long a member is in use before it is first measured.
 const settleFor = 45 * time.Second

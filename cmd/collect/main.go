@@ -255,7 +255,7 @@ func refreshHot(paths []string, out string, n int, crowd crowdStats, report, tes
 		log.Fatal("hot: no candidates")
 	}
 	first, tested := realTest(list, n)
-	passed := confirm(first)
+	passed := strict(confirm(first), hotSize+hotSpare)
 	if report != "" {
 		writeReport(report, tester, first, passed, tested)
 	}
@@ -353,7 +353,7 @@ func main() {
 	maxFresh := flag.Int("max-fresh", 60000, "most servers in fresh.txt; the rest go to the other files")
 	limit := flag.Int("limit", 0, "use only the first N sources (for tests)")
 	real := flag.Int("real", 8000, "connect through this many of the fresh servers with the cores in SING_BOX and XRAY; 0 skips")
-	flag.Float64Var(&speedMin, "speed-min", speedMin, "bytes a second a server must carry in a real download, at each of its two tests, to pass (0: no download)")
+	flag.Float64Var(&speedMin, "speed-min", speedMin, "bytes a second a server must carry in a real download, at each of its two tests, to pass; twice it keeps the server without question (0: no download)")
 	prev := flag.String("prev", "", "directory holding the last published lists, for new.txt")
 	hotFrom := flag.String("hot-from", "", "only rewrite hot.txt in -out from the servers listed in this file that pass the real test")
 	crowdPath := flag.String("crowd", "", "comma-separated reports about servers from inside the country (list/servers/crowd.json, iran.json): confirmed servers first in hot.txt, failing ones left out")
@@ -570,7 +570,7 @@ func main() {
 	log.Printf("lanes: %d servers reserved in the real test", len(laneSel))
 	promoteRare(freshE, *real, minProtoTests)
 	passed, tested := realTest(freshE, *real)
-	passed = confirm(passed)
+	passed = strict(confirm(passed), hotSize+hotSpare)
 	freshE, failedE := orderFresh(freshE, passed, tested, crowd)
 	restE = append(failedE, restE...)
 	fresh, rest := links(freshE), links(restE)

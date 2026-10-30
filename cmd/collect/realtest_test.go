@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -380,4 +381,40 @@ func TestProbeAllWithoutBudget(t *testing.T) {
 	if probed != 1 || !alive[e.endpoint] {
 		t.Fatalf("probed %d, alive %v", probed, alive)
 	}
+}
+
+// Servers that carried twice the bar and answered quickly are kept; those
+// between the bars fill up only what is short, fastest first; a slow
+// answer counts against a server however fast its download.
+func TestStrictKeepsTheBest(t *testing.T) {
+	old := speedMin
+	speedMin = 256 << 10
+	defer func() { speedMin = old }()
+	mk := func(i int, speed float64) *entry {
+		return &entry{link: fmt.Sprintf("vless://b831381d-6324-4d53-ad4f-8cda48b30811@10.0.0.%d:443?type=tcp#s%d", i, i), speed: speed}
+	}
+	fast, fast2, middling, slowish, lagging := mk(1, 2<<20), mk(2, 600<<10), mk(3, 400<<10), mk(4, 300<<10), mk(5, 5<<20)
+	passed := map[*entry]time.Duration{fast: 300 * time.Millisecond, fast2: time.Second, middling: 500 * time.Millisecond, slowish: 400 * time.Millisecond, lagging: 3 * time.Second}
+	got := strict(passed, 2)
+	if len(got) != 2 || got[fast] == 0 || got[fast2] == 0 {
+		t.Fatalf("enough cleared the bar: %v", names(got))
+	}
+	got = strict(passed, 4)
+	if len(got) != 4 || got[middling] == 0 || got[lagging] == 0 || got[slowish] != 0 {
+		t.Fatalf("filled with the fastest of the rest: %v", names(got))
+	}
+	// No download bar (-speed-min 0): everything that passed stays.
+	speedMin = 0
+	if got := strict(passed, 1); len(got) != len(passed) {
+		t.Fatalf("without a bar: %v", names(got))
+	}
+}
+
+func names(m map[*entry]time.Duration) []string {
+	var out []string
+	for e := range m {
+		out = append(out, e.link[strings.LastIndex(e.link, "#")+1:])
+	}
+	sort.Strings(out)
+	return out
 }

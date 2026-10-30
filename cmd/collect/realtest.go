@@ -20,14 +20,63 @@ import (
 )
 
 // A server passes only when it also carries a real download (speedBytes)
-// at speedMin or more: answering a small request proves little. Overloaded
-// free servers answer and then crawl, and those that crawl from a data
-// centre crawl worse for users behind Iran's filtering. The bar is high on
-// purpose: the lists the apps try first hold only servers that carry.
+// at speedMin or more, in each of its two tests: answering a small request
+// proves little. Overloaded free servers answer and then crawl, and those
+// that crawl from a data centre crawl worse for users behind Iran's
+// filtering. The bar is high on purpose: the lists the apps try first hold
+// only servers that carry.
+//
+// strict then keeps the servers that did twice as well (speedGood) and
+// answered quickly (maxDelay); those between the two bars only fill the
+// lists when too few cleared the higher one.
 var (
 	speedMin   float64 = 256 << 10
-	speedBytes         = 1 << 20
+	speedBytes         = 2 << 20
 )
+
+const maxDelay = 2500 * time.Millisecond
+
+// speedGood is the bar a server must clear to be kept without question.
+func speedGood() float64 { return 2 * speedMin }
+
+// strict keeps of what passed both tests the servers that carried at least
+// speedGood and answered within maxDelay (a server that is not speed tested,
+// a DNS tunnel or Tor, needs only the quick answer). When fewer than keep
+// cleared that, the fastest of the rest fill up to keep, so a bad day leaves
+// the lists short of nothing; the others are dropped.
+func strict(passed map[*entry]time.Duration, keep int) map[*entry]time.Duration {
+	if speedMin <= 0 {
+		return passed
+	}
+	out := map[*entry]time.Duration{}
+	var rest []*entry
+	for e, d := range passed {
+		exempt := false
+		if n, err := node.ParseLink(e.link); err == nil {
+			exempt = tester.SpeedExempt(n)
+		}
+		if d <= maxDelay && (e.speed >= speedGood() || (exempt && e.speed == 0)) {
+			out[e] = d
+		} else {
+			rest = append(rest, e)
+		}
+	}
+	good := len(out)
+	sort.Slice(rest, func(i, j int) bool {
+		if rest[i].speed != rest[j].speed {
+			return rest[i].speed > rest[j].speed
+		}
+		return passed[rest[i]] < passed[rest[j]]
+	})
+	for _, e := range rest {
+		if len(out) >= keep {
+			break
+		}
+		out[e] = passed[e]
+	}
+	log.Printf("strict: %d of %d servers cleared the higher bar; %d kept in all", good, len(passed), len(out))
+	return out
+}
 
 // batchSeq names each test core's files apart: cores started side by side
 // with one name would write one config file, and one of them start with
@@ -91,7 +140,7 @@ func realTest(list []*entry, n int) (passed map[*entry]time.Duration, tested map
 				defer func() { <-sem; wg.Done() }()
 				t := &tester.Tester{Runtime: rt, Concurrency: 64, Timeout: 8 * time.Second}
 				if speedMin > 0 {
-					t.SpeedBytes, t.SpeedTimeout, t.SpeedNeed, t.SpeedConcurrency = speedBytes, 10*time.Second, speedMin, 8
+					t.SpeedBytes, t.SpeedTimeout, t.SpeedNeed, t.SpeedConcurrency = speedBytes, 12*time.Second, speedMin, 8
 				}
 				name := fmt.Sprintf("collect-%d", batchSeq.Add(1))
 				err := t.Batch(ctx, name, part, func(r tester.Result) {
