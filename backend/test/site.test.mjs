@@ -70,3 +70,15 @@ test("the privacy statements say what the website does", () => {
   assert.match(privacy, /Google's advertising tag/);
   assert.match(privacy, /neither do the apps/);
 });
+
+test("the website is ready for Google Search Console: a sitemap, a robots file that names it, one canonical page", () => {
+  const robots = read(site, "robots.txt");
+  assert.match(robots, /^User-agent: \*$/m);
+  assert.match(robots, /^Sitemap: https:\/\/albatrossvpn\.online\/sitemap\.xml$/m);
+  assert.doesNotMatch(robots, /^Disallow: \/$/m, "the site is not shut out");
+  const sitemap = read(site, "sitemap.xml");
+  assert.match(sitemap, /<loc>https:\/\/albatrossvpn\.online\/<\/loc>/);
+  assert.match(sitemap, /<urlset xmlns="http:\/\/www\.sitemaps\.org\/schemas\/sitemap\/0\.9">/);
+  assert.match(read(site, "index.html"), /<link rel="canonical" href="https:\/\/albatrossvpn\.online\/">/);
+  assert.match(read(site, "404.html"), /<meta name="robots" content="noindex">/, "the not-found page stays out of the index");
+});

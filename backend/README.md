@@ -66,6 +66,16 @@ Then open `/admin`, sign in, turn on sign-ups if you want them, set the default 
 
 `/admin` is protected by the login and a rate limit. Put **Cloudflare Access** in front of `/admin*` (Zero Trust → Access → Applications) to require your own identity provider as well, and, where you can, restrict it to your own addresses.
 
+### Security checklist
+
+What the code already does: every answer a Worker builds carries HSTS, `nosniff`, no framing, no referrer and a policy that loads nothing (`src/headers.js`; the static pages get the same from each site's `public/_headers`); plain HTTP that reaches the edge is sent on to HTTPS before the sign-in, account and admin pages, the API and the downloads are served; the account pages are never cached; all wrong administrator sign-ins together are held to 200 per 15 minutes besides the ten a single address gets; `/.well-known/security.txt` says where to report a weakness (`CONTACT_EMAIL`).
+
+What only you can do:
+
+- Keep `ADMIN_PASSWORD` at 16 or more random characters (the deploy workflow warns when it is shorter), and turn on two-step sign-in for your Cloudflare, GitHub and domain-registrar accounts. Lock the domain at the registrar.
+- Leave Cloudflare's **Always Use HTTPS** off: the public website's pages answer over plain HTTP too (it may get through where HTTPS is blocked), while the Workers send HTTP requests for the sensitive parts to HTTPS themselves: the whole account service, and on the website the release files, the release manifest and the server lists. The *Harden the Cloudflare zone* workflow sets this and the TLS settings when `CLOUDFLARE_API_TOKEN` may edit the zone's settings; it says which setting it could not change.
+- Turn on DNSSEC (Cloudflare → DNS → Settings) and add the DS record it shows at the registrar.
+
 ### Optional: Turnstile on sign-up
 
 Create a Turnstile widget in Cloudflare, put its site key in `wrangler.toml` (`TURNSTILE_SITEKEY`) and run `npx wrangler secret put TURNSTILE_SECRET`. The sign-up form then asks for the check.

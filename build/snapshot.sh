@@ -10,11 +10,12 @@
 set -uo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/internal/sources/lists/snapshot.txt.gz"
-# The project's own storage first (the account service's /list/), then
-# GitHub while the repository is public.
+# The project's own storage first (the account service's /list/), then the
+# public repository the collector publishes to, then this one's old branch.
 own="$(bash "$root/build/account-url.sh" 2>/dev/null | cut -d, -f1)"
 urls=()
 [ -n "$own" ] && urls+=("$own/list/servers/fresh.txt")
+urls+=("https://raw.githubusercontent.com/Albatrossvpn/alba-data/servers/fresh.txt")
 urls+=("https://raw.githubusercontent.com/Albatrossvpn/Albatross/servers/fresh.txt")
 tmp="$(mktemp)"
 opener=""

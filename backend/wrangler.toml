@@ -13,8 +13,10 @@ routes = [{ pattern = "accounts.albatrossvpn.online", custom_domain = true }]
 [assets]
 directory = "./public"
 binding = "ASSETS"
-# Only the API runs code; pages are served as static files.
-run_worker_first = ["/api/*"]
+# The API runs code, and so do the pages people type a password into or reach
+# first (to send plain HTTP on to HTTPS before anything is served); the other
+# files are served as static files.
+run_worker_first = ["/api/*", "/", "/index.html", "/account*", "/admin*", "/privacy*", "/terms*"]
 
 # The release files, served at /dl/<tag>/<name> and stored by the
 # administrator's call (deploy/files/push.sh).

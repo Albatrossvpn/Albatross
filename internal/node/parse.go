@@ -16,7 +16,7 @@ import (
 	"unicode/utf8"
 )
 
-var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|trojan-go|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|amneziawg|awg|anytls|socks5?|socks4a?|naive(?:\+https|\+quic)?|juicity|mieru|brook|wstunnel|snell|sn|exclave|albatross|https?)://`)
+var schemeRe = regexp.MustCompile(`(?i)(vmess|vless|trojan|trojan-go|ssr?|ssh|hysteria2|hy2|hysteria|tuic|wireguard|wg|amneziawg|awg|anytls|socks5h|socks5?|socks4a?|naive(?:\+https|\+http|\+quic)?|juicity|mierus|mieru|brook|wstunnel|snell|sn|exclave|albatross|https?)://`)
 
 // ErrUnsupported marks links that parse but cannot be run by any core.
 var ErrUnsupported = errors.New("unsupported")
@@ -56,6 +56,9 @@ func ExtractLinks(text string) []string {
 			if loc[0] > 0 && line[loc[0]-1] != ' ' && line[loc[0]-1] != '\t' && strings.HasPrefix(strings.ToLower(line[loc[0]:loc[1]]), "http") {
 				continue
 			}
+			if inValue(line, loc[0]) {
+				continue
+			}
 			starts = append(starts, loc)
 		}
 		for i, loc := range starts {
@@ -63,7 +66,7 @@ func ExtractLinks(text string) []string {
 			if i+1 < len(starts) {
 				end = starts[i+1][0]
 			}
-			link := strings.TrimSpace(line[loc[0]:end])
+			link := strings.TrimSpace(unescapeLink(line[loc[0]:end]))
 			link = strings.TrimRight(link, ",;|\"'")
 			if len(link) > 12 {
 				out = append(out, link)
@@ -78,6 +81,41 @@ func ExtractLinks(text string) []string {
 // string ("vless://...\nvmess://..."), come apart.
 var jsonCleaner = strings.NewReplacer(`\"`, `"`, `\n`, "\n", `\r`, "\n", `\t`, " ", `\u0026`, "&", `\u003d`, "=", `\u003c`, "\n", `\u003e`, "\n",
 	`\/`, "/", `"`, "\n")
+
+// unquotedPS finds a VMess name written without its opening quote.
+var unquotedPS = regexp.MustCompile(`"ps"\s*:\s*([^"\s{\[][^"]*|\[[^"]*)"`)
+
+// unescapeLink undoes the escapes one link keeps when the text around it
+// did not look like JSON (a link in a page's script, a JSON string inside
+// a plain list): with "\u0026" for "&" every parameter after the first was
+// lost and a TLS server ran without TLS. A link ends where an escaped line
+// break or quote does: "\nvless://" glued the next link's "\n" to this
+// one's last value.
+func unescapeLink(link string) string {
+	if !strings.Contains(link, `\`) && !strings.Contains(link, "&#") {
+		return link
+	}
+	for _, end := range []string{`\n`, `\r`, `\t`, `\u003c`, `\u003e`, `\"`} {
+		if i := strings.Index(link, end); i > 0 {
+			link = link[:i]
+		}
+	}
+	return linkUnescaper.Replace(link)
+}
+
+var linkUnescaper = strings.NewReplacer(`\u0026`, "&", `\u003d`, "=", `\u003D`, "=", `\/`, "/", `&#38;`, "&", `&#x26;`, "&")
+
+// inValue reports whether the scheme found at i is the tail of a site's
+// scheme inside a query value ("wssserver=wss://host"): "ss://" there is
+// no link of its own. A link glued to base64 padding ("fQ==vless://")
+// still is one.
+func inValue(line string, i int) bool {
+	k := i
+	for k > 0 && i-k < 3 && line[k-1] >= 'a' && line[k-1] <= 'z' {
+		k--
+	}
+	return k < i && k > 0 && line[k-1] == '='
+}
 
 func head(s string, n int) string {
 	if len(s) > n {
@@ -237,7 +275,8 @@ func parseLink(link string) (*Node, error) {
 		n, err = parseWireGuard(link)
 	case "ssh":
 		n, err = parseSSH(link)
-	case "socks", "socks5":
+	case "socks", "socks5", "socks5h":
+		// socks5h only says the proxy resolves names, as every one here does.
 		n, err = parseSocks(link)
 	case "socks4", "socks4a":
 		// SOCKS 4 has no password; sing-box speaks it, Xray does not.
@@ -581,7 +620,12 @@ func parseVMess(link string) (*Node, error) {
 	var j vmessJSON
 	// The first JSON object; bytes decoded past its end are not part of it.
 	if err := json.NewDecoder(bytes.NewReader(raw)).Decode(&j); err != nil {
-		return nil, fmt.Errorf("vmess json: %w", err)
+		// One generator writes the name unquoted ("ps": [🏁]t.me/x",);
+		// the rest of such a link is sound.
+		fixed := unquotedPS.ReplaceAll(raw, []byte(`"ps":"$1"`))
+		if json.NewDecoder(bytes.NewReader(fixed)).Decode(&j) != nil {
+			return nil, fmt.Errorf("vmess json: %w", err)
+		}
 	}
 	n := &Node{
 		Proto:       "vmess",
@@ -611,6 +655,10 @@ func parseVMess(link string) (*Node, error) {
 	}
 	if n.Transport == "grpc" {
 		n.ServiceName = firstNonEmpty(str(j.ServiceName), strings.TrimPrefix(n.Path, "/"))
+	}
+	if n.Transport == "xhttp" || n.Transport == "splithttp" {
+		// v2rayN keeps the XHTTP mode in "type", the header type of TCP.
+		n.Mode, n.HeaderType = firstNonEmpty(n.Mode, n.HeaderType), ""
 	}
 	if n.Transport == "kcp" || n.Transport == "mkcp" {
 		n.Seed = n.Path
@@ -735,7 +783,7 @@ func parseSS(link string) (*Node, error) {
 		Method:   strings.ToLower(strings.TrimSpace(method)),
 		Password: password,
 	}
-	if p := query["plugin"]; p != "" {
+	if p := query["plugin"]; p != "" && !strings.EqualFold(p, "none") {
 		parts := strings.SplitN(p, ";", 2)
 		n.Plugin = parts[0]
 		if len(parts) == 2 {
@@ -774,6 +822,10 @@ func parseHy2(link string) (*Node, error) {
 		n.Insecure = true
 	}
 	setPorts(n, u.port, q["mport"])
+	if n.Port == 0 && n.PortHop == "" {
+		// The share-link format's default.
+		n.Port = 443
+	}
 	return n, nil
 }
 
@@ -1062,7 +1114,13 @@ func (n *Node) normalize() {
 		n.Path = badEscapeRe.ReplaceAllStringFunc(n.Path, func(m string) string { return "%25" + m[1:] })
 	}
 	if (n.Proto == "vmess" || n.Proto == "vless" || n.Proto == "tuic") && n.UUID != "" && !isUUID(n.UUID) {
-		n.UUID = uuidV5(n.UUID)
+		if u, ok := dashUUID(n.UUID); ok {
+			// A UUID written without its dashes is the same UUID, not a
+			// name to map.
+			n.UUID = u
+		} else {
+			n.UUID = uuidV5(n.UUID)
+		}
 	}
 	if n.Proto == "wireguard" {
 		for i, a := range n.LocalAddress {

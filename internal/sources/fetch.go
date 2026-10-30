@@ -209,10 +209,14 @@ func (f *Fetcher) fetchOne(ctx context.Context, s Source) Result {
 			}
 		}
 		// The domestic mirrors, in their order: first when foreign
-		// addresses are cut, last otherwise.
-		if mode == ModeDomestic {
+		// addresses are cut, last otherwise; for the app's own files right
+		// after its own storage (ownFirst).
+		switch {
+		case mode == ModeDomestic:
 			attempts = append(dom, attempts...)
-		} else {
+		case isOwn(url):
+			attempts = ownFirst(attempts, dom)
+		default:
 			attempts = append(attempts, dom...)
 		}
 		// The proxy attempt belongs first whatever the mode.
@@ -437,7 +441,7 @@ func Mirrors(u string) []string {
 	// api.github.com stayed open through Iran's allowlist periods while
 	// github.com and raw were closed. Anonymous use allows 60 requests an
 	// hour per address, so only the app's own files go this way.
-	if strings.EqualFold(owner+"/"+repo, ownRepo) {
+	if isOwnRepo(owner, repo) {
 		out = append(out, fmt.Sprintf("https://api.github.com/repos/%s/%s/contents/%s?ref=%s", owner, repo, path, branch))
 		for _, w := range strings.Split(WorkerMirror, ",") {
 			if w = strings.TrimRight(strings.TrimSpace(w), "/"); w != "" {
@@ -483,8 +487,48 @@ func IsWorker(u string) bool {
 	return false
 }
 
-// ownRepo is the app's own repository, where the collector publishes.
-const ownRepo = "Albatrossvpn/Albatross"
+// ownRepos are the app's own repositories: its code and update manifest,
+// and the public one the collector publishes the sealed lists to.
+var ownRepos = []string{"Albatrossvpn/Albatross", "Albatrossvpn/alba-data"}
+
+func isOwnRepo(owner, repo string) bool {
+	for _, r := range ownRepos {
+		if strings.EqualFold(owner+"/"+repo, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// isOwn says whether u is one of the app's own files on GitHub.
+func isOwn(u string) bool {
+	m := rawGitHubRe.FindStringSubmatch(u)
+	return m != nil && isOwnRepo(m[1], m[2])
+}
+
+// ownGitHubWait is the most each GitHub or CDN try of an own file may take.
+const ownGitHubWait = 10 * time.Second
+
+// ownFirst orders the tries of one of the app's own files: its own storage
+// (the Workers), then the domestic mirrors, then GitHub and its CDNs with a
+// short wait each. While the repository is private GitHub and the CDNs
+// answer 404 or, where filtered, nothing at all; a device whose Worker was
+// out of reach used to spend a minute on each of them before it got to the
+// mirror inside the country, which holds the same sealed files.
+func ownFirst(attempts, dom []attempt) []attempt {
+	var own, rest []attempt
+	for _, a := range attempts {
+		if IsWorker(a.url) {
+			own = append(own, a)
+			continue
+		}
+		if a.timeout == 0 || a.timeout > ownGitHubWait {
+			a.timeout = ownGitHubWait
+		}
+		rest = append(rest, a)
+	}
+	return append(append(own, dom...), rest...)
+}
 
 // githubAPI is the prefix of api.github.com contents URLs, which return
 // the raw file when asked for it.

@@ -120,11 +120,11 @@ func TestSpeedRoundMovesOffSlowServer(t *testing.T) {
 	}
 
 	// Right after a swap nothing is measured or swapped, even if the new
-	// member turns slow.
+	// member turns slow (but usable: above unusable).
 	cur := now()
 	for i, tag := range tags {
 		if tag == cur {
-			limits[i].Store(50 << 10)
+			limits[i].Store(128 << 10)
 		}
 	}
 	c.speedAt = time.Time{}

@@ -100,7 +100,9 @@ func Regions() []RegionInfo {
 
 // DomesticApps lists the package-name prefixes of the region's own apps
 // (Settings.BypassApps). Iranian apps are published under ir.* almost
-// without exception; the banks and services that are not are named.
+// without exception; the banks and services that are not are named, by
+// their real package names: Snapp is cab.snapp.passenger, Tap30
+// taxi.tap30.passenger and SnappFood com.zoodfood.android.
 func DomesticApps(code string) []string {
 	if code != "IR" {
 		return nil
@@ -108,5 +110,7 @@ func DomesticApps(code string) []string {
 	return []string{"ir.", "com.pmb.", "com.samanpr.", "com.farazpardazan.", "com.bki.", "com.sadad", "com.tosan.",
 		"com.ada.mbank", "com.refah", "com.saman", "com.bsi.", "com.tejarat", "com.pasargad", "com.parsian", "com.sepah",
 		"com.ansar", "com.resalat", "com.mellat", "com.bmi.", "com.hamrahbank", "com.snapp", "com.digikala", "com.zarinpal",
-		"com.mydigipay", "com.sibche", "com.tap30", "com.alibaba.ir", "com.divar", "com.sheypoor", "com.myket", "com.farsitel"}
+		"com.mydigipay", "com.sibche", "com.tap30", "com.alibaba.ir", "com.divar", "com.sheypoor", "com.myket", "com.farsitel",
+		"cab.snapp.", "taxi.tap30.", "com.zoodfood.", "com.snappfood", "com.snapptrip", "com.balad", "com.neshan", "com.torob",
+		"com.basalam", "com.cafebazaar", "com.filimo", "com.namava", "com.aparat", "com.rubika", "com.eitaa", "mobi.mmk."}
 }

@@ -17,7 +17,7 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cd "$work"
-gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" > rel.json
+gh api "repos/${RELEASE_REPO:-$GITHUB_REPOSITORY}/releases/tags/v$VERSION" > rel.json
 # The files go into the project's own storage and are served by
 # the website (/download/) and the account service (/dl/), so no
 # download depends on GitHub, whose downloads break off or are

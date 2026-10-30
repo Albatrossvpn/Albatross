@@ -221,3 +221,54 @@ func TestProtocolName(t *testing.T) {
 		}
 	}
 }
+
+// A connection is named by what it really is: Tor is not "WARP+", and a
+// server reached through a DNS tunnel says so instead of passing for the
+// protocol it carries.
+func TestConnLabel(t *testing.T) {
+	for _, c := range []struct {
+		info engine.ConnInfo
+		want string
+	}{
+		{engine.ConnInfo{Proto: "warpplus", Method: "tor"}, "Tor"},
+		{engine.ConnInfo{Proto: "warpplus", Method: "warp"}, "Cloudflare WARP"},
+		{engine.ConnInfo{Proto: "warpplus", Method: "gool"}, "WARP in WARP"},
+		{engine.ConnInfo{Proto: "warpplus", Method: "psiphon"}, "Psiphon"},
+		{engine.ConnInfo{Proto: "warpplus", Method: "masque"}, "WARP · MASQUE"},
+		{engine.ConnInfo{Proto: "warpplus"}, "WARP+"},
+		{engine.ConnInfo{Proto: "vmess", Carrier: "dns"}, "VMess · DNS tunnel"},
+		{engine.ConnInfo{Proto: "vmess", Carrier: "icmp"}, "VMess · ping tunnel"},
+		{engine.ConnInfo{Proto: "vless", Security: "reality"}, "VLESS Reality"},
+		{engine.ConnInfo{Proto: "tuic"}, "TUIC"},
+	} {
+		if got := connLabel(&c.info); got != c.want {
+			t.Errorf("connLabel(%+v) = %q, want %q", c.info, got, c.want)
+		}
+	}
+}
+
+// A protocol with no servers says why: it has none, it has only ones that
+// failed, or this device cannot run it at all.
+func TestProtocolNotes(t *testing.T) {
+	st := publicState(engine.Snapshot{
+		ProtocolServers: map[string][2]int{"vless": {40, 9}},
+		ProtocolFailed:  map[string]int{"brook": 3},
+		ProtocolMissing: []string{"snell"},
+	})
+	got := map[string]protocol{}
+	for _, p := range st.Protocols {
+		got[p.Value] = p
+	}
+	if p := got["vless"]; p.Servers != 40 || p.Working != 9 || p.Failed != 0 || p.Missing {
+		t.Errorf("vless: %+v", p)
+	}
+	if p := got["brook"]; p.Servers != 0 || p.Failed != 3 || p.Missing {
+		t.Errorf("brook has only failed servers: %+v", p)
+	}
+	if p := got["snell"]; !p.Missing {
+		t.Errorf("snell cannot run here: %+v", p)
+	}
+	if p := got["wstunnel"]; p.Servers != 0 || p.Failed != 0 || p.Missing {
+		t.Errorf("wstunnel simply has none: %+v", p)
+	}
+}

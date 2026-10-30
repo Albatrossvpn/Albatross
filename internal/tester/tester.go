@@ -39,6 +39,10 @@ type Result struct {
 	// Tampered means the server showed a certificate the system does not
 	// trust for the site: it intercepts HTTPS (see Intercepted).
 	Tampered bool
+	// Speed is what a real download through the server came to, in bytes a
+	// second, when Tester.SpeedBytes asked for one (SpeedTested).
+	Speed       float64
+	SpeedTested bool
 }
 
 // Tester runs probes and real tests.
@@ -58,6 +62,15 @@ type Tester struct {
 	// TunnelDNS is the resolver DNS tunnels send their queries through
 	// (core.BuildOptions.LocalDNS); empty means LocalDNS.
 	TunnelDNS string
+	// SpeedBytes is the size of the download every server that passes its
+	// probe must also carry (Throughput), 0 for none; SpeedTimeout caps one
+	// such download and SpeedNeed is the speed (bytes a second) below which
+	// it may stop early. SpeedConcurrency downloads run at once (default 1),
+	// so they share the line as little as possible.
+	SpeedBytes       int
+	SpeedTimeout     time.Duration
+	SpeedNeed        float64
+	SpeedConcurrency int
 	// Mobile builds configs for the Android app: no auto_detect_interface.
 	// sing-box watches the interfaces over netlink for it, which Android
 	// denies to apps, and then refuses to start. The app is left out of its
@@ -184,6 +197,11 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 		timeout = 10 * time.Second
 	}
 	sem := make(chan struct{}, conc)
+	speedSem := make(chan struct{}, max(t.SpeedConcurrency, 1))
+	speedLimit := t.SpeedTimeout
+	if speedLimit <= 0 {
+		speedLimit = 8 * time.Second
+	}
 	var wg sync.WaitGroup
 	for i, n := range run.Set.Nodes {
 		if ctx.Err() != nil {
@@ -192,37 +210,68 @@ func (t *Tester) Batch(ctx context.Context, name string, nodes []*node.Node, onR
 		sem <- struct{}{}
 		wg.Add(1)
 		go func(n *node.Node, tag string) {
-			defer func() { <-sem; wg.Done() }()
-			if !run.Alive() {
+			defer wg.Done()
+			r, ok := t.probeOne(ctx, run, n, tag, pass, port, timeout)
+			<-sem
+			if !ok {
 				return
 			}
-			proxy := &url.URL{Scheme: "http", User: url.UserPassword(tag, pass), Host: "127.0.0.1:" + strconv.Itoa(port)}
-			limit := timeout
-			switch {
-			case n.Engine() == node.EngineWarpPlus, n.Engine() == node.EngineSidecar, n.DNSTunnel(), sessionFirst(n):
-				// warp-plus, the sidecars and OpenVPN negotiate first; a
-				// DNS tunnel moves a few hundred bytes per query.
-				limit = 3 * timeout
-			case n.ICMP():
-				limit = 2 * timeout
+			if r.OK && t.SpeedBytes > 0 && !SpeedExempt(n) {
+				// After the probe's slot is given back: the probes go on
+				// while the downloads take their turns.
+				select {
+				case speedSem <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+				r.Speed, _ = Throughput(ctx, probeProxy(tag, pass, port), t.SpeedBytes, speedLimit, t.SpeedNeed)
+				r.SpeedTested = true
+				<-speedSem
+				if !run.Alive() || ctx.Err() != nil {
+					return
+				}
 			}
-			var r Result
-			if sessionFirst(n) {
-				r = probeSession(ctx, proxy, limit, Probe)
-			} else {
-				r = Probe(ctx, proxy, limit)
-			}
-			if !run.Alive() || ctx.Err() != nil {
-				// The core crashed, or the test was cut off; the result
-				// says nothing about the node.
-				return
-			}
-			r.Node = n
 			onResult(r)
 		}(n, run.Set.Tags[i])
 	}
 	wg.Wait()
 	return nil
+}
+
+// probeProxy is the core's test inbound for one node.
+func probeProxy(tag, pass string, port int) *url.URL {
+	return &url.URL{Scheme: "http", User: url.UserPassword(tag, pass), Host: "127.0.0.1:" + strconv.Itoa(port)}
+}
+
+// probeOne is Batch's probe of one node; ok is false when the result says
+// nothing about the node (the core crashed or the test was cut off).
+func (t *Tester) probeOne(ctx context.Context, run *core.Running, n *node.Node, tag, pass string, port int, timeout time.Duration) (Result, bool) {
+	if !run.Alive() {
+		return Result{}, false
+	}
+	proxy := probeProxy(tag, pass, port)
+	limit := timeout
+	switch {
+	case n.Engine() == node.EngineWarpPlus, n.Engine() == node.EngineSidecar, n.DNSTunnel(), sessionFirst(n):
+		// warp-plus, the sidecars and OpenVPN negotiate first; a
+		// DNS tunnel moves a few hundred bytes per query.
+		limit = 3 * timeout
+	case n.ICMP():
+		limit = 2 * timeout
+	}
+	var r Result
+	if sessionFirst(n) {
+		r = probeSession(ctx, proxy, limit, Probe)
+	} else {
+		r = Probe(ctx, proxy, limit)
+	}
+	if !run.Alive() || ctx.Err() != nil {
+		// The core crashed, or the test was cut off; the result
+		// says nothing about the node.
+		return r, false
+	}
+	r.Node = n
+	return r, true
 }
 
 // Through starts a temporary core holding nodes and calls try with each

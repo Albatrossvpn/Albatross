@@ -145,7 +145,8 @@ func singBoxOutbound(o cmap) *Node {
 			n.PortHop = strings.ReplaceAll(strings.Join(ports, ","), ":", "-")
 		}
 	case "hysteria":
-		n.Proto, n.Password, n.Obfs = "hysteria", firstNonEmpty(o.s("auth_str"), o.s("auth")), o.s("obfs")
+		// sing-box's hysteria obfs is the obfuscation password.
+		n.Proto, n.Password, n.Obfs, n.ObfsPassword = "hysteria", firstNonEmpty(o.s("auth_str"), o.s("auth")), o.s("obfs"), o.s("obfs")
 		n.UpMbps, n.DownMbps = num(o["up_mbps"]), num(o["down_mbps"])
 	case "tuic":
 		n.Proto, n.UUID, n.Password = "tuic", o.s("uuid"), o.s("password")
@@ -265,8 +266,24 @@ func xrayOutbound(o cmap, all []any) *Node {
 				n.Host = hosts[0]
 			}
 			n.Mode = t.s("mode")
+			extra := map[string]any{}
 			if x, ok := t["extra"].(map[string]any); ok {
-				if b, err := json.Marshal(x); err == nil {
+				extra = x
+			}
+			if key == "xhttpSettings" || key == "splithttpSettings" {
+				// Xray reads the options it knows from the settings
+				// themselves too (downloadSettings, xPaddingBytes, xmux...):
+				// they are what "extra" carries in a link.
+				for k, v := range t {
+					switch k {
+					case "path", "host", "mode", "extra", "headers":
+					default:
+						extra[k] = v
+					}
+				}
+			}
+			if len(extra) > 0 {
+				if b, err := json.Marshal(extra); err == nil {
 					n.Extra = string(b)
 				}
 			}

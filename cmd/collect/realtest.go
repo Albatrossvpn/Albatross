@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Albatrossvpn/vp/internal/antiblock"
@@ -16,6 +18,21 @@ import (
 	"github.com/Albatrossvpn/vp/internal/node"
 	"github.com/Albatrossvpn/vp/internal/tester"
 )
+
+// A server passes only when it also carries a real download (speedBytes)
+// at speedMin or more: answering a small request proves little. Overloaded
+// free servers answer and then crawl, and those that crawl from a data
+// centre crawl worse for users behind Iran's filtering. The bar is high on
+// purpose: the lists the apps try first hold only servers that carry.
+var (
+	speedMin   float64 = 256 << 10
+	speedBytes         = 1 << 20
+)
+
+// batchSeq names each test core's files apart: cores started side by side
+// with one name would write one config file, and one of them start with
+// the other's servers.
+var batchSeq atomic.Int64
 
 // realTest connects through up to n of list with the real cores, the way
 // the app does, and reports which worked and how fast. A TCP answer alone
@@ -73,11 +90,21 @@ func realTest(list []*entry, n int) (passed map[*entry]time.Duration, tested map
 			go func(part []*node.Node) {
 				defer func() { <-sem; wg.Done() }()
 				t := &tester.Tester{Runtime: rt, Concurrency: 64, Timeout: 8 * time.Second}
-				err := t.Batch(ctx, "collect", part, func(r tester.Result) {
+				if speedMin > 0 {
+					t.SpeedBytes, t.SpeedTimeout, t.SpeedNeed, t.SpeedConcurrency = speedBytes, 10*time.Second, speedMin, 8
+				}
+				name := fmt.Sprintf("collect-%d", batchSeq.Add(1))
+				err := t.Batch(ctx, name, part, func(r tester.Result) {
 					switch {
+					case r.OK && !r.Tampered && r.SpeedTested && r.Speed < speedMin:
+						// Answers, but does not carry: failed.
 					case r.OK && !r.Tampered:
 						mu.Lock()
-						passed[byNode[r.Node]] = r.Delay
+						e := byNode[r.Node]
+						passed[e] = r.Delay
+						if r.SpeedTested && (e.speed == 0 || r.Speed < e.speed) {
+							e.speed = r.Speed
+						}
 						mu.Unlock()
 					case r.Err == "the core could not start":
 						// Nothing was learned about the server; it stays
@@ -252,9 +279,11 @@ func fitHot(hot []*entry, max int) []*entry {
 	return keepReserves(hot[:min(len(hot), max)], hot, max, func(p string) int { return reserveOf(p, max) })
 }
 
-// confirm tests the servers that passed once more and keeps those that
-// pass twice, with the mean of both delays: one lucky connection does not
-// make a hot server.
+// confirm tests the servers that passed once more and keeps only those that
+// pass twice, download and all, with the mean of both delays: one lucky
+// connection does not make a hot server. A server the second test could not
+// reach (its core did not start) is tested once more; one that still has
+// no second result is left out, not kept on its first.
 func confirm(passed map[*entry]time.Duration) map[*entry]time.Duration {
 	if len(passed) == 0 {
 		return passed
@@ -268,15 +297,25 @@ func confirm(passed map[*entry]time.Duration) map[*entry]time.Duration {
 	if second == nil {
 		return passed
 	}
+	var retry []*entry
+	for _, e := range again {
+		if !tested[e] {
+			retry = append(retry, e)
+		}
+	}
+	if len(retry) > 0 {
+		third, _ := realTest(retry, len(retry))
+		for e, d := range third {
+			second[e] = d
+		}
+	}
 	out := map[*entry]time.Duration{}
 	for e, d := range passed {
 		if d2, ok := second[e]; ok {
 			out[e] = (d + d2) / 2
-		} else if !tested[e] {
-			out[e] = d
 		}
 	}
-	log.Printf("confirmation: %d of %d servers passed a second time", len(out), len(passed))
+	log.Printf("confirmation: %d of %d servers passed a second time (%d needed a third try)", len(out), len(passed), len(retry))
 	return out
 }
 

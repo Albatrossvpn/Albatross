@@ -28,7 +28,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -78,6 +77,48 @@ func promoteRare(list []*entry, n, min int) {
 		}
 	}
 	copy(list, out)
+}
+
+// rareProtos are the protocols the world's public lists hold few servers of:
+// whatever there is of them goes to fresh.txt (rareFresh), whichever source
+// carried it.
+var rareProtos = map[string]bool{
+	"wireguard": true, "amneziawg": true, "tuic": true, "hysteria": true, "anytls": true, "naive": true,
+	"juicity": true, "mieru": true, "brook": true, "wstunnel": true, "ssr": true, "snell": true,
+	"openvpn": true, "ssh": true,
+}
+
+// rareFresh is how many servers of one rare protocol go to fresh.txt beyond
+// those a priority source carried.
+const rareFresh = 1500
+
+// splitFresh divides the servers between fresh.txt, which every app loads
+// every hour, and the long-tail lists, which an app reads one at a time (a
+// phone only while nothing works). The lane picks come first; then the
+// servers a priority source carries, and then those of the rare protocols,
+// whatever source they came from: a protocol whose few servers sat in the
+// long tail had none for most people, however many the internet held. A
+// server that only dud sources carry stays out, as before.
+func splitFresh(list, laneSel []*entry, inLane map[*entry]bool, maxFresh int) (fresh, rest []*entry) {
+	fresh = append([]*entry(nil), laneSel...)
+	taken := map[string]int{}
+	rare := func(e *entry) bool {
+		if !rareProtos[e.proto] || taken[e.proto] >= rareFresh {
+			return false
+		}
+		taken[e.proto]++
+		return true
+	}
+	for _, e := range list {
+		switch {
+		case inLane[e]:
+		case e.dud < e.pop && len(fresh)-len(laneSel) < maxFresh && (e.fresh || rare(e)):
+			fresh = append(fresh, e)
+		default:
+			rest = append(rest, e)
+		}
+	}
+	return fresh, rest
 }
 
 // newList is fresh minus what the last run published, newest first, with
@@ -265,6 +306,9 @@ type entry struct {
 	lane bool
 	dud  int
 	dead bool
+	// speed is the slowest real download through the server among the
+	// tests that passed it (bytes a second), 0 when none measured it.
+	speed float64
 }
 
 type meta struct {
@@ -297,8 +341,6 @@ type meta struct {
 	Lanes map[string]int `json:"lanes,omitempty"`
 }
 
-var schemeRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9+.-]{1,20})://[^\s"'<>]{8,}`)
-
 func main() {
 	out := flag.String("out", "servers", "output directory")
 	keysIn := flag.String("keys", "", "the list keys handed out so far (JSON), read to keep the recent ones")
@@ -311,6 +353,7 @@ func main() {
 	maxFresh := flag.Int("max-fresh", 60000, "most servers in fresh.txt; the rest go to the other files")
 	limit := flag.Int("limit", 0, "use only the first N sources (for tests)")
 	real := flag.Int("real", 8000, "connect through this many of the fresh servers with the cores in SING_BOX and XRAY; 0 skips")
+	flag.Float64Var(&speedMin, "speed-min", speedMin, "bytes a second a server must carry in a real download, at each of its two tests, to pass (0: no download)")
 	prev := flag.String("prev", "", "directory holding the last published lists, for new.txt")
 	hotFrom := flag.String("hot-from", "", "only rewrite hot.txt in -out from the servers listed in this file that pass the real test")
 	crowdPath := flag.String("crowd", "", "comma-separated reports about servers from inside the country (list/servers/crowd.json, iran.json): confirmed servers first in hot.txt, failing ones left out")
@@ -403,15 +446,19 @@ func main() {
 			} else {
 				node.EachText(res.Text, func(n *node.Node) { nodes = append(nodes, n) })
 			}
-			links := schemeRe.FindAllStringSubmatch(res.Text, -1)
+			// Counted on the links as the parser takes them apart, so a link
+			// stuck to an escape or a word ("\\nvless://", "Germanyvmess://")
+			// counts under its own scheme.
+			links := node.ExtractLinks(res.Text)
 			mu.Lock()
 			defer mu.Unlock()
-			for _, m := range links {
+			for _, l := range links {
 				h := fnv.New64a()
-				h.Write([]byte(m[0]))
+				h.Write([]byte(l))
 				if k := h.Sum64(); !seenLinks[k] {
 					seenLinks[k] = true
-					schemes[strings.ToLower(m[1])]++
+					scheme, _, _ := strings.Cut(l, "://")
+					schemes[strings.ToLower(scheme)]++
 				}
 			}
 			reached++
@@ -519,17 +566,7 @@ func main() {
 	for _, e := range laneSel {
 		inLane[e] = true
 	}
-	freshE := append([]*entry(nil), laneSel...)
-	var restE []*entry
-	for _, e := range list {
-		switch {
-		case inLane[e]:
-		case e.fresh && e.dud < e.pop && len(freshE)-len(laneSel) < *maxFresh:
-			freshE = append(freshE, e)
-		default:
-			restE = append(restE, e)
-		}
-	}
+	freshE, restE := splitFresh(list, laneSel, inLane, *maxFresh)
 	log.Printf("lanes: %d servers reserved in the real test", len(laneSel))
 	promoteRare(freshE, *real, minProtoTests)
 	passed, tested := realTest(freshE, *real)

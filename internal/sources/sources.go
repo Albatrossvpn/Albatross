@@ -170,9 +170,17 @@ func Snapshot() string {
 	return string(b)
 }
 
-// CentralBase is where the collector publishes its lists: a branch of the
-// app's own repository, so the GitHub CDN mirrors work for it too.
-const CentralBase = "https://raw.githubusercontent.com/Albatrossvpn/Albatross/servers/"
+// CentralBase is where the collector publishes its lists on GitHub: a
+// public repository of their own, which holds nothing but the sealed lists,
+// so GitHub and its CDN mirrors serve them while the app's own repository
+// is private. The apps ask the project's own storage first (Addresses).
+const CentralBase = "https://raw.githubusercontent.com/Albatrossvpn/alba-data/servers/"
+
+// legacyCentralBase is where the lists were published before, in the app's
+// own repository. The lists' IDs stay as they were made from it, so each
+// keeps its copy on disk (a network where the download fails falls back to
+// it) and its statistics.
+const legacyCentralBase = "https://raw.githubusercontent.com/Albatrossvpn/Albatross/servers/"
 
 // CentralShards is how many all-N.txt files the collector writes.
 const CentralShards = 8
@@ -188,7 +196,7 @@ func Central(install uint32) []Source {
 	var out []Source
 	add := func(name string, tier int) {
 		u := CentralBase + name
-		out = append(out, Source{ID: ID(KindSubscription, u), Kind: KindSubscription, URL: u, Tier: tier, Builtin: true, Enabled: true, Central: true})
+		out = append(out, Source{ID: ID(KindSubscription, legacyCentralBase+name), Kind: KindSubscription, URL: u, Tier: tier, Builtin: true, Enabled: true, Central: true})
 	}
 	if ownKey() != nil {
 		// own-0.bin holds the relays inside the country (deploy/server

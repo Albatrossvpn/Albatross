@@ -22,6 +22,8 @@ concurrency:
 
 jobs:
   discover:
+    # As collect.yml: in alba-data, here only with COLLECT_IN_PRIVATE.
+    if: vars.COLLECT_IN_PRIVATE == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 58
     steps:

@@ -312,6 +312,7 @@ test("a ticket is opened, answered and closed in the person's language; the team
   const opened = w.lastText(SARA);
   assert.equal(opened.text, screens("ru").ticketOpened(1001, false).text);
   assert.equal(labels(opened.reply_markup)[0], screens("ru").t("btn_solved"));
+  await w.send(text(SARA, "Не подключается"));
   const card = w.api.calls.filter((c) => c.method === "sendMessage" && c.chat_id === TEAM).pop();
   assert.ok(card.text.includes(`🌐 ${pack("ru").name}`), card.text);
   // The team answers by replying to the card: the person reads it with their own label.
@@ -325,6 +326,7 @@ test("a ticket is opened, answered and closed in the person's language; the team
   // An English chat needs no language on its card. (A second service stands in for Telegram from here on.)
   const english = await world({ lang: "en" });
   await english.send(text(SARA, "/human"));
+  await english.send(text(SARA, "It does not connect"));
   const englishCard = english.api.calls.filter((c) => c.method === "sendMessage" && c.chat_id === TEAM).pop();
   assert.ok(!englishCard.text.includes("🌐"), "an English chat needs no language on its card");
 });

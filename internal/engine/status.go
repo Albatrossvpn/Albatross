@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Albatrossvpn/vp/internal/geo"
+	"github.com/Albatrossvpn/vp/internal/node"
 )
 
 // Snapshot is everything the main screen shows.
@@ -23,18 +24,25 @@ type Snapshot struct {
 	// ProtocolServers counts the servers of each protocol (ProtocolChoice
 	// values): those not known dead, and those that worked.
 	ProtocolServers map[string][2]int `json:"protocol_servers,omitempty"`
-	Scan            ScanInfo          `json:"scan"`
-	Settings        Settings          `json:"settings"`
-	Admin           bool              `json:"admin"`
-	Version         string            `json:"version"`
-	Cores           CoreInfo          `json:"cores"`
-	WorkingNow      int               `json:"working_now"`
-	Mobile          bool              `json:"mobile"` // the Android app: one VPN mode, no admin
-	Update          *UpdateInfo       `json:"update,omitempty"`
-	TotalGood       int               `json:"total_good"`
-	Account         AccountState      `json:"account"`
-	Notice          string            `json:"notice,omitempty"`
-	Network         string            `json:"network,omitempty"` // the filtering regime found here
+	// ProtocolFailed counts, for each protocol, the servers that were tried
+	// and failed; ProtocolMissing lists the protocols this device cannot run
+	// at all, because the program they run on is not installed here. With
+	// them a protocol with no servers says whether it has none, has only
+	// ones that failed, or cannot run.
+	ProtocolFailed  map[string]int `json:"protocol_failed,omitempty"`
+	ProtocolMissing []string       `json:"protocol_missing,omitempty"`
+	Scan            ScanInfo       `json:"scan"`
+	Settings        Settings       `json:"settings"`
+	Admin           bool           `json:"admin"`
+	Version         string         `json:"version"`
+	Cores           CoreInfo       `json:"cores"`
+	WorkingNow      int            `json:"working_now"`
+	Mobile          bool           `json:"mobile"` // the Android app: one VPN mode, no admin
+	Update          *UpdateInfo    `json:"update,omitempty"`
+	TotalGood       int            `json:"total_good"`
+	Account         AccountState   `json:"account"`
+	Notice          string         `json:"notice,omitempty"`
+	Network         string         `json:"network,omitempty"` // the filtering regime found here
 	// HelpAvailable says "Help others" can run on this network; Helping
 	// that it does.
 	HelpAvailable bool `json:"help_available"`
@@ -113,6 +121,8 @@ func (e *Engine) Snapshot() Snapshot {
 		WorkingNow:      working,
 		TotalGood:       len(e.good),
 		ProtocolServers: maps.Clone(e.protoStats),
+		ProtocolFailed:  maps.Clone(e.protoFailed),
+		ProtocolMissing: e.missingProtocols(),
 		Scan: ScanInfo{
 			Phase: e.scan.Phase, Candidates: total, Untested: untested, Dead: dead, Testing: e.scan.Testing,
 			PerMinute: len(e.scan.recent), SourcesTotal: e.scan.SourcesTotal, SourcesDone: e.scan.SourcesDone,
@@ -225,4 +235,29 @@ func virtualIface(name string) bool {
 		}
 	}
 	return false
+}
+
+// missingProtocols lists the chosen-protocol values this device cannot run:
+// the program a protocol runs on is not installed (a build without it, or an
+// Android ABI it is not made for).
+func (e *Engine) missingProtocols() []string {
+	var out []string
+	for _, c := range ProtocolChoices() {
+		switch c.Value {
+		case "":
+		case "warp":
+			if e.bin.WarpPlus == "" && e.bin.Usque == "" {
+				out = append(out, c.Value)
+			}
+		case "tor":
+			if e.bin.Tor == "" {
+				out = append(out, c.Value)
+			}
+		default:
+			if h := node.SidecarOf(c.Value); h != "" && e.bin.Sidecar(h) == "" {
+				out = append(out, c.Value)
+			}
+		}
+	}
+	return out
 }

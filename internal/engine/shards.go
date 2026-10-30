@@ -58,6 +58,12 @@ func (e *Engine) nextShard(now time.Time, shut bool) int {
 func (e *Engine) noneLeft() {
 	now := time.Now()
 	e.mu.Lock()
+	if methodChoice(e.settings.Protocol) {
+		// A method (Tor, WARP) is not found in the long tail: nothing there
+		// could help, and a phone's data would pay for it.
+		e.mu.Unlock()
+		return
+	}
 	working := false
 	for _, s := range e.good {
 		if s.usable(now) && s.matches(e.settings.Protocol) {

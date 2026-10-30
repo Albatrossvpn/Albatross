@@ -149,6 +149,7 @@ type Engine struct {
 	attempt     context.CancelFunc // cancels the attempt in progress; under mu
 	poolStats   [4]int             // total, untested, dead, ok; refreshed by statsLoop
 	protoStats  map[string][2]int  // by protocol: servers not known dead, and those that worked
+	protoFailed map[string]int     // by protocol: servers tried that failed
 	scan        scanState
 	logs        []LogLine
 	localDNS    string
@@ -196,6 +197,7 @@ func New(opt Options) (*Engine, error) {
 	for _, d := range []string{"cache", "run", "rules"} {
 		os.MkdirAll(filepath.Join(opt.DataDir, d), 0o755)
 	}
+	freshStart(opt.DataDir)
 	if opt.IsAdmin == nil {
 		opt.IsAdmin = func() bool { return false }
 	}
@@ -264,6 +266,36 @@ func New(opt Options) (*Engine, error) {
 	e.loadSourceStats()
 	e.buildSources()
 	return e, nil
+}
+
+// serverGen is the generation of the server results kept on disk. A
+// version that judges servers differently raises it, and its first start
+// forgets every result reached the old way (freshStart).
+//
+// 2: servers must carry a real download, not only answer a request.
+const serverGen = 2
+
+// freshStart forgets, once per serverGen, the server results kept from
+// before: the servers that worked (servers.json) and every test result
+// (states.bin), so each server is tested again the new way and none that
+// passed on its ping alone is connected to on the strength of it. Every
+// list is asked for again at once (their meta files go); the copies of the
+// lists stay, for a network where the download fails.
+func freshStart(dir string) {
+	path := filepath.Join(dir, "server-gen")
+	if b, err := os.ReadFile(path); err == nil {
+		if g, _ := strconv.Atoi(strings.TrimSpace(string(b))); g >= serverGen {
+			return
+		}
+	}
+	for _, f := range []string{"servers.json", "states.bin"} {
+		os.Remove(filepath.Join(dir, f))
+	}
+	metas, _ := filepath.Glob(filepath.Join(dir, "cache", "*.json"))
+	for _, m := range metas {
+		os.Remove(m)
+	}
+	os.WriteFile(path, []byte(strconv.Itoa(serverGen)), 0o644)
 }
 
 // Start begins scanning (and connects if the user asked for that).
@@ -457,6 +489,13 @@ func (e *Engine) newTester() tester.Tester {
 	t.LocalDNS, t.TunnelDNS = e.localDNS, tunnel
 	t.Mobile = e.opt.Mobile
 	t.LineMbps = e.net.lineMbps()
+	// Every server that answers must also carry a real download (scanSpeed).
+	t.SpeedBytes, t.SpeedTimeout, t.SpeedNeed, t.SpeedConcurrency = 512<<10, 8*time.Second, unusable, 2
+	if e.opt.Mobile {
+		// A phone's data is paid for; a quarter of a megabyte still gets
+		// past the first kilobytes filtering lets through.
+		t.SpeedBytes, t.SpeedConcurrency = 256<<10, 1
+	}
 	return t
 }
 

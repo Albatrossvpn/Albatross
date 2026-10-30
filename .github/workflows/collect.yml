@@ -28,6 +28,10 @@ concurrency:
 
 jobs:
   collect:
+    # Collections run in the public repository alba-data (deploy/data-repo),
+    # on its free minutes; here only while the variable COLLECT_IN_PRIVATE
+    # is 1. Two collectors would race over the list keys.
+    if: vars.COLLECT_IN_PRIVATE == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:

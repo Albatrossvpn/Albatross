@@ -46,7 +46,9 @@ const (
 // Speed tests: real downloads through one member, made only while traffic
 // flows and only when the member in use is not already fast.
 // speedURL serves the number of bytes asked for; tests point it elsewhere.
-var speedURL = "https://speed.cloudflare.com/__down?bytes="
+var speedURL = defaultSpeedURL
+
+const defaultSpeedURL = "https://speed.cloudflare.com/__down?bytes="
 
 const (
 	// fastEnough is the speed (bytes/s) at which nothing is compared.
@@ -300,10 +302,15 @@ func (c *connection) backups(skip map[*member]bool) []*member {
 	return out
 }
 
-// speedKnown reports whether m has a recent speed result. The caller holds
-// connection.mu.
+// speedKnown reports whether m has a recent speed result. A result below
+// unusable is kept longer: a server that carried nothing is not tried again
+// for speed as soon as its result ages. The caller holds connection.mu.
 func (m *member) speedKnown() bool {
-	return !m.speedAt.IsZero() && time.Since(m.speedAt) < speedFresh
+	fresh := speedFresh
+	if m.speed < unusable {
+		fresh = 2 * time.Hour
+	}
+	return !m.speedAt.IsZero() && time.Since(m.speedAt) < fresh
 }
 
 // noteResult records a check of a member, on the member and on the server
@@ -694,12 +701,19 @@ func (e *Engine) sweep(ctx context.Context, c *connection) bool {
 	e.mu.Lock()
 	auto := e.settings.AutoSwitch
 	e.mu.Unlock()
-	if !auto || c.pinned {
+	if c.pinned {
 		return true
 	}
 	if !c.idle() {
 		// Speed tests take seconds; health checks must not wait for them.
+		// Without automatic switching they still run: a server that carries
+		// nothing is left either way (speedRound).
 		go e.speedRound(ctx, c, false)
+	}
+	if !auto {
+		return true
+	}
+	if !c.idle() {
 	} else if b := c.faster(); b != nil && c.confirmFaster(b) && c.use(ctx, b) == nil {
 		c.mu.Lock()
 		d := b.delay
@@ -775,7 +789,9 @@ func (e *Engine) groupStale(c *connection) bool {
 	inGroup := map[string]bool{}
 	for _, m := range c.members {
 		inGroup[m.server.Key] = true
-		if m.alive && !m.forged {
+		// A member that answers but carries next to nothing is as good as
+		// gone: a group of them is rebuilt like a dead one.
+		if m.alive && !m.forged && !(m.speedKnown() && m.speed < unusable) {
 			live++
 		}
 	}
@@ -910,10 +926,47 @@ func (c *connection) addTraffic(up, down int64) {
 		}
 		c.stalls++
 	}
+	if c.starved(now, up, down) {
+		// Measured at once, as for stalls that keep coming.
+		stalled = true
+		c.stalls, c.stallsFrom = stallsMany, now
+	}
 	c.mu.Unlock()
 	if stalled {
 		c.poke()
 	}
+}
+
+// A server can let a trickle through: every second brings a little back,
+// so no stall is ever counted, while pages never finish. Requests going out
+// in many seconds of a window that brings back next to nothing are that
+// trickle.
+const (
+	starveWindow  = 20 * time.Second
+	starveUpSecs  = 8
+	starveDown    = 160 << 10 // 8 KB/s over the window
+	starveBetween = 3 * time.Minute
+)
+
+// starved adds one second of traffic to the current window and reports
+// whether the window just ended starved. An upload (a file, a call) sends a
+// lot and gets little back; those seconds do not count. The caller holds
+// connection.mu.
+func (c *connection) starved(now time.Time, up, down int64) bool {
+	ended := false
+	if c.winStart.IsZero() || now.Sub(c.winStart) >= starveWindow {
+		ended = !c.winStart.IsZero() && c.winUpSecs >= starveUpSecs && c.winDown < starveDown &&
+			now.Sub(c.starvedAt) >= starveBetween
+		c.winStart, c.winUpSecs, c.winDown = now, 0, 0
+	}
+	if up > 0 && up < 64<<10 {
+		c.winUpSecs++
+	}
+	c.winDown += down
+	if ended {
+		c.starvedAt = now
+	}
+	return ended
 }
 
 // A server can answer its check, a few bytes, and still carry next to
@@ -1027,33 +1080,20 @@ var speedWait = 12 * time.Second
 // speed downloads through one member and returns its speed in bytes per
 // second, timed from the first byte so connection setup is left out.
 func (c *connection) speed(ctx context.Context, m *member, size int) (float64, error) {
+	return c.speedFor(ctx, m, size, speedWait)
+}
+
+// speedFor is speed with its own time limit. When the speed test cannot be
+// reached through the member (a Workers-based server cannot reach
+// Cloudflare; the test may refuse), other downloads are tried before the
+// member counts as carrying nothing.
+func (c *connection) speedFor(ctx context.Context, m *member, size int, limit time.Duration) (float64, error) {
 	proxy := &url.URL{Scheme: "http", User: url.UserPassword(m.tag, c.clashSecret), Host: c.probeAddr}
-	client := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy), DisableKeepAlives: true}}
-	ctx, cancel := context.WithTimeout(ctx, speedWait)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, speedURL+strconv.Itoa(size), nil)
-	if err != nil {
-		return 0, err
+	ends := []string{speedURL + "%d"}
+	if speedURL == defaultSpeedURL {
+		ends = append(ends, tester.DownloadEndpoints[1:]...)
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("speed test: HTTP %d", resp.StatusCode)
-	}
-	start := time.Now()
-	// A server too slow to finish in time is measured on what arrived.
-	n, _ := io.Copy(io.Discard, io.LimitReader(resp.Body, int64(size)))
-	took := time.Since(start)
-	if n < 64<<10 {
-		if ctx.Err() != nil {
-			return float64(n) / took.Seconds(), nil
-		}
-		return 0, fmt.Errorf("speed test: only %d bytes", n)
-	}
-	return float64(n) / max(took.Seconds(), 0.05), nil
+	return tester.ThroughputFrom(ctx, ends, proxy, size, limit, unusable)
 }
 
 // noteLine learns the line speed from a result. Hysteria servers are left
@@ -1064,17 +1104,29 @@ func (e *Engine) noteLine(m *member, bps float64) {
 	}
 }
 
-// noteSpeed records a speed result on m.
-func (c *connection) noteSpeed(m *member, bps float64) {
+// noteSpeed records a speed result on m, and on its server so the result
+// outlives the group: a server that carried nothing is not picked again as
+// soon as the group is rebuilt. One that carries next to nothing is
+// reported as failing too, so the crowd report does not keep it up front.
+func (e *Engine) noteSpeed(c *connection, m *member, bps float64) {
+	now := time.Now()
 	c.mu.Lock()
-	m.speed, m.speedAt = bps, time.Now()
+	m.speed, m.speedAt = bps, now
 	c.mu.Unlock()
+	e.mu.Lock()
+	m.server.noteSpeed(bps, now)
+	e.mu.Unlock()
+	if bps < unusable/3 && m.server.key64 != 0 {
+		e.net.recordServer(m.server.key64, false)
+	}
 }
 
-// unusable is the speed, in bytes a second, below which the member in use is
-// left even before stayAtLeast: pages through it do not finish. A member a
-// download fails through counts as 0.
-const unusable = 32 << 10
+// unusable is the speed, in bytes a second, below which a server is not
+// worth using: pages through it crawl and videos do not play. The scan
+// fails servers below it (when the line is known to do better), and the
+// member in use is left for one above it even before stayAtLeast. A member
+// a download fails through counts as 0.
+const unusable = 96 << 10
 
 // settleFor is how long a member is in use before it is first measured.
 const settleFor = 45 * time.Second
@@ -1083,12 +1135,18 @@ const settleFor = 45 * time.Second
 // slow, its best backups; it moves to one that is much faster. A server can
 // answer pings quickly and still carry little, so delay alone cannot tell.
 // To avoid swapping on one unlucky test, a backup must win twice in a row
-// unless it is more than four times as fast. Within stayAtLeast of a switch
-// only an unusable member is left, for a backup that is usable. stalled
-// (the user's traffic keeps stalling) measures now, with less, instead of
-// at the usual pace.
+// unless it is more than four times as fast. A member below unusable is a
+// rescue instead: it is left at once for any backup that carries clearly
+// more, also within stayAtLeast of a switch, with automatic switching off,
+// and when every server is slow (one that carries 100 KB/s beats one that
+// carries nothing, however slow the network). stalled (the user's traffic
+// keeps stalling) measures now, with less, instead of at the usual pace.
+// A server the user picked is measured but never left.
 func (e *Engine) speedRound(ctx context.Context, c *connection, stalled bool) {
 	every, size := speedPlan(e.opt.Mobile)
+	e.mu.Lock()
+	auto := e.settings.AutoSwitch
+	e.mu.Unlock()
 	c.mu.Lock()
 	if stalled && time.Since(c.slowNet) >= 10*time.Minute {
 		// Not while every server was just found slow: then the network is,
@@ -1118,42 +1176,54 @@ func (e *Engine) speedRound(ctx context.Context, c *connection, stalled bool) {
 		// came through it: as unusable as it gets.
 		cur = 0
 	}
-	c.noteSpeed(active, cur)
+	e.noteSpeed(c, active, cur)
 	if err == nil {
 		e.noteLine(active, cur)
 	}
-	if cur >= fastEnough || young && cur >= unusable {
+	rescue := cur < unusable
+	if c.pinned || cur >= fastEnough || (young || !auto) && !rescue {
 		c.mu.Lock()
 		c.slowRuns = 0
 		c.mu.Unlock()
 		return
 	}
+	// A rescue looks further: more backups and, when no location was
+	// chosen, other locations too.
+	limit := 2
+	if rescue {
+		limit = 4
+	}
 	var best *member
 	var bestSpeed float64
 	tested := 0
 	for _, b := range c.backups(map[*member]bool{active: true}) {
-		if tested == 2 || ctx.Err() != nil {
+		if tested == limit || ctx.Err() != nil {
 			break
 		}
 		c.mu.Lock()
 		same := b.country == active.country
+		dud := b.speedKnown() && b.speed < unusable
 		c.mu.Unlock()
-		if !same {
+		if !same && !(rescue && c.country == "") || dud {
 			continue
 		}
 		tested++
 		s, err := c.speed(ctx, b, size)
 		if err != nil {
+			if ctx.Err() == nil {
+				e.noteSpeed(c, b, 0)
+			}
 			continue
 		}
-		c.noteSpeed(b, s)
+		e.noteSpeed(c, b, s)
 		e.noteLine(b, s)
 		if s > bestSpeed {
 			best, bestSpeed = b, s
 		}
 	}
 	c.mu.Lock()
-	if tested > 0 && cur < usable && bestSpeed < usable && time.Since(c.slowNet) > time.Hour {
+	rescued := rescue && best != nil && bestSpeed >= 2*cur+16<<10
+	if !rescued && tested > 0 && cur < usable && bestSpeed < usable && time.Since(c.slowNet) > time.Hour {
 		// Every server is slow, so the network itself is (Iran throttles
 		// all encrypted traffic at times). Switching would only drop
 		// connections; say so instead.
@@ -1162,11 +1232,11 @@ func (e *Engine) speedRound(ctx context.Context, c *connection, stalled bool) {
 		e.logf("info", "Every server is slow right now (%s at best), so the network itself is slow; staying on the current server.", rate(max(cur, bestSpeed)))
 		return
 	}
-	better := best != nil && bestSpeed >= 2*cur && bestSpeed-cur >= 200<<10
-	if young {
-		// Only a rescue this soon: the exit address is not changed for a
+	better := rescued || best != nil && bestSpeed >= 2*cur && bestSpeed-cur >= 200<<10
+	if young || !auto {
+		// Only a rescue then: the exit address is not changed for a
 		// faster server, only for one that works.
-		better = best != nil && cur < unusable && bestSpeed >= usable
+		better = rescued
 	}
 	if better {
 		c.slowRuns++
@@ -1174,7 +1244,7 @@ func (e *Engine) speedRound(ctx context.Context, c *connection, stalled bool) {
 		c.slowRuns = 0
 	}
 	// A failover may have moved traffic meanwhile.
-	swap := better && (c.slowRuns >= 2 || bestSpeed >= 4*cur) && c.active == active
+	swap := better && (rescued || c.slowRuns >= 2 || bestSpeed >= 4*cur) && c.active == active
 	if swap {
 		c.slowRuns = 0
 	}
@@ -1182,11 +1252,79 @@ func (e *Engine) speedRound(ctx context.Context, c *connection, stalled bool) {
 	if !swap || c.use(ctx, best) != nil {
 		return
 	}
+	c.closeOn(ctx, active.tag)
 	if cur == 0 {
-		e.logf("info", "Nothing came through the server in use, although it answered its checks; switched to one at %s in the same location.", rate(bestSpeed))
+		e.logf("info", "Nothing came through the server in use, although it answered its checks; switched to one at %s.", rate(bestSpeed))
 		return
 	}
-	e.logf("info", "A server was slow (%s); switched to one at %s in the same location.", rate(cur), rate(bestSpeed))
+	e.logf("info", "A server was slow (%s); switched to one at %s.", rate(cur), rate(bestSpeed))
+}
+
+// gateWait is the longest one download of gateSpeed takes.
+var gateWait = 6 * time.Second
+
+// gateSpeed makes the member a new connection starts on prove it carries
+// data, not only that it answers: a download through it, and when that
+// comes to less than unusable, through up to three of the group's other
+// working members, keeping the fastest. The connection is not called
+// connected on a server that answers its test and then carries nothing.
+// It reports whether it moved to another member.
+func (e *Engine) gateSpeed(ctx context.Context, c *connection) bool {
+	m := c.activeMember()
+	if m == nil || tester.SpeedExempt(m.server.Node()) {
+		return false
+	}
+	size := 512 << 10
+	if e.opt.Mobile {
+		size = 256 << 10
+	}
+	measure := func(m *member) float64 {
+		s, err := c.speedFor(ctx, m, size, gateWait)
+		if err != nil {
+			if ctx.Err() != nil {
+				return -1
+			}
+			s = 0
+		}
+		e.noteSpeed(c, m, s)
+		return s
+	}
+	defer func() {
+		// The connection was just measured: the first speed round waits
+		// its usual turn.
+		c.mu.Lock()
+		c.speedAt = time.Now()
+		c.mu.Unlock()
+	}()
+	cur := measure(m)
+	if cur < 0 || cur >= unusable {
+		return false
+	}
+	best, bestSpeed, tried := m, cur, 0
+	for _, b := range c.backups(map[*member]bool{m: true}) {
+		if tried == 3 || ctx.Err() != nil || bestSpeed >= usable {
+			break
+		}
+		c.mu.Lock()
+		dud := b.speedKnown() && b.speed < unusable
+		c.mu.Unlock()
+		if dud || tester.SpeedExempt(b.server.Node()) {
+			continue
+		}
+		tried++
+		if s := measure(b); s > bestSpeed {
+			best, bestSpeed = b, s
+		}
+	}
+	if best == m || bestSpeed < 2*cur+16<<10 || c.use(ctx, best) != nil {
+		if tried > 0 {
+			e.logf("info", "The servers here carry little right now (%s at best).", rate(max(cur, bestSpeed)))
+		}
+		return false
+	}
+	c.keep(ctx, best)
+	e.logf("info", "The first server answered but carried only %s; started on one at %s instead.", rate(cur), rate(bestSpeed))
+	return true
 }
 
 // rate formats a speed in bytes per second for the log.

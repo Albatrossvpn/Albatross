@@ -106,8 +106,8 @@ func (e *Engine) refreshLoop() {
 			go e.crowdReport(e.ctx)
 		}
 		e.mu.Lock()
-		// The WARP methods are their own protocol; a chosen one excludes them.
-		warp, clean := e.settings.Warp && e.settings.Protocol == "", e.settings.CleanIP
+		warp, tor := methodsWanted(e.settings)
+		clean := e.settings.CleanIP
 		e.mu.Unlock()
 		if clean && e.cf.Age() > 2*time.Hour {
 			found := e.cf.Scan(e.ctx, 400, 8)
@@ -115,8 +115,8 @@ func (e *Engine) refreshLoop() {
 				e.logf("info", "%d clean edge addresses found (best: %d ms).", len(found), found[0].Latency/time.Millisecond)
 			}
 		}
-		if warp {
-			e.refreshWarp()
+		if warp || tor {
+			e.refreshWarp(warp, tor)
 		}
 		e.refreshEdge()
 		select {
@@ -568,6 +568,9 @@ func (e *Engine) pickBatch(size int) []candidate {
 	allowPlain := e.settings.AllowPlain
 	protocol := e.settings.Protocol
 	wantProto := protoCodes[protocol] // 0 = any
+	// The built-in methods are not servers of the pool: refreshWarp tests
+	// them, and the pool has nothing for a choice of them to try.
+	methodOnly := methodChoice(protocol)
 	haveXray := e.bin.Xray != ""
 	targetHasServers := false
 	// Protocols with a working server now; the others are stocked first,
@@ -640,6 +643,9 @@ func (e *Engine) pickBatch(size int) []candidate {
 		tb = [2]byte{target[0], target[1]}
 	}
 	e.pool.Each(func(en *pool.Entry) {
+		if methodOnly {
+			return
+		}
 		switch en.State {
 		case pool.StateRejected, pool.StateOK:
 			return
@@ -663,8 +669,11 @@ func (e *Engine) pickBatch(size int) []candidate {
 		if en.Engine == 2 && !haveXray {
 			return
 		}
-		if shut && !canGetOut(reg, regProbe, en) {
-			// Only what the regime leaves a path for is worth a test.
+		if shut && wantProto == 0 && !canGetOut(reg, regProbe, en) {
+			// Only what the regime leaves a path for is worth a test. A
+			// protocol the user chose is tried anyway: they asked for it,
+			// and a regime read wrongly must not decide for them (a failure
+			// there costs the server nothing, see recordFail).
 			return
 		}
 		sc := 0.0
@@ -1018,11 +1027,15 @@ func (e *Engine) unpoison(cands []candidate) []candidate {
 
 // realTest tests candidates in chunks and returns the ones that failed.
 // Rejected and working servers are recorded here; failures are left to
-// the caller, which may retry them.
+// the caller, which may retry them. A server that answers but carries less
+// than unusable fails too (slowFails), with no retry: the tricks that get
+// a blocked handshake through do not make a server faster.
 func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidate {
 	var failed []candidate
 	var mu sync.Mutex
 	for _, part := range chunks(cands, chunk) {
+		var slow []slowResult
+		fast := false
 		if e.ctx.Err() != nil {
 			return nil
 		}
@@ -1041,7 +1054,20 @@ func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidat
 			case r.Rejected:
 				e.pool.Update(c.key, func(p *pool.Entry) { p.State = pool.StateRejected; p.LastTest = pool.Minutes(time.Now()) })
 				e.forget(c.key)
+			case r.OK && r.SpeedTested && r.Speed < unusable:
+				mu.Lock()
+				slow = append(slow, slowResult{c, r})
+				mu.Unlock()
 			case r.OK:
+				if r.SpeedTested {
+					mu.Lock()
+					fast = true
+					mu.Unlock()
+					if p := c.node.Proto; p != "hysteria2" && p != "hysteria" {
+						// As noteLine: Hysteria sends at the speed asked for.
+						e.net.recordLine(r.Speed)
+					}
+				}
 				e.recordOK(c, r)
 			case r.Tampered && e.distrust(c.key, c.node.Name):
 			default:
@@ -1053,8 +1079,36 @@ func (e *Engine) realTest(cands []candidate, spoof string, chunk int) []candidat
 		if err != nil && e.ctx.Err() == nil {
 			e.logf("warn", "Batch test failed: %v", err)
 		}
+		e.slowFails(slow, fast)
 	}
 	return failed
+}
+
+// slowResult is a server that answered its probe but carried too little.
+type slowResult struct {
+	c candidate
+	r tester.Result
+}
+
+// slowFails records the servers of one batch that answered but carried less
+// than unusable. They fail when this network is known to carry more: another
+// server of the batch did, or the line was measured faster before. When
+// none did, the network itself may be what is slow (Iran throttles all
+// encrypted traffic at times), and failing every server would leave nothing
+// to connect to; they are kept, with their speed, which puts them behind
+// any server measured faster (Server.speedRank).
+func (e *Engine) slowFails(slow []slowResult, fast bool) {
+	if len(slow) == 0 || e.ctx.Err() != nil {
+		return
+	}
+	strict := fast || e.net.lineBps() >= 2*unusable
+	for _, x := range slow {
+		if strict {
+			e.recordFail(x.c, "too slow")
+			continue
+		}
+		e.recordOK(x.c, x.r)
+	}
 }
 
 // chunks splits candidates so one core holds a bounded number of nodes and
@@ -1122,6 +1176,9 @@ func (e *Engine) recordOK(c candidate, r tester.Result) {
 	}
 	s.node = n
 	s.Delay = int(r.Delay / time.Millisecond)
+	if r.SpeedTested {
+		s.noteSpeed(r.Speed, now)
+	}
 	if r.Country != "" {
 		s.Country = r.Country
 	}
@@ -1247,13 +1304,17 @@ func (e *Engine) statsLoop() {
 		if !watched && n%12 != 0 {
 			continue
 		}
-		total, untested, dead, okN, live, worked := e.pool.StatsByProto()
+		total, untested, dead, okN, live, worked, failed := e.pool.StatsByProto()
 		e.mu.Lock()
 		e.poolStats = [4]int{total, untested, dead, okN}
 		e.protoStats = map[string][2]int{}
+		e.protoFailed = map[string]int{}
 		for name, code := range protoCodes {
 			if live[code] > 0 {
 				e.protoStats[name] = [2]int{live[code], worked[code]}
+			}
+			if failed[code] > 0 {
+				e.protoFailed[name] = failed[code]
 			}
 		}
 		cut := time.Now().Add(-time.Minute)

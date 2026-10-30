@@ -253,17 +253,46 @@ func FreePorts(n int) ([]int, error) {
 			l.Close()
 		}
 	}()
+	portsMu.Lock()
+	defer portsMu.Unlock()
+	now := time.Now()
+	for p, at := range portsGiven {
+		if now.Sub(at) > portHold {
+			delete(portsGiven, p)
+		}
+	}
 	ports := make([]int, 0, n)
-	for i := 0; i < n; i++ {
+	for len(ports) < n {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
 			return nil, err
 		}
+		// Kept open until the end, so the system hands out another one.
 		ls = append(ls, l)
-		ports = append(ports, l.Addr().(*net.TCPAddr).Port)
+		p := l.Addr().(*net.TCPAddr).Port
+		if _, taken := portsGiven[p]; taken {
+			if len(ls) > n+64 {
+				return nil, errors.New("no free local port")
+			}
+			continue
+		}
+		portsGiven[p] = now
+		ports = append(ports, p)
 	}
 	return ports, nil
 }
+
+// A port handed out is free when FreePorts returns, and stays so until the
+// core it was given to binds it, seconds later. Cores started side by side
+// (the collector runs several) must not be handed the same one meanwhile:
+// one of them would fail with "address already in use".
+var (
+	portsMu    sync.Mutex
+	portsGiven = map[int]time.Time{}
+)
+
+// portHold is how long a handed-out port is not handed out again.
+const portHold = 2 * time.Minute
 
 // mergeEnv returns base with the variables in extra set, one entry per
 // name. The C library takes the first entry of a repeated name, so a plain

@@ -46,16 +46,35 @@ import (
 // channels) and discover.json (counts), which the collector takes with
 // -sources and -channels.
 
-// Schemes the GitHub code search looks for, one query each.
+// Schemes the GitHub code search looks for, one query each: every protocol
+// the app runs, the rare ones too. Lists that carry a rare protocol are
+// few and seldom carry the common ones, so a search for the common schemes
+// alone never finds them.
 var discoverSchemes = []string{
 	"vless", "vmess", "trojan", "ss", "ssr", "hysteria2", "hy2", "hysteria", "tuic", "anytls",
-	"wireguard", "wg", "socks5", "socks", "ssh", "naive+https", "warp",
+	"wireguard", "wg", "socks5", "socks", "ssh", "naive+https", "naive+quic", "warp",
+	"amneziawg", "awg", "juicity", "mieru", "mierus", "brook", "snell", "wstunnel", "shadowtls",
 }
 
-// Repository searches: the words the usual lists are described with.
+// discoverFormats find the rare protocols where they are kept as configs
+// rather than links: Clash and sing-box files name a server's type, and
+// WireGuard and AmneziaWG servers come as .conf files.
+var discoverFormats = []string{
+	`"type: tuic" path:*.yaml`, `"type: hysteria2" path:*.yaml`, `"type: wireguard" path:*.yaml`,
+	`"type: anytls" path:*.yaml`, `"type: snell" path:*.yaml`, `"type: mieru" path:*.yaml`,
+	`"type: ssh" "server:" path:*.yaml`, `"type: juicity"`,
+	`"\"type\": \"tuic\"" path:*.json`, `"\"type\": \"hysteria2\"" path:*.json`,
+	`"\"type\": \"anytls\"" path:*.json`, `"\"type\": \"naive\"" path:*.json`,
+	`"[Peer]" "Endpoint" "PrivateKey" path:*.conf`, `"Jc =" "Jmin =" "[Peer]"`,
+}
+
+// Repository searches: the words the usual lists are described with, and
+// the names of the rare protocols.
 var discoverRepoQueries = []string{
 	"v2ray subscription free", "free vpn config", "hysteria2 free", "vless reality free",
 	"proxy config collector", "sub store v2ray", "free proxies iran", "تنظیمات v2ray",
+	"tuic free node", "wireguard config free", "amneziawg config", "naiveproxy free",
+	"juicity", "mieru proxy", "snell proxy free", "anytls free", "brook proxy free", "ssh tunnel free account",
 }
 
 // minSourceLinks is how many servers a subscription must hold to count,
@@ -421,11 +440,18 @@ func (d *discoverer) keep(ctx context.Context, subs, tgs []string) []string {
 		d.mu.Lock()
 		d.checked[key] = true
 		d.mu.Unlock()
-		n := 0
+		n, rare := 0, 0
 		if res.Err == nil && res.Text != "" {
-			node.EachText(res.Text, func(*node.Node) { n++ })
+			node.EachText(res.Text, func(nd *node.Node) {
+				n++
+				if rareProtos[nd.Proto] {
+					rare++
+				}
+			})
 		}
-		if n < min {
+		// A server of a rare protocol is worth a source of its own: a
+		// WireGuard or AmneziaWG .conf holds one, and such lists are short.
+		if n < min && rare == 0 {
 			d.carry(s, true)
 			return
 		}
@@ -559,11 +585,12 @@ func (d *discoverer) githubCode(ctx context.Context, hour int) []string {
 	if hour == 2 {
 		pages = 10
 	}
-	queries := make([]string, 0, len(discoverSchemes)+2)
+	queries := make([]string, 0, len(discoverSchemes)+2+len(discoverFormats))
 	for _, s := range discoverSchemes {
 		queries = append(queries, fmt.Sprintf(`"%s://"`, s))
 	}
 	queries = append(queries, `path:*.ovpn "remote "`, `"proxies:" "server:" path:*.yaml`)
+	queries = append(queries, discoverFormats...)
 	for _, q := range queries {
 		n := 0
 		for page := 1; page <= pages; page++ {
