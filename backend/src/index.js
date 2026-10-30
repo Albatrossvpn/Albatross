@@ -14,6 +14,8 @@ import { SWEEP_CRON, check as telegramCheck, connect as telegramConnect, disconn
 
 const SESSION = 30 * DAY; // an app or browser session
 const ADMIN_SESSION = 8 * 3600;
+const ADMIN_ALL = "admin:all"; // the wrong administrator sign-ins of every address, together
+const ADMIN_ALL_MAX = 200;
 const MAX_BODY = 8 * 1024;
 
 const DEFAULTS = {
@@ -718,11 +720,16 @@ async function adminLogin(request, env) {
   if (!env.ADMIN_USER || !env.ADMIN_PASSWORD) throw new HttpError(503, "The administrator account is not set up.");
   const { username, password } = await body(request);
   const ip = "admin:ip:" + (await clientTag(request, env));
-  if (await blocked(env, ip, 10, 900)) throw tooMany();
+  // One address gets ten wrong tries; all addresses together get 200 (a
+  // guesser with many addresses is held to a total a dictionary cannot get
+  // far on in a day, and a right password from a quiet address still waits
+  // for the window rather than hand the flood a way to tell it apart).
+  if ((await blocked(env, ip, 10, 900)) || (await blocked(env, ADMIN_ALL, ADMIN_ALL_MAX, 900))) throw tooMany();
   // Both checks always run, so the answer does not say which one was wrong.
   const [a, b] = await Promise.all([safeEqual(username ?? "", env.ADMIN_USER), safeEqual(password ?? "", env.ADMIN_PASSWORD)]);
   if (!(a && b)) {
     await count(env, ip, 900);
+    await count(env, ADMIN_ALL, 900);
     throw new HttpError(401, "Wrong username or password.");
   }
   await forget(env, ip);

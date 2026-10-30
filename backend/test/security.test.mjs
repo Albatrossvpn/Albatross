@@ -112,3 +112,27 @@ test("no page needs what the policies forbid", () => {
     }
   }
 });
+
+test("the administrator sign-in is held to a total across all addresses", async () => {
+  const env = accountsEnv({ ADMIN_USER: "root", ADMIN_PASSWORD: "a-long-passphrase-for-tests" });
+  const login = (ip, password) =>
+    accounts.fetch(new Request("https://accounts.albatrossvpn.online/api/v1/admin/login", {
+      method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": ip },
+      body: JSON.stringify({ username: "root", password }),
+    }), env, { waitUntil() {} });
+  // One address is stopped after ten wrong tries.
+  for (let i = 0; i < 10; i++) assert.equal((await login("203.0.113.1", "wrong")).status, 401);
+  assert.equal((await login("203.0.113.1", "wrong")).status, 429);
+  // Many addresses add up: 190 more wrong tries make 200 in all.
+  for (let i = 0; i < 190; i++) assert.equal((await login(`10.0.${Math.floor(i / 250)}.${(i % 250) + 1}`, "wrong")).status, 401);
+  // Now even the right password from an address nobody used waits for the window.
+  assert.equal((await login("192.0.2.77", "a-long-passphrase-for-tests")).status, 429);
+  // Before that total, the right password signs in.
+  const fresh = accountsEnv({ ADMIN_USER: "root", ADMIN_PASSWORD: "a-long-passphrase-for-tests" });
+  const ok = await accounts.fetch(new Request("https://accounts.albatrossvpn.online/api/v1/admin/login", {
+    method: "POST", headers: { "Content-Type": "application/json", "CF-Connecting-IP": "192.0.2.78" },
+    body: JSON.stringify({ username: "root", password: "a-long-passphrase-for-tests" }),
+  }), fresh, { waitUntil() {} });
+  assert.equal(ok.status, 200);
+  assert.ok((await ok.json()).token);
+});
