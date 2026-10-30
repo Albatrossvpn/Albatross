@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import test, { afterEach } from "node:test";
 import { sweep } from "../src/telegram.js";
 import { verifyPassword } from "../src/lib.js";
+import * as sales from "../src/sales.js";
 import { SARA, TEAM, datas, labels, press, real, telegram, text, world } from "./tg-helpers.mjs";
 
 afterEach(() => (globalThis.fetch = real));
@@ -23,9 +24,11 @@ const paidBy = (chat, payload, amount, charge = `charge${++charges}`) => ({
 });
 
 /** A service with a bot, a team chat and data on sale (unless `on` is false). */
-async function shop({ on = true, ...rest } = {}) {
+async function shop({ on = true, discounts = false, ...rest } = {}) {
   const w = await world(rest);
   if (on) await w.env.DB.prepare("INSERT INTO settings (key, value) VALUES ('stars_enabled', '1')").run();
+  // The prices most tests check are the plain ones: no discount unless asked for.
+  if (!discounts) await w.env.DB.prepare("INSERT INTO settings (key, value) VALUES ('stars_size_discounts', ''), ('stars_month_discounts', '')").run();
   return w;
 }
 
@@ -99,8 +102,8 @@ test("with selling on, the packages cost what 10,000 toman a GB at 270,000 toman
   assert.ok(store.reply_markup.inline_keyboard.flat().slice(0, 5).every((b) => b.style === "primary"), "the packages carry buying's colour");
   // So do the choice of account and the payment, through to the end.
   await w.send(press(SARA, "s:10"));
-  const choice = w.api.of("editMessageText").pop().reply_markup.inline_keyboard[0];
-  assert.deepEqual(choice.map((b) => b.style), ["primary", "primary"]);
+  const choice = w.api.of("editMessageText").pop().reply_markup.inline_keyboard.flat().filter((b) => /^s[nr]:/.test(b.callback_data || ""));
+  assert.deepEqual(choice.map((b) => [b.callback_data, b.style]), [["sn:10:1", "primary"], ["sr:10:1", "primary"]]);
   await w.send(press(SARA, "sn:10"));
   const pay = w.api.of("editMessageText").pop().reply_markup.inline_keyboard[0][0];
   assert.ok(pay.callback_data.startsWith("sp:") && pay.style === "primary", JSON.stringify(pay));
@@ -547,4 +550,49 @@ test("the webhook is set again, with the updates payments need, when a deploy wa
   assert.equal(hook.drop_pending_updates, undefined, "waiting updates are kept");
   await sweep(w.env, w.kit);
   assert.equal(api.of("setWebhook").length, 1);
+});
+
+test("a plan of the buyer's own: data a month with - and +, the months, a price worked out with both discounts, and its whole data and days on the account", async () => {
+  const w = await shop({ discounts: true });
+  await w.send(press(SARA, "b:50:3"));
+  const screen = w.api.of("editMessageText").pop();
+  const cfg = await sales.config(w.env);
+  const p = sales.plan(cfg, 50, 3);
+  assert.equal(p.total, 150);
+  assert.equal(p.tier, "gold", "150 GB in all earns Gold");
+  assert.ok(screen.text.includes("<b>150 GB</b>") && screen.text.includes(`⭐${p.stars}`) && screen.text.includes(`${p.save}%`), screen.text);
+  const buttons = screen.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
+  assert.ok(buttons.includes("b:45:3") && buttons.includes("b:60:3") && buttons.includes("b:50:12"), JSON.stringify(buttons));
+  // A price from a button is never trusted: a plan the store does not sell shows the packages.
+  await w.send(press(SARA, "sn:55:3"));
+  assert.ok(w.api.of("editMessageText").pop().text.startsWith("⭐"), "55 GB is no step of the builder");
+  await w.send(press(SARA, "sn:50:3"));
+  const id = lastOrder(w);
+  const row = await w.row("SELECT gb, stars, days FROM stars_orders WHERE id = ?1", id);
+  assert.deepEqual({ ...row }, { gb: 150, stars: p.stars, days: 90 });
+  await pay(w, SARA, id);
+  const account = await accountOf(w, credentials(w, SARA).username);
+  assert.equal(account.quota_bytes, 150 * 1024 ** 3);
+  assert.equal(account.tier, "gold");
+  assert.ok(Math.abs(account.expires_at - (Math.floor(Date.now() / 1000) + 90 * 86400)) < 60);
+});
+
+test("an account bought here that runs low is reminded once, with a recharge one tap away, and again after a recharge", async () => {
+  const w = await shop();
+  await pay(w, SARA, await order(w, SARA, { gb: 10 }));
+  const { username } = credentials(w, SARA);
+  await sweep(w.env, w.kit);
+  assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === SARA && c.text.includes("running low")).length, 0, "not while it has plenty");
+  await w.env.DB.prepare("UPDATE users SET used_bytes = quota_bytes * 85 / 100 WHERE username = ?1").bind(username).run();
+  await sweep(w.env, w.kit);
+  const told = w.api.of("sendMessage").filter((c) => c.chat_id === SARA && c.text.includes("running low"));
+  assert.equal(told.length, 1);
+  assert.ok(told[0].text.includes(username) && told[0].reply_markup.inline_keyboard[0][0].style === "primary", told[0].text);
+  await sweep(w.env, w.kit);
+  assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === SARA && c.text.includes("running low")).length, 1, "once a period");
+  // A recharge starts a new period: the next time it runs low, it is reminded again.
+  await pay(w, SARA, await order(w, SARA, { gb: 5, target: username }));
+  await w.env.DB.prepare("UPDATE users SET used_bytes = quota_bytes * 9 / 10, period_start = period_start + 1 WHERE username = ?1").bind(username).run();
+  await sweep(w.env, w.kit);
+  assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === SARA && c.text.includes("running low")).length, 2);
 });

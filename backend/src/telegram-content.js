@@ -249,20 +249,39 @@ function build(code) {
     /** The packages, with the Stars each costs and the plan it earns. `cat` is sales.js catalog. */
     store(cat, days) {
       const rows = [];
-      for (let i = 0; i < cat.length; i += 2) rows.push(cat.slice(i, i + 2).map((p) => buy(btn(`${MEDALS[p.tier] || "⭐"} ${p.gb} GB · ⭐${p.stars}`, `s:${p.gb}`))));
+      for (let i = 0; i < cat.length; i += 2) rows.push(cat.slice(i, i + 2).map((p) => buy(btn(`${MEDALS[p.tier] || "⭐"} ${p.gb} GB · ⭐${p.stars}`, `b:${p.gb}:1`))));
       return {
         text: t("store", { lines: cat.map((p) => `• <b>${p.gb} GB</b> - ⭐${p.stars} - ${planLine(p)}`).join("\n"), valid: validText(days) }),
-        markup: keys(...rows, [btn(t("btn_what_plans"), "p"), btn(t("btn_terms"), "st")], [WEBSITE, MENU_BUTTON]),
+        markup: keys(...rows, [buy(btn(t("btn_build"), "b:10:3"))], [btn(t("btn_what_plans"), "p"), btn(t("btn_terms"), "st")], [WEBSITE, MENU_BUTTON]),
       };
     },
 
-    /** A package was picked: a new account, or one that exists? */
-    storeChoice: (p, days) => ({
-      text: t("store_choice", { gb: p.gb, stars: p.stars, plan: planLine(p), valid: validText(days) }),
-      markup: keys([buy(btn(t("btn_new_account"), `sn:${p.gb}`)), buy(btn(t("btn_add_account"), `sr:${p.gb}`))], [BACK_TO_PACKAGES]),
-    }),
+    /**
+     * A plan of the buyer's own (sales.plan): the data a month with - and +,
+     * the months, and its price, worked out at once; then a new account or
+     * one that exists. `limits` is { min, max, step } of the data a month.
+     */
+    builder(p, limits) {
+      const down = p.gb - limits.stepDown, up = p.gb + limits.stepUp;
+      const months = limits.months.map((m) => {
+        const label = t("months_short", { n: m });
+        return btn(m === p.months ? `✅ ${label}` : label, `b:${p.gb}:${m}`);
+      });
+      const save = p.save > 0 ? `\n${t("builder_save", { save: p.save })}` : "";
+      return {
+        text: t("builder", { gb: p.gb, months: t("months_short", { n: p.months }), total: p.total, valid: validText(p.days), plan: `${MEDALS[p.tier] || ""} ${planLine(p)}`.trim(), stars: p.stars }) + save,
+        markup: keys(
+          [btn(down >= limits.min ? `➖ ${limits.stepDown} GB` : "·", down >= limits.min ? `b:${down}:${p.months}` : `b:${p.gb}:${p.months}`),
+            btn(`📦 ${p.gb} GB`, `b:${p.gb}:${p.months}`),
+            btn(up <= limits.max ? `➕ ${limits.stepUp} GB` : "·", up <= limits.max ? `b:${up}:${p.months}` : `b:${p.gb}:${p.months}`)],
+          months,
+          [buy(btn(t("btn_new_account"), `sn:${p.gb}:${p.months}`)), buy(btn(t("btn_add_account"), `sr:${p.gb}:${p.months}`))],
+          [BACK_TO_PACKAGES, btn(t("btn_terms"), "st")],
+        ),
+      };
+    },
 
-    askAccount: (p) => ({ text: t("ask_account", { gb: p.gb }), markup: keys([BACK_TO_PACKAGES]) }),
+    askAccount: (p) => ({ text: t("ask_account", { gb: p.total ?? p.gb }), markup: keys([BACK_TO_PACKAGES]) }),
     NOT_A_USERNAME: { text: t("not_a_username"), markup: keys([BACK_TO_PACKAGES]) },
     NO_SUCH_ACCOUNT: { text: t("no_such_account"), markup: keys([BACK_TO_PACKAGES]) },
     CANNOT_RECHARGE: { text: t("cannot_recharge"), markup: keys([TEAM_BUTTON], [BACK_TO_PACKAGES]) },
@@ -272,7 +291,7 @@ function build(code) {
     checkout(o, p, days) {
       const what = o.kind === "topup" ? t("checkout_topup", { account: esc(o.target) }) : t("checkout_new");
       return {
-        text: t("checkout", { gb: o.gb, stars: o.stars, plan: planLine(p), valid: validText(days), what }),
+        text: t("checkout", { gb: o.gb, stars: o.stars, plan: planLine(p), valid: validText(p.days ?? days), what }),
         markup: keys([buy(btn(t("btn_pay", { stars: o.stars }), `sp:${o.id}`))], [btn(t("btn_terms"), "st"), BACK_TO_PACKAGES]),
       };
     },
@@ -315,6 +334,12 @@ function build(code) {
     receiptTopup: (r) => ({
       text: t("receipt_topup", { id: r.id, gb: r.gb, stars: r.stars, username: esc(r.username), total: gbOf(r.quota_bytes), until: untilText(r.expires), plan: planLine(r) }),
       markup: keys([link(t("btn_account_page_short"), ACCOUNT), WEBSITE], [MENU_NEW]),
+    }),
+
+    /** An account bought here runs low on data or days: a recharge is one tap away. */
+    renew: (r) => ({
+      text: t("renew", { account: esc(r.username), left: gbOf(r.left), until: untilText(r.expires) }),
+      markup: keys([buy(btn(t("btn_recharge"), "s"))], [MENU_NEW]),
     }),
 
     /** A payment was given back: `why` is "delivery" (it could not be delivered) or "team". */

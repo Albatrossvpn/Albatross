@@ -10,6 +10,7 @@ import en from "../src/i18n/en.js";
 import { DEFAULT, PACKS, fill, has, pack, translator } from "../src/i18n/index.js";
 import { check, connect, disconnect, sweep } from "../src/telegram.js";
 import { languagePicker, screens } from "../src/telegram-content.js";
+import * as sales from "../src/sales.js";
 import { d1 } from "./d1.mjs";
 import { ADMIN_REQUEST, SARA, TEAM, TOKEN, datas, labels, nextUpdate, press, real, telegram, text, world } from "./tg-helpers.mjs";
 
@@ -48,6 +49,7 @@ test("a string is filled from its placeholders, a missing key is read from Engli
 function everyScreen(v) {
   const shop = { catalog: [{ gb: 5, stars: 15, plan: "Bronze", devices: 1 }, { gb: 10, stars: 29, plan: "Silver", devices: 2 }, { gb: 100, stars: 285, plan: "Gold", devices: 4 }, { gb: 1000, stars: 2850, plan: "VIP", devices: 0 }], days: 30 };
   const p = shop.catalog[1];
+  const cfg = { priceToman: 10000, usdToman: 270000, starsPer1000: 13, days: 30, sizeSteps: sales.parseSteps(sales.SALES_DEFAULTS.stars_size_discounts), monthSteps: sales.parseSteps(sales.SALES_DEFAULTS.stars_month_discounts) };
   const receipt = { id: 7, gb: 10, stars: 29, username: "tg1234567", password: "Ab3dE6gH9jK2mN", quota_bytes: 10 * 1024 ** 3, plan: "Silver", devices: 2, expires: 1900000000 };
   const out = [];
   const add = (name, s) => out.push([name, s]);
@@ -85,7 +87,8 @@ function everyScreen(v) {
   for (const mailed of [true, false]) add(`noTeam(${mailed})`, v.noTeam(mailed));
   add("store", v.store(shop.catalog, 30));
   add("store no end", v.store(shop.catalog, 0));
-  add("storeChoice", v.storeChoice(p, 30));
+  for (const [gb, m] of [[5, 1], [10, 3], [500, 12]]) add(`builder ${gb}x${m}`, v.builder(sales.plan(cfg, gb, m), { min: sales.MIN_GB, max: sales.MAX_GB, stepUp: sales.stepOf(gb), stepDown: sales.stepOf(gb - 1), months: sales.MONTHS }));
+  add("renew", v.renew({ username: "tg1234567", left: 2 * 1024 ** 3, expires: 1893456000 }));
   add("askAccount", v.askAccount(p));
   for (const k of ["NOT_A_USERNAME", "NO_SUCH_ACCOUNT", "CANNOT_RECHARGE", "TOO_MANY_LOOKUPS", "PAYSUPPORT", "STORE_OFF", "ORDER_GONE", "NO_OWN_ACCOUNT", "TOO_MANY_RESETS"]) add(k, v[k]);
   add("checkout new", v.checkout({ id: 5, kind: "new", gb: 10, stars: 29, target: "" }, p, 30));
@@ -245,7 +248,7 @@ test("/language and the menu's button offer the choice again; a new choice repla
 
 test("a link into the bot (/start buy) is remembered through the choice of a language", async () => {
   const w = await fresh();
-  await w.env.DB.prepare("INSERT INTO settings (key, value) VALUES ('stars_enabled', '1')").run();
+  await w.env.DB.prepare("INSERT INTO settings (key, value) VALUES ('stars_enabled', '1'), ('stars_size_discounts', ''), ('stars_month_discounts', '')").run();
   await w.send(text(SARA, "/start buy"));
   assert.deepEqual(datas(w.lastText(SARA).reply_markup), PACKS.map((p) => `l:${p.code}:buy`));
   await w.send(press(SARA, "l:es:buy", 70));

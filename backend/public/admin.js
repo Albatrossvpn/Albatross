@@ -306,7 +306,9 @@ function showStars(s) {
   $("#t-stars-usd").value = s.stars_usd_toman;
   $("#t-stars-worth").value = s.stars_usd_per_1000;
   $("#t-stars-days").value = s.stars_valid_days;
-  const list = (s.stars_packages || []).map((p) => `${p.gb} GB = ${p.stars} ⭐ (${p.plan})`).join(", ");
+  $("#t-stars-size").value = s.stars_size_discounts ?? "";
+  $("#t-stars-months").value = s.stars_month_discounts ?? "";
+  const list = (s.stars_packages || []).map((p) => `${p.gb} GB = ${p.stars} ⭐ (${p.plan}${p.save ? `, ${p.save}% off` : ""})`).join(", ");
   $("#t-stars-preview").textContent = list ? `Packages at these prices: ${list}. Saved settings make these; the bot shows them once they are saved.` : "";
 }
 $("#t-tg-off").addEventListener("click", async () => {
@@ -343,6 +345,8 @@ $("#settings-form").addEventListener("submit", async (e) => {
     stars_usd_toman: String(Math.round(num($("#t-stars-usd").value))),
     stars_usd_per_1000: String(Math.round(num($("#t-stars-worth").value))),
     stars_valid_days: String(Math.round(num($("#t-stars-days").value))),
+    stars_size_discounts: $("#t-stars-size").value.trim(),
+    stars_month_discounts: $("#t-stars-months").value.trim(),
     // A token connects the bot (and Telegram's refusal shows here); left empty, the bot stays as it is.
     ...($("#t-tg").value.trim() ? { telegram_bot_token: $("#t-tg").value.trim() } : {}),
     plan_features: Object.fromEntries([...document.querySelectorAll("#t-features select")].map((el) => [el.dataset.feature, el.value])),

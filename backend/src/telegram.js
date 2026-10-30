@@ -935,6 +935,7 @@ export async function sweep(env, kit) {
     await giveBack(c, row.id, "delivery").catch(log("sweep"));
   }
   await sales.purge(env, t).catch(log("sweep"));
+  if (!over()) await remindRenewals(c, t).catch(log("sweep"));
   const quiet = await env.DB.prepare("SELECT * FROM tg_users WHERE mode != 'ticket' AND blocked = 0 AND updated < ?1 ORDER BY updated LIMIT ?2").bind(t - IDLE, SWEEP_MAX).all();
   for (const user of quiet.results) {
     if (over()) break;
@@ -1020,12 +1021,13 @@ async function onCallback(c, update) {
       await tg.answer(q.id);
       return edit(v.plans(await shopOf(env)));
     case "s":
+    case "b":
     case "sn":
     case "sr":
     case "sp":
     case "st":
       await tg.answer(q.id);
-      return onStoreButton(c, user, kind, arg, edit, show);
+      return onStoreButton(c, user, kind, arg, edit, show, extra);
     case "pw":
     case "py":
       await tg.answer(q.id);
@@ -1214,6 +1216,29 @@ async function onTeamButton(c, q, data, msg) {
 // its username and password are sent in the same chat. A payment that cannot
 // be delivered is given back.
 
+/**
+ * Accounts bought here that run low (a fifth of their data, or three days,
+ * left) are told so by the bot, with a recharge one tap away: once a period,
+ * since a recharge starts a new one. A few a minute.
+ */
+async function remindRenewals(c, t) {
+  const { env, tg } = c;
+  if (!(await shopOf(env))) return;
+  const { results } = await env.DB.prepare(
+    `SELECT u.id, u.username, u.quota_bytes, u.used_bytes, u.expires_at, u.tg_owner FROM users u
+       LEFT JOIN tg_users g ON g.chat_id = u.tg_owner
+     WHERE u.tg_owner > 0 AND u.disabled = 0 AND u.quota_bytes > 0 AND u.reminded_at < u.period_start
+       AND (u.used_bytes * 5 >= u.quota_bytes * 4 OR (u.expires_at > ?1 AND u.expires_at < ?2))
+       AND COALESCE(g.blocked, 0) = 0
+     LIMIT 5`,
+  ).bind(t, t + 3 * DAY).all();
+  for (const u of results) {
+    await env.DB.prepare("UPDATE users SET reminded_at = ?2 WHERE id = ?1").bind(u.id, t).run();
+    const said = (await viewOf(c, u.tg_owner)).renew({ username: u.username, left: Math.max(0, u.quota_bytes - u.used_bytes), expires: u.expires_at });
+    await tg.send(u.tg_owner, said.text, said.markup);
+  }
+}
+
 /** The packages on sale now, with the settings; null while selling is off. */
 async function shopOf(env) {
   const cfg = await sales.config(env);
@@ -1229,22 +1254,32 @@ async function showStore(c, user, put = (s) => c.tg.send(user.chat_id, s.text, s
 /** Orders a person may make: ten an hour, three hundred a day in all. */
 const mayOrder = (c, t) => allowed(c.env, c.kit, [{ key: `tg:order:${t}`, max: 10, window: 3600 }, { key: `tg:orders:all:${today()}`, max: 300, window: DAY }]);
 
+/** An order for plan `p` (sales.plan): its total data and days; the price is worked out here, never taken from a button. */
 async function makeOrder(c, user, shop, p, kind, target = "") {
-  const order = { chat_id: user.chat_id, kind, gb: p.gb, stars: p.stars, days: shop.days, target };
-  return { ...order, id: await sales.newOrder(c.env, { chat: order.chat_id, kind, gb: p.gb, stars: p.stars, days: shop.days, target }) };
+  const order = { chat_id: user.chat_id, kind, gb: p.total, stars: p.stars, days: p.days, target };
+  return { ...order, id: await sales.newOrder(c.env, { chat: order.chat_id, kind, gb: p.total, stars: p.stars, days: p.days, target }) };
 }
 
-/** The store's buttons: the packages, a package's choice, a new account, one to recharge, the order's payment, the terms. */
-async function onStoreButton(c, user, kind, arg, edit, show) {
+/** The builder's limits for a plan of `gb` a month. */
+const limitsOf = (gb) => ({ min: sales.MIN_GB, max: sales.MAX_GB, stepUp: sales.stepOf(gb), stepDown: sales.stepOf(Math.max(sales.MIN_GB, gb - 1)), months: sales.MONTHS });
+
+/**
+ * The store's buttons: the packages ("s"), a plan of the buyer's own ("b",
+ * from a package or their own choice), a new account or one to recharge
+ * with it, the order's payment, the terms. A plan is "<GB a month>:<months>";
+ * buttons from before plans had months name the GB alone, a month.
+ */
+async function onStoreButton(c, user, kind, arg, edit, show, extra = "") {
   const { env, tg } = c;
   const chat = user.chat_id;
   const v = await viewOf(c, chat);
   const shop = await shopOf(env);
   if (!shop) return edit(v.STORE_OFF);
-  const p = arg && kind !== "sp" ? shop.catalog.find((x) => x.gb === Number(arg)) : null;
+  const p = arg && kind !== "sp" ? sales.plan(shop.cfg, Number(arg), Number(extra || 1)) : null;
   switch (kind) {
     case "s":
-      return edit(p ? v.storeChoice(p, shop.days) : v.store(shop.catalog, shop.days));
+    case "b":
+      return edit(p ? v.builder(p, limitsOf(p.gb)) : v.store(shop.catalog, shop.days));
     case "st":
       return show(v.terms(shop.days));
     case "sn": {
@@ -1254,7 +1289,7 @@ async function onStoreButton(c, user, kind, arg, edit, show) {
     }
     case "sr":
       if (!p) return edit(v.store(shop.catalog, shop.days));
-      await setMode(env, chat, "topup", String(p.gb));
+      await setMode(env, chat, "topup", `${p.gb}:${p.months}`);
       return edit(v.askAccount(p));
     default: // "sp": the person agreed, and the invoice is sent
       return sendInvoice(c, user, Number(arg));
@@ -1268,7 +1303,8 @@ async function onAccountName(c, user, text) {
   const v = await viewOf(c, chat);
   const send = (s) => tg.send(chat, s.text, s.markup);
   const shop = await shopOf(env);
-  const p = shop && shop.catalog.find((x) => x.gb === Number(user.device));
+  const [gb, months] = String(user.device || "").split(":");
+  const p = shop && sales.plan(shop.cfg, Number(gb), Number(months || 1));
   if (!p) {
     await setMode(env, chat, "");
     return send(shop ? v.store(shop.catalog, shop.days) : v.STORE_OFF);

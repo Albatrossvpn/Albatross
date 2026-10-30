@@ -9,7 +9,7 @@ import { armor, httpsRedirect, securityTxt } from "./headers.js";
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
 import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
-import { SALES_DEFAULTS, SALES_RANGE, catalog as salesCatalog, config as salesConfig } from "./sales.js";
+import { MAX_GB, MIN_GB, MONTHS, SALES_DEFAULTS, SALES_RANGE, catalog as salesCatalog, config as salesConfig, parseSteps } from "./sales.js";
 import { SWEEP_CRON, check as telegramCheck, connect as telegramConnect, disconnect as telegramDisconnect, heal as telegramHeal, repair as telegramRepair, sweep as telegramSweep, webhook as telegramWebhook } from "./telegram.js";
 
 const SESSION = 30 * DAY; // an app or browser session
@@ -312,7 +312,12 @@ async function publicInfo(env) {
 /** Data on sale in the Telegram bot, for the websites' "how to buy": null while it is not (or there is no bot to sell in). */
 const starsInfo = (s, shop) =>
   shop.enabled && s.telegram_bot_username
-    ? { bot: s.telegram_bot_username, days: shop.days, packages: salesCatalog(shop).map(({ gb, stars, plan, devices }) => ({ gb, stars, plan, devices })) }
+    ? {
+        bot: s.telegram_bot_username, days: shop.days,
+        packages: salesCatalog(shop).map(({ gb, stars, plan, devices, save }) => ({ gb, stars, plan, devices, save })),
+        // A plan of one's own: data a month within these limits, for these months, less these discounts.
+        custom: { min_gb: MIN_GB, max_gb: MAX_GB, months: MONTHS, size_discounts: shop.sizeSteps, month_discounts: shop.monthSteps },
+      }
     : null;
 
 // ---------- Encrypted DNS for Apple devices ----------
@@ -999,6 +1004,11 @@ async function adminSaveSettings(request, env) {
       continue;
     } else if (k === "support_notify_to") {
       if (v && !/^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,}$/.test(v)) throw new HttpError(400, "That is not an email address.");
+    } else if (k === "stars_size_discounts" || k === "stars_month_discounts") {
+      // "GB:percent,..." and "months:percent,...", up to 90% each.
+      const steps = parseSteps(v);
+      if (!steps) throw new HttpError(400, `${k} is a list like 10:5,25:10 (${k === "stars_size_discounts" ? "GB a month" : "months"}:percent, at most 90%).`);
+      v = steps.slice().reverse().map(([at, pct]) => `${at}:${pct}`).join(",");
     } else if (k === "stars_enabled") {
       v = b[k] === true || v === "1" ? "1" : "0";
     } else if (Object.hasOwn(SALES_RANGE, k)) {
