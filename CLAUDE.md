@@ -18,6 +18,10 @@
   - If something sensitive ever reaches alba-data (a file, a log, a release asset), delete it at once: the run, the commit (force-push the branch's single commit) or the asset.
 - **After any change to `.github/workflows/build.yml`:** regenerate alba-data's `release.yml` with `deploy/data-repo/gen-release.py` and push it there.
 
+## The app's text
+
+- **The app is in English only.** No Persian text goes into it: not in the UI, not in notifications, and not in an update message (update.json's `message` is shown in the app).
+
 ## Commits
 
 - Commit with a noreply address and with `TZ=UTC` (`.github/workflows/identity.yml`).
