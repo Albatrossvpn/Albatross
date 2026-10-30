@@ -80,6 +80,48 @@ func promoteRare(list []*entry, n, min int) {
 	copy(list, out)
 }
 
+// rareProtos are the protocols the world's public lists hold few servers of:
+// whatever there is of them goes to fresh.txt (rareFresh), whichever source
+// carried it.
+var rareProtos = map[string]bool{
+	"wireguard": true, "amneziawg": true, "tuic": true, "hysteria": true, "anytls": true, "naive": true,
+	"juicity": true, "mieru": true, "brook": true, "wstunnel": true, "ssr": true, "snell": true,
+	"openvpn": true, "ssh": true,
+}
+
+// rareFresh is how many servers of one rare protocol go to fresh.txt beyond
+// those a priority source carried.
+const rareFresh = 1500
+
+// splitFresh divides the servers between fresh.txt, which every app loads
+// every hour, and the long-tail lists, which an app reads one at a time (a
+// phone only while nothing works). The lane picks come first; then the
+// servers a priority source carries, and then those of the rare protocols,
+// whatever source they came from: a protocol whose few servers sat in the
+// long tail had none for most people, however many the internet held. A
+// server that only dud sources carry stays out, as before.
+func splitFresh(list, laneSel []*entry, inLane map[*entry]bool, maxFresh int) (fresh, rest []*entry) {
+	fresh = append([]*entry(nil), laneSel...)
+	taken := map[string]int{}
+	rare := func(e *entry) bool {
+		if !rareProtos[e.proto] || taken[e.proto] >= rareFresh {
+			return false
+		}
+		taken[e.proto]++
+		return true
+	}
+	for _, e := range list {
+		switch {
+		case inLane[e]:
+		case e.dud < e.pop && len(fresh)-len(laneSel) < maxFresh && (e.fresh || rare(e)):
+			fresh = append(fresh, e)
+		default:
+			rest = append(rest, e)
+		}
+	}
+	return fresh, rest
+}
+
 // newList is fresh minus what the last run published, newest first, with
 // the last new.txt's servers that are still listed after them.
 func newList(fresh, prevFresh, prevNew []string, max int) []string {
@@ -519,17 +561,7 @@ func main() {
 	for _, e := range laneSel {
 		inLane[e] = true
 	}
-	freshE := append([]*entry(nil), laneSel...)
-	var restE []*entry
-	for _, e := range list {
-		switch {
-		case inLane[e]:
-		case e.fresh && e.dud < e.pop && len(freshE)-len(laneSel) < *maxFresh:
-			freshE = append(freshE, e)
-		default:
-			restE = append(restE, e)
-		}
-	}
+	freshE, restE := splitFresh(list, laneSel, inLane, *maxFresh)
 	log.Printf("lanes: %d servers reserved in the real test", len(laneSel))
 	promoteRare(freshE, *real, minProtoTests)
 	passed, tested := realTest(freshE, *real)
