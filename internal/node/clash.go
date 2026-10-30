@@ -276,6 +276,10 @@ func clashTransport(n *Node, p cmap) {
 		n.Path = o.s("path")
 		n.Host = o.m("headers").s("Host", "host")
 		n.EarlyData = atoi(o.s("max-early-data"))
+		if o.b("v2ray-http-upgrade") {
+			// How mihomo and subconverter write HTTPUpgrade.
+			n.Transport, n.EarlyData = "httpupgrade", 0
+		}
 	case "grpc":
 		n.ServiceName = p.m("grpc-opts").s("grpc-service-name")
 	case "h2":
