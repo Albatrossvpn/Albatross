@@ -52,14 +52,48 @@ download it today). In the fork we:
   easy to carry forward.
 The cryptography is left untouched.
 
-## Phase 2 — privacy, hardened to the bone
-- Keep nothing that identifies a user: no addresses, no traffic, no logs that
-  could, anywhere in the app or the backend. Audit every write.
-- The account already asks only for a username and a password — no email, no
-  phone. Keep it that way, and make sure the counts we do keep cannot single
-  anyone out.
-- Safe defaults on by default: unencrypted traffic refused, DNS private, the
-  kill switch within reach.
+## Phase 2 — the finder, the parser, the tester: the strongest anywhere
+
+Own servers are cancelled, so every server a user gets comes from the finder.
+That makes this pipeline the whole product. Each part, in turn.
+
+**The finder — reach everywhere a server is shared.**
+Today: GitHub code, repositories, gists and forks; GitLab, Codeberg, Gitee;
+the web through several engines; paste sites; Telegram channels crawled two
+hops out, in several languages. Further:
+- more search engines where these lists live (Yandex above all, and more
+  SearXNG instances, Brave, Mojeek);
+- more code hosts and self-hosted Gitea/Forgejo instances;
+- Telegram wider: more seed channels, deeper crawling, public search;
+- subscription converters and sub-store instances, RSS feeds of aggregators;
+- configs shared as QR images (decode them);
+- learn which sources yield servers that pass, and chase the ones like them
+  (the lanes already begin this); a source that keeps giving is kept warm.
+
+**The parser — understand every form a server is written in.**
+Today: the schemes and the quirks the public lists use, Clash and sing-box
+configs, escaped and glued links, odd encodings. Further:
+- every client's export (v2rayN, NekoBox, Hiddify, Clash Meta, Karing, V2Box)
+  and every config format (Surge, Quantumult X, Loon) mapped to what we run;
+- nested and layered encodings, HTML-entity and double-URL forms, truncated
+  links recovered to what is still valid;
+- QR images decoded to links;
+- a growing corpus of real-world lists as tests, so a form we get wrong once
+  is never got wrong again.
+
+**The tester — hand out only servers that truly carry.**
+Today: a real 2 MB download twice, a strict speed and latency bar, a rescue
+when all are slow, a reachability check from inside the country. Further:
+- test that real sites open through the server — the ones users want, and the
+  domestic ones — not only a speed endpoint;
+- stability over a window, not one sample: jitter, success rate over several
+  tries, the slowest moment as well as the fastest;
+- from more vantage points (the runners, the in-country tester, globalping);
+- one score from speed, latency, stability, reachability and freshness, so
+  the list is ordered by what a user will actually feel.
+
+Privacy stays a standing rule throughout, not a phase: no logs that identify
+a user, the account only a username and a password, safe defaults on.
 
 ## Cleanup this cancels
 Own servers are gone, so the own-servers code can be retired when convenient
