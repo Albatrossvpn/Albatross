@@ -75,7 +75,25 @@ var discoverRepoQueries = []string{
 	"proxy config collector", "sub store v2ray", "free proxies iran", "تنظیمات v2ray",
 	"tuic free node", "wireguard config free", "amneziawg config", "naiveproxy free",
 	"juicity", "mieru proxy", "snell proxy free", "anytls free", "brook proxy free", "ssh tunnel free account",
+	// The languages the lists are written in: Persian, Chinese, Russian.
+	"کانفیگ رایگان", "فیلترشکن رایگان", "v2ray رایگان", "免费节点", "免费 v2ray 订阅", "机场 订阅", "节点 每日更新",
+	"бесплатный vpn", "vless конфиги", "обход блокировок vpn",
+	// Topics the collectors tag themselves with.
+	"topic:v2ray-config", "topic:v2ray-subscription", "topic:free-v2ray", "topic:vless", "topic:xray-config",
+	"topic:clash-config", "topic:sing-box-config", "topic:hysteria2", "topic:free-proxy", "topic:proxy-list", "topic:free-nodes",
 }
+
+// codeSlices split each code search by file size: a search shows at most
+// a thousand files, so each slice shows another thousand. Each run takes
+// another slice (rotate), so a day of runs reads them all.
+var codeSlices = []string{"size:<2000", "size:2000..10000", "size:10000..50000", "size:50000..250000", "size:>250000"}
+
+// pasteRe finds lists kept on paste sites, which have no file names.
+var pasteRe = regexp.MustCompile(`https?://(?:pastebin\.com/raw/[A-Za-z0-9]{6,12}|paste\.ee/r/[A-Za-z0-9]{4,12}|rentry\.(?:co|org)/[A-Za-z0-9_-]{3,40}/raw|dpaste\.org/[A-Za-z0-9]{4,12}/raw|gitee\.com/[^\s"'<>()\[\]/]+/[^\s"'<>()\[\]/]+/raw/[^\s"'<>()\[\]]+)\b`)
+
+// gistWords pick, among the newest public gists, the ones that may hold
+// servers: by their description or their files' names.
+var gistWords = regexp.MustCompile(`(?i)v2ray|vless|vmess|trojan|hysteria|tuic|shadowsocks|clash|sing-?box|xray|proxy|proxies|config|sub(scri)?|vpn|nodes?|wireguard|节点|订阅|کانفیگ|فیلترشکن`)
 
 // minSourceLinks is how many servers a subscription must hold to count,
 // and minChannelLinks how many a channel's recent posts must.
@@ -284,6 +302,8 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 	if token != "" {
 		gh := d.githubCode(ctx, hour)
 		gh = append(gh, d.githubRepos(ctx)...)
+		gh = append(gh, d.githubGists(ctx)...)
+		gh = append(gh, d.githubForks(ctx, knownSubs, hour)...)
 		before := len(candSubs)
 		add(gh, nil)
 		d.stats["from_github"] = len(candSubs) - before
@@ -521,6 +541,11 @@ func mentions(text string) (subs, channels []string) {
 			subs = append(subs, u)
 		}
 	}
+	for _, m := range pasteRe.FindAllString(text, -1) {
+		if u := canonical(m); u != "" {
+			subs = append(subs, u)
+		}
+	}
 	for _, m := range importRe.FindAllStringSubmatch(text, -1) {
 		raw := m[1]
 		if raw == "" {
@@ -591,7 +616,10 @@ func (d *discoverer) githubCode(ctx context.Context, hour int) []string {
 	}
 	queries = append(queries, `path:*.ovpn "remote "`, `"proxies:" "server:" path:*.yaml`)
 	queries = append(queries, discoverFormats...)
-	for _, q := range queries {
+	for i, q := range queries {
+		// Each query its own slice this hour, so the hour's searches spread
+		// over all the slices.
+		q += " " + codeSlices[(hour+i)%len(codeSlices)]
 		n := 0
 		for page := 1; page <= pages; page++ {
 			var res struct {
@@ -630,6 +658,8 @@ func (d *discoverer) githubRepos(ctx context.Context) []string {
 				FullName string `json:"full_name"`
 			} `json:"items"`
 		}
+		// Lists that still update: pushed to within the week.
+		q += " pushed:>" + time.Now().UTC().AddDate(0, 0, -7).Format("2006-01-02")
 		u := "https://api.github.com/search/repositories?per_page=100&sort=updated&q=" + url.QueryEscape(q)
 		if err := d.github(ctx, u, &res); err != nil {
 			log.Printf("discover: repository search %s: %v", q, err)
@@ -642,7 +672,7 @@ func (d *discoverer) githubRepos(ctx context.Context) []string {
 	var out []string
 	n := 0
 	for repo := range repos {
-		if n >= 400 {
+		if n >= 600 {
 			break
 		}
 		n++
@@ -668,6 +698,87 @@ func (d *discoverer) githubRepos(ctx context.Context) []string {
 		}
 	}
 	log.Printf("discover: %d repositories listed, %d files", n, len(out))
+	return out
+}
+
+// githubGists reads the newest public gists (a thousand, an hour's worth)
+// and returns the files of those whose description or file names say they
+// may hold servers: people paste their configs there and pass the link on.
+func (d *discoverer) githubGists(ctx context.Context) []string {
+	var out []string
+	for page := 1; page <= 10; page++ {
+		var res []struct {
+			Description string `json:"description"`
+			Files       map[string]struct {
+				RawURL string `json:"raw_url"`
+				Size   int    `json:"size"`
+			} `json:"files"`
+		}
+		if err := d.github(ctx, "https://api.github.com/gists/public?per_page=100&page="+strconv.Itoa(page), &res); err != nil {
+			log.Printf("discover: public gists page %d: %v", page, err)
+			break
+		}
+		for _, g := range res {
+			for name, f := range g.Files {
+				if f.Size < 64 || f.Size > 10<<20 || !gistWords.MatchString(g.Description+" "+name) {
+					continue
+				}
+				out = append(out, f.RawURL)
+			}
+		}
+		if len(res) < 100 {
+			break
+		}
+	}
+	log.Printf("discover: %d gist files", len(out))
+	return out
+}
+
+// githubForks reads the newest forks of the repositories that hold known
+// lists: a collector's forks run the same collector, each with its own
+// list at the same place. A slice of the repositories each run (rotate).
+func (d *discoverer) githubForks(ctx context.Context, known []string, hour int) []string {
+	paths := map[string][]string{}
+	var repos []string
+	for _, u := range known {
+		p, err := url.Parse(u)
+		if err != nil || p.Host != "raw.githubusercontent.com" {
+			continue
+		}
+		parts := strings.SplitN(strings.TrimPrefix(p.Path, "/"), "/", 4)
+		if len(parts) < 4 {
+			continue
+		}
+		repo := parts[0] + "/" + parts[1]
+		if paths[repo] == nil {
+			repos = append(repos, repo)
+		}
+		paths[repo] = append(paths[repo], parts[3])
+	}
+	sort.Strings(repos)
+	var out []string
+	n := 0
+	for _, repo := range rotate(repos, hour, 60) {
+		var forks []struct {
+			FullName string `json:"full_name"`
+			PushedAt string `json:"pushed_at"`
+		}
+		if err := d.github(ctx, "https://api.github.com/repos/"+repo+"/forks?sort=newest&per_page=30", &forks); err != nil {
+			continue
+		}
+		week := time.Now().UTC().AddDate(0, 0, -7).Format(time.RFC3339)
+		for _, f := range forks {
+			// A fork nobody pushed to lately holds the original's old list.
+			if f.PushedAt < week {
+				continue
+			}
+			for _, path := range paths[repo] {
+				out = append(out, "https://raw.githubusercontent.com/"+f.FullName+"/HEAD/"+path)
+				n++
+			}
+		}
+	}
+	log.Printf("discover: %d files in forks of known lists", n)
 	return out
 }
 

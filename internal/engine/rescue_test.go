@@ -119,7 +119,7 @@ func TestSpeedRoundRescuesFromUnusableServer(t *testing.T) {
 	for _, m := range c.members {
 		probe.set(m.tag, 0)
 	}
-	probe.set(cur.tag, 100<<10)
+	probe.set(cur.tag, 150<<10)
 	in(cur, 2*settleFor)
 	e.speedRound(ctx, c, false)
 	if now() != cur {

@@ -200,3 +200,32 @@ func TestImportLinksMentioned(t *testing.T) {
 		t.Errorf("missing %v from %v", want, subs)
 	}
 }
+
+// The newest public gists that may hold servers are read, by description
+// or file name; forks pushed to lately are read at their original's paths;
+// lists on paste sites are mentions too.
+func TestGistsForksAndPastes(t *testing.T) {
+	d := newDiscoverer("t", nil)
+	recent := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	old := time.Now().UTC().AddDate(0, -2, 0).Format(time.RFC3339)
+	d.client = &http.Client{Transport: fakeTransport{
+		"https://api.github.com/gists/public?per_page=100&page=1": `[
+			{"description":"my vless configs","files":{"a.txt":{"raw_url":"https://gist.githubusercontent.com/u/1/raw/a.txt","size":900}}},
+			{"description":"shopping list","files":{"b.md":{"raw_url":"https://gist.githubusercontent.com/u/2/raw/b.md","size":900}}},
+			{"description":"","files":{"clash.yaml":{"raw_url":"https://gist.githubusercontent.com/u/3/raw/clash.yaml","size":5000}}},
+			{"description":"v2ray","files":{"tiny.txt":{"raw_url":"https://gist.githubusercontent.com/u/4/raw/tiny.txt","size":10}}}]`,
+		"https://api.github.com/repos/owner/collector/forks?sort=newest&per_page=30": `[{"full_name":"fresh/collector","pushed_at":"` + recent + `"},{"full_name":"stale/collector","pushed_at":"` + old + `"}]`,
+	}}
+	gists := d.githubGists(context.Background())
+	if len(gists) != 2 || gists[0] != "https://gist.githubusercontent.com/u/1/raw/a.txt" && gists[1] != "https://gist.githubusercontent.com/u/1/raw/a.txt" {
+		t.Fatalf("gists: %v", gists)
+	}
+	forks := d.githubForks(context.Background(), []string{"https://raw.githubusercontent.com/owner/collector/main/sub/all.txt", "https://example.com/x.txt"}, 0)
+	if len(forks) != 1 || forks[0] != "https://raw.githubusercontent.com/fresh/collector/HEAD/sub/all.txt" {
+		t.Fatalf("forks: %v", forks)
+	}
+	subs, _ := mentions("get it at https://pastebin.com/raw/AbC123xy or https://rentry.co/freev2/raw, and https://gitee.com/a/b/raw/master/sub.txt")
+	if len(subs) < 3 {
+		t.Fatalf("paste sites: %v", subs)
+	}
+}

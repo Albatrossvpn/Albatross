@@ -24,6 +24,11 @@ import (
 // connects without signing in (development builds and tests).
 var AccountURL = ""
 
+// SupportBot is the Telegram bot where accounts are bought, offered on the
+// sign-in screen until the service says which bot sells (it may be out of
+// reach there). Set at build time like AccountURL; empty offers none.
+var SupportBot = "AlbatrossHelp_bot"
+
 // ErrLoginRequired means the user has to sign in before connecting.
 var ErrLoginRequired = errors.New("Sign in to connect.")
 
@@ -138,12 +143,18 @@ func (e *Engine) Account() AccountState {
 	e.mu.Unlock()
 	st := AccountState{Enabled: true, SiteURL: e.acct.Site(), Progress: step}
 	v := e.acct.View()
-	if s := e.acct.Store(); s != nil && botName.MatchString(s.Bot) {
+	switch s := e.acct.Store(); {
+	case s != nil && botName.MatchString(s.Bot):
 		st.Store, st.BuyURL = s, "https://t.me/"+s.Bot+"?start=buy"
 		if v.SignedIn {
 			st.RenewURL = renewURL(s.Bot, v.Info.Username)
 		}
-	} else if !v.SignedIn {
+	case s == nil && !v.SignedIn:
+		// Not known yet (where the service is filtered it may never be):
+		// the build's bot, so whoever just installed the app can buy.
+		if botName.MatchString(SupportBot) {
+			st.BuyURL = "https://t.me/" + SupportBot + "?start=buy"
+		}
 		e.askStore()
 	}
 	if !v.SignedIn {

@@ -1197,7 +1197,7 @@ function renderAccount(a) {
   planBadge($("plan-chip"), a.signed_in ? a.tier : "");
   planBadge($("acc-plan"), a.signed_in ? a.tier : "");
   $("login").classList.toggle("hidden", !needLogin);
-  $("login-buy").classList.toggle("hidden", !a.buy_url);
+  $("login-new").classList.toggle("hidden", !a.buy_url);
   $("account-card").classList.toggle("hidden", !a.signed_in);
   if (!a.signed_in) return;
   $("account-card").className = "member " + (PLAN_NAMES[a.tier] ? a.tier : "");

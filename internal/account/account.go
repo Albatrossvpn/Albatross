@@ -301,6 +301,10 @@ func (c *Client) FetchStore(ctx context.Context) (*Store, error) {
 	if err := c.call(ctx, http.MethodGet, "support/info", "", nil, &out); err != nil {
 		return nil, err
 	}
+	// Nothing on sale is known too: an empty store, not "not asked yet".
+	if out.Stars == nil {
+		out.Stars = &Store{}
+	}
 	c.mu.Lock()
 	c.shop = out.Stars
 	c.mu.Unlock()
