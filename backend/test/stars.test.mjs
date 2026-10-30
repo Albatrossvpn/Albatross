@@ -87,10 +87,23 @@ test("selling is off until it is turned on: no Buy button, the store says so, th
 test("with selling on, the packages cost what 10,000 toman a GB at 270,000 toman a dollar and 13 dollars per 1,000 Stars make, and the menu, the plans and the commands show them", async () => {
   const w = await shop();
   await w.send(text(SARA, "/start"));
-  assert.deepEqual(labels(w.lastText(SARA).reply_markup), ["🔌 I can't connect", "📲 Install the app", "💎 Plans & upgrading", "👤 Account & data", "⭐ Buy data", "⬇️ Downloads", "🧑‍💼 Talk to our team", "🌐 Language"]);
+  // Buying comes first, on a row of its own, in the brand's colour.
+  const menu = w.lastText(SARA).reply_markup;
+  assert.deepEqual(labels(menu), ["⭐ Buy data", "🔌 I can't connect", "📲 Install the app", "💎 Plans & upgrading", "👤 Account & data", "⬇️ Downloads", "🧑‍💼 Talk to our team", "🌐 Language"]);
+  assert.equal(menu.inline_keyboard[0].length, 1);
+  assert.equal(menu.inline_keyboard[0][0].style, "primary");
+  assert.ok(menu.inline_keyboard.slice(1).flat().every((b) => !b.style), "only buying stands out");
   await w.send(press(SARA, "s"));
   const store = w.api.of("editMessageText").pop();
-  assert.deepEqual(labels(store.reply_markup).slice(0, 5), ["5 GB · ⭐15", "10 GB · ⭐29", "25 GB · ⭐72", "50 GB · ⭐143", "100 GB · ⭐285"]);
+  assert.deepEqual(labels(store.reply_markup).slice(0, 5), ["🥉 5 GB · ⭐15", "🥈 10 GB · ⭐29", "🥈 25 GB · ⭐72", "🥈 50 GB · ⭐143", "🥇 100 GB · ⭐285"]);
+  assert.ok(store.reply_markup.inline_keyboard.flat().slice(0, 5).every((b) => b.style === "primary"), "the packages carry buying's colour");
+  // So do the choice of account and the payment, through to the end.
+  await w.send(press(SARA, "s:10"));
+  const choice = w.api.of("editMessageText").pop().reply_markup.inline_keyboard[0];
+  assert.deepEqual(choice.map((b) => b.style), ["primary", "primary"]);
+  await w.send(press(SARA, "sn:10"));
+  const pay = w.api.of("editMessageText").pop().reply_markup.inline_keyboard[0][0];
+  assert.ok(pay.callback_data.startsWith("sp:") && pay.style === "primary", JSON.stringify(pay));
   assert.ok(store.text.includes("<b>10 GB</b> - ⭐29 - Silver, devices: 2") && store.text.includes("<b>100 GB</b> - ⭐285 - Gold, devices: 4") && store.text.includes("<b>5 GB</b> - ⭐15 - Bronze, devices: 1"));
   assert.ok(store.text.includes("valid 30 days"));
   // The plans screen says what each plan has and how it is earned, and sells.
@@ -104,7 +117,7 @@ test("with selling on, the packages cost what 10,000 toman a GB at 270,000 toman
   // A new rate makes new prices.
   await w.env.DB.prepare("INSERT INTO settings (key, value) VALUES ('stars_usd_toman', '540000')").run();
   await w.send(press(SARA, "s"));
-  assert.deepEqual(labels(w.api.of("editMessageText").pop().reply_markup).slice(0, 5), ["5 GB · ⭐8", "10 GB · ⭐15", "25 GB · ⭐36", "50 GB · ⭐72", "100 GB · ⭐143"]);
+  assert.deepEqual(labels(w.api.of("editMessageText").pop().reply_markup).slice(0, 5), ["🥉 5 GB · ⭐8", "🥈 10 GB · ⭐15", "🥈 25 GB · ⭐36", "🥈 50 GB · ⭐72", "🥇 100 GB · ⭐143"]);
 });
 
 test("the plans are explained in the bot whether or not data is on sale", async () => {

@@ -252,7 +252,7 @@ test("a link into the bot (/start buy) is remembered through the choice of a lan
   const store = w.api.of("editMessageText").pop();
   assert.equal(store.message_id, 70);
   assert.ok(store.text.startsWith("⭐") && store.text.includes("<b>10 GB</b> - ⭐29"), store.text);
-  assert.deepEqual(labels(store.reply_markup).slice(0, 2), ["5 GB · ⭐15", "10 GB · ⭐29"]);
+  assert.deepEqual(labels(store.reply_markup).slice(0, 2), ["🥉 5 GB · ⭐15", "🥈 10 GB · ⭐29"]);
   assert.equal(store.text.split("\n")[0], screens("es").t("store").split("\n")[0]);
   // Another topic, another screen (with the packages on sale: the plans screen offers them).
   await w.send(text(SARA + 1, "/start plans"));

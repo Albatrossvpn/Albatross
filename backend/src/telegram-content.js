@@ -17,6 +17,13 @@ export const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "
 
 const btn = (text, data) => ({ text, callback_data: data });
 const link = (text, url) => ({ text, url });
+// Buying stands out: its button and every one that carries a purchase on to
+// its end are in the brand's colour (Telegram's "primary", blue), where the
+// rest keep the app's own style.
+const BUY_STYLE = "primary";
+const buy = (b) => ({ ...b, style: BUY_STYLE });
+/** The medal of a package's plan, on its button: every language reads it. */
+const MEDALS = { bronze: "🥉", silver: "🥈", gold: "🥇", vip: "💎" };
 const WEBSITE_LINE = `🌐 <a href="${SITE}">albatrossvpn.online</a>`;
 const keys = (...rows) => ({ inline_keyboard: rows });
 
@@ -60,7 +67,7 @@ function build(code) {
   const MENU_BUTTON = btn(t("btn_menu_back"), "menu");
   const MENU_NEW = btn(t("btn_menu"), "mn");
   const TEAM_BUTTON = btn(t("btn_team"), "h");
-  const BUY_BUTTON = btn(t("btn_buy"), "s");
+  const BUY_BUTTON = buy(btn(t("btn_buy"), "s"));
   const LANGUAGE_BUTTON = btn(t("btn_language"), "lg");
   const WEBSITE = link("🌐 albatrossvpn.online", SITE);
   const ACCOUNT_BUTTON = link(t("btn_account_page"), ACCOUNT);
@@ -76,15 +83,17 @@ function build(code) {
   /** The button under a ticket's messages carries the ticket's number, so an old one never closes a newer ticket. */
   const ticketKeys = (id) => keys([btn(t("btn_solved"), `tc:${id}`)]);
 
-  /** The main menu; with a Buy button when data is on sale. */
+  /** The main menu; with the Buy button first, on a row of its own, when data is on sale. */
   function menu(name = "", selling = false) {
     const hello = name ? t("menu_hello", { name: esc(name) }) : t("menu_hello_anon");
     return {
       text: `${t("menu_title")}\n\n${hello} ${t(selling ? "menu_intro_sales" : "menu_intro")}\n\n${t("menu_pick")}\n\n${WEBSITE_LINE}`,
       markup: keys(
+        ...(selling ? [[BUY_BUTTON]] : []),
         [btn(t("btn_connect"), "c"), btn(t("btn_install"), "i")],
         [btn(t("btn_plans"), "p"), btn(t("btn_account"), "a")],
-        ...(selling ? [[BUY_BUTTON, btn(t("btn_downloads"), "d")], [TEAM_BUTTON, LANGUAGE_BUTTON]] : [[btn(t("btn_downloads"), "d"), TEAM_BUTTON], [LANGUAGE_BUTTON]]),
+        [btn(t("btn_downloads"), "d"), TEAM_BUTTON],
+        [LANGUAGE_BUTTON],
       ),
     };
   }
@@ -240,7 +249,7 @@ function build(code) {
     /** The packages, with the Stars each costs and the plan it earns. `cat` is sales.js catalog. */
     store(cat, days) {
       const rows = [];
-      for (let i = 0; i < cat.length; i += 2) rows.push(cat.slice(i, i + 2).map((p) => btn(`${p.gb} GB · ⭐${p.stars}`, `s:${p.gb}`)));
+      for (let i = 0; i < cat.length; i += 2) rows.push(cat.slice(i, i + 2).map((p) => buy(btn(`${MEDALS[p.tier] || "⭐"} ${p.gb} GB · ⭐${p.stars}`, `s:${p.gb}`))));
       return {
         text: t("store", { lines: cat.map((p) => `• <b>${p.gb} GB</b> - ⭐${p.stars} - ${planLine(p)}`).join("\n"), valid: validText(days) }),
         markup: keys(...rows, [btn(t("btn_what_plans"), "p"), btn(t("btn_terms"), "st")], [WEBSITE, MENU_BUTTON]),
@@ -250,7 +259,7 @@ function build(code) {
     /** A package was picked: a new account, or one that exists? */
     storeChoice: (p, days) => ({
       text: t("store_choice", { gb: p.gb, stars: p.stars, plan: planLine(p), valid: validText(days) }),
-      markup: keys([btn(t("btn_new_account"), `sn:${p.gb}`), btn(t("btn_add_account"), `sr:${p.gb}`)], [BACK_TO_PACKAGES]),
+      markup: keys([buy(btn(t("btn_new_account"), `sn:${p.gb}`)), buy(btn(t("btn_add_account"), `sr:${p.gb}`))], [BACK_TO_PACKAGES]),
     }),
 
     askAccount: (p) => ({ text: t("ask_account", { gb: p.gb }), markup: keys([BACK_TO_PACKAGES]) }),
@@ -264,7 +273,7 @@ function build(code) {
       const what = o.kind === "topup" ? t("checkout_topup", { account: esc(o.target) }) : t("checkout_new");
       return {
         text: t("checkout", { gb: o.gb, stars: o.stars, plan: planLine(p), valid: validText(days), what }),
-        markup: keys([btn(t("btn_pay", { stars: o.stars }), `sp:${o.id}`)], [btn(t("btn_terms"), "st"), BACK_TO_PACKAGES]),
+        markup: keys([buy(btn(t("btn_pay", { stars: o.stars }), `sp:${o.id}`))], [btn(t("btn_terms"), "st"), BACK_TO_PACKAGES]),
       };
     },
 
@@ -299,7 +308,7 @@ function build(code) {
     /** After a new account's payment: the account, once. */
     receiptNew: (r) => ({
       text: t("receipt_new", { id: r.id, gb: r.gb, stars: r.stars, username: esc(r.username), password: esc(r.password), plan: planLine(r), until: untilText(r.expires) }),
-      markup: keys([link(t("btn_dl_app"), DOWNLOAD_PAGE)], [link(t("btn_account_page_short"), ACCOUNT), WEBSITE], [MENU_NEW]),
+      markup: keys([buy(link(t("btn_dl_app"), DOWNLOAD_PAGE))], [link(t("btn_account_page_short"), ACCOUNT), WEBSITE], [MENU_NEW]),
     }),
 
     /** After data was added to an account. */
