@@ -793,14 +793,27 @@ async function openTicket(c, user) {
   }
   await c.kit.count(env, `tg:ticket:${t}`, DAY);
   await c.kit.count(env, `tg:tickets:all:${today()}`, DAY);
-  const opened = v.ticketOpened(id, rows.length > 0);
+  const said = rows.some((r) => r.role === "user");
+  const opened = v.ticketOpened(id, said);
   await tg.send(chat, opened.text, opened.markup);
   await bump(env, "tickets");
-  const told = await tellTeam(c, id, card(id, user, rows, true, await langOf(c, chat)), teamKeys(id, chat));
+  // Nothing said yet: the team hears of the ticket with its first message
+  // (toTeam). A press of the button alone, which many never follow with a
+  // word, used to send the team an empty ticket.
+  if (said) await announce(c, user, id, rows);
+}
+
+/** Tells the team's chat and the owner's mail of a ticket, with what was said; the person is told when neither took it. */
+async function announce(c, user, id, rows) {
+  const told = await tellTeam(c, id, card(id, user, rows, true, await langOf(c, user.chat_id)), teamKeys(id, user.chat_id));
   const mailed = await mailChat(c, user, rows, { human: true, ticket: id });
   // Neither the team's chat nor the mail took it: the person must not think someone knows.
-  if (!(told && told.ok) && !mailed) await tg.send(chat, v.TEAM_UNREACHABLE);
+  if (!(told && told.ok) && !mailed) await c.tg.send(user.chat_id, (await viewOf(c, user.chat_id)).TEAM_UNREACHABLE);
+  return told;
 }
+
+/** Whether the team's chat has heard of a ticket: its card, or a message of it. */
+const announced = async (env, id) => !!(await env.DB.prepare("SELECT 1 AS found FROM tg_relay WHERE ticket_id = ?1 LIMIT 1").bind(id).first());
 
 /** A person writes while their ticket is open: the team gets it, with who it is from. */
 async function toTeam(c, user, m) {
@@ -818,7 +831,23 @@ async function toTeam(c, user, m) {
   if (!c.team) return;
   const head = `🎫 <b>#${ticket}</b> - ${view.esc(who(user))}`;
   let sent;
-  if (typeof m.text === "string") {
+  // The ticket's first words: the team hears of the ticket now, its card
+  // carrying them (a picture or a file follows the card as it is).
+  const first = !(await announced(env, ticket));
+  if (first) {
+    const rows = await conversation(env, chat);
+    sent = await tellTeam(c, ticket, card(ticket, user, rows, true, await langOf(c, chat)), teamKeys(ticket, chat));
+    if (sent && sent.ok) {
+      await mailChat(c, user, rows, { human: true, ticket });
+      if (typeof m.text === "string") {
+        await tg.react(chat, m.message_id, "👀");
+        return;
+      }
+    }
+  }
+  if (first && !(sent && sent.ok)) {
+    // The card did not reach the team's chat: handled below like any message that does not.
+  } else if (typeof m.text === "string") {
     sent = await tellTeam(c, ticket, `${head}\n${fit(m.text, 3600)}`);
   } else {
     // A picture, a file or a voice note is copied as it is, with the ticket in its caption where Telegram allows one.
@@ -862,7 +891,8 @@ async function closeTicket(c, id, by, { tell = true } = {}) {
     const said = by === "team" ? v.ticketClosedByTeam(id) : by === "idle" ? v.ticketClosedIdle(id) : v.ticketClosedByUser(id);
     await tg.send(person, said.text, said.markup);
   }
-  if (by !== "team") await tellTeam(c, id, `✅ <b>Ticket #${id}</b> was closed ${by === "user" ? `by ${view.esc(who(user || {}))}` : "after three quiet days"}.`);
+  // A ticket the team never heard of (nothing was written in it) closes without a word to the team.
+  if (by !== "team" && (await announced(env, id))) await tellTeam(c, id, `✅ <b>Ticket #${id}</b> was closed ${by === "user" ? `by ${view.esc(who(user || {}))}` : "after three quiet days"}.`);
   return true;
 }
 

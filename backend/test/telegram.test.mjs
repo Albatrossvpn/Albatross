@@ -427,6 +427,8 @@ test("two presses of the button at once open one ticket, and a claim that never 
   const w = await world();
   await Promise.all([w.send(press(SARA, "h")), w.send(press(SARA, "h"))]);
   assert.equal((await w.row("SELECT COUNT(*) AS n FROM tg_tickets")).n, 1);
+  assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === TEAM).length, 0, "no card before a word is written");
+  await w.send(text(SARA, "It does not connect"));
   assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === TEAM).length, 1, "one card");
   // A person whose ticket is being opened (a claim made a moment ago) opens nothing else.
   const t = Math.floor(Date.now() / 1000);
@@ -448,11 +450,19 @@ test("while a ticket is open the person's words, pictures and files reach the te
   w.api.calls.length = 0;
   const first = text(SARA, "It says <no server>");
   await w.send(first);
-  const forwarded = w.lastText(TEAM);
-  assert.equal(forwarded.text, "🎫 <b>#1001</b> - Sara (@sara_tg)\nIt says &lt;no server&gt;");
+  // The first words come on the ticket's card: the team never gets an empty one.
+  const card = w.lastText(TEAM);
+  assert.ok(card.text.startsWith("🎫 <b>Ticket #1001</b> - new") && card.text.includes("<b>Visitor:</b> It says &lt;no server&gt;"), card.text);
+  assert.deepEqual(datas(card.reply_markup), ["o:c:1001", "o:b:4242", "o:f:1001"]);
   assert.equal(w.api.of("setMessageReaction")[0].message_id, first.message.message_id);
   assert.equal(w.api.of("setMessageReaction")[0].reaction[0].emoji, "👀");
-  assert.equal(w.env.asked.length, 0);
+  // Later words come on their own.
+  await w.send(text(SARA, "Still <nothing>"));
+  assert.equal(w.lastText(TEAM).text, "🎫 <b>#1001</b> - Sara (@sara_tg)\nStill &lt;nothing&gt;");
+  // The model only summed the ticket up for the owner's mail; it answered nothing in the chat.
+  assert.equal(w.env.sent.length, 1);
+  assert.equal(w.env.asked.length, 1);
+  assert.equal(w.api.of("sendMessage").filter((c) => c.chat_id === SARA).length, 0);
   await w.send(media(SARA, { photo: [{ file_id: "p" }], caption: "the screen" }));
   const copy = w.api.of("copyMessage")[0];
   assert.equal(copy.chat_id, TEAM);
@@ -464,7 +474,7 @@ test("while a ticket is open the person's words, pictures and files reach the te
   // A GIF is also a document, and a place also a location: the more exact kind is named.
   await w.send(media(SARA, { animation: { file_id: "a" }, document: { file_id: "a" } }));
   await w.send(media(SARA, { venue: { title: "Cafe" }, location: { latitude: 1, longitude: 2 } }));
-  assert.deepEqual((await w.rows("SELECT content FROM tg_messages ORDER BY id")).map((r) => r.content), ["It says <no server>", "[photo] the screen", "[sticker]", "[GIF]", "[place]"]);
+  assert.deepEqual((await w.rows("SELECT content FROM tg_messages ORDER BY id")).map((r) => r.content), ["It says <no server>", "Still <nothing>", "[photo] the screen", "[sticker]", "[GIF]", "[place]"]);
 });
 
 test("the team answers a ticket by replying to its message; photos and files go too; closing tells the person and forgets the chat", async () => {
@@ -499,7 +509,7 @@ test("the team answers a ticket by replying to its message; photos and files go 
   const closed = await w.row("SELECT status, closed_by, chat_id FROM tg_tickets WHERE id = 1001");
   assert.deepEqual({ ...closed }, { status: "closed", closed_by: "team", chat_id: 0 }, "a closed ticket keeps its number and nothing of the person");
   // The message ids stay a while, so a reply to an old card says it is closed instead of vanishing.
-  assert.equal((await w.row("SELECT COUNT(*) AS n FROM tg_relay")).n, 2);
+  assert.equal((await w.row("SELECT COUNT(*) AS n FROM tg_relay")).n, 1);
   w.api.calls.length = 0;
   await w.send(text(TEAM, "one more thing", { reply_to_message: { message_id: noteId } }));
   assert.ok(w.lastText(TEAM).text.startsWith("Ticket #1001 is closed."));
@@ -520,6 +530,7 @@ test("a person who blocked the bot is not a silent failure for the team", async 
 test("the person can close their own ticket, with the button or /close, rate the help, and the team is told", async () => {
   const w = await world();
   await w.send(text(SARA, "/human"));
+  await w.send(text(SARA, "It does not connect"));
   w.api.calls.length = 0;
   await w.send(press(SARA, "tc:1001"));
   assert.ok(w.lastText(SARA).text.includes("Glad it is sorted") && w.lastText(SARA).text.includes("How was our help?"));
@@ -594,9 +605,7 @@ test("a team chat that cannot be reached is not a silent loss: the owner is mail
   const w = await world();
   const api = telegram({ sendMessage: (p) => (p.chat_id === TEAM ? { ok: false, error_code: 403, description: "Forbidden: bot was kicked from the group chat" } : { ok: true, result: { message_id: 900 } }) });
   await w.send(text(SARA, "/human"));
-  assert.equal(w.env.sent.length, 1, "the owner got the ticket by mail");
-  assert.ok(!api.of("sendMessage").some((c) => c.text === "I could not reach our team's chat just now, so they may be slow to see your message. If it is urgent, email support@albatrossvpn.online."), "the mail took it, so nothing is hidden");
-  w.env.sent.length = 0;
+  assert.equal(w.env.sent.length, 0, "a ticket nobody wrote in is sent nowhere");
   api.calls.length = 0;
   await w.send(text(SARA, "The error is 12"));
   await w.send(text(SARA, "Still the same"));
@@ -608,6 +617,7 @@ test("a team chat that cannot be reached is not a silent loss: the owner is mail
   const lost = await world({ mail: false });
   const api2 = telegram({ sendMessage: (p) => (p.chat_id === TEAM ? { ok: false, error_code: 403, description: "Forbidden" } : { ok: true, result: { message_id: 900 } }) });
   await lost.send(text(SARA, "/human"));
+  await lost.send(text(SARA, "Help"));
   assert.ok(api2.of("sendMessage").some((c) => c.chat_id === SARA && c.text.startsWith("I could not reach our team")));
 });
 
@@ -617,12 +627,14 @@ test("a team group that became a supergroup is followed, by the service message 
   assert.equal(await w.setting("telegram_owner_chat"), "-100777");
   w.api.calls.length = 0;
   await w.send(text(SARA, "/human"));
+  await w.send(text(SARA, "Help"));
   assert.equal(w.lastText(-100777).text.includes("Ticket #1001"), true, "the card goes to the new chat");
   assert.equal((await w.row("SELECT team_chat FROM tg_relay LIMIT 1")).team_chat, -100777);
   // Telegram's own refusal names the new chat as well.
   const v = await world();
   const api = telegram({ sendMessage: (p) => (p.chat_id === TEAM ? { ok: false, error_code: 400, description: "Bad Request: group chat was upgraded to a supergroup chat", parameters: { migrate_to_chat_id: -100888 } } : { ok: true, result: { message_id: 900 } }) });
   await v.send(text(SARA, "/human"));
+  await v.send(text(SARA, "Help"));
   assert.equal(await v.setting("telegram_owner_chat"), "-100888");
   assert.ok(api.of("sendMessage").some((c) => c.chat_id === -100888 && c.text.includes("Ticket #1001")));
 });
@@ -634,6 +646,7 @@ test("an administrator who writes anonymously in the team's group is the team: p
   await w.send(anonymous(`/pair ${await w.setting("telegram_pair_code")}`));
   assert.equal(await w.setting("telegram_owner_chat"), String(GROUP));
   await w.send(text(SARA, "/human"));
+  await w.send(text(SARA, "Help"));
   const card = w.lastText(GROUP);
   assert.ok(card.text.includes("Ticket #1001"));
   const noteId = (await w.row("SELECT message_id FROM tg_relay")).message_id;
@@ -837,6 +850,7 @@ test("the team lists tickets, reads the day's numbers, shows a ticket's chat and
 test("the team can block by replying to a ticket's message", async () => {
   const w = await world();
   await w.send(text(SARA, "/human"));
+  await w.send(text(SARA, "Help"));
   const noteId = (await w.row("SELECT message_id FROM tg_relay")).message_id;
   await w.send(text(TEAM, "/block", { reply_to_message: { message_id: noteId } }));
   assert.equal((await w.row("SELECT blocked FROM tg_users WHERE chat_id = ?1", SARA)).blocked, 1);
