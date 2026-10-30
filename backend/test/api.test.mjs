@@ -817,7 +817,13 @@ test("stars: the settings are checked, the panel shows the packages they make, a
   const put = (b) => call("PUT", "admin/settings", { token: admin, body: b });
   const first = (await call("GET", "admin/settings", { token: admin })).body;
   assert.equal(first.stars_enabled, "0", "selling starts off");
-  assert.deepEqual(first.stars_packages.map((p) => [p.gb, p.stars, p.plan]), [[5, 15, "Bronze"], [10, 29, "Silver"], [25, 72, "Silver"], [50, 143, "Silver"], [100, 285, "Gold"]], "10,000 toman a GB, 270,000 a dollar, 13 dollars per 1,000 Stars");
+  // 10,000 toman a GB, 270,000 a dollar, 13 dollars per 1,000 Stars, less 5% from 10 GB a month up to 20% from 100 GB.
+  assert.deepEqual(first.stars_packages.map((p) => [p.gb, p.stars, p.plan, p.save]), [[5, 15, "Bronze", 0], [10, 28, "Silver", 3], [25, 65, "Silver", 10], [50, 122, "Silver", 15], [100, 228, "Gold", 20]]);
+  assert.equal(first.stars_size_discounts, "10:5,25:10,50:15,100:20");
+  assert.equal(first.stars_month_discounts, "3:10,6:20,12:30");
+  for (const bad of [{ stars_size_discounts: "10:95" }, { stars_month_discounts: "three:10" }]) assert.equal((await put(bad)).status, 400, JSON.stringify(bad));
+  assert.equal((await put({ stars_size_discounts: "25:10, 10:5" })).status, 400, "no spaces");
+  assert.equal((await put({ stars_size_discounts: "25:10,10:5" })).body.stars_size_discounts, "10:5,25:10", "kept in order");
   assert.equal((await call("GET", "public")).body.stars, null);
   for (const bad of [{ stars_price_toman: "0" }, { stars_usd_toman: "5" }, { stars_usd_per_1000: "500" }, { stars_valid_days: "99999" }, { stars_price_toman: "abc" }]) assert.equal((await put(bad)).status, 400, JSON.stringify(bad));
   // On, with no bot to sell in: the websites hear nothing.
@@ -828,14 +834,15 @@ test("stars: the settings are checked, the panel shows the packages they make, a
   const on = (await call("GET", "public")).body.stars;
   assert.equal(on.bot, "MockSupportBot");
   assert.equal(on.days, 30);
-  assert.deepEqual(on.packages[1], { gb: 10, stars: 29, plan: "Silver", devices: 2 });
+  assert.deepEqual(on.packages[1], { gb: 10, stars: 28, plan: "Silver", devices: 2, save: 3 });
+  assert.deepEqual(on.custom, { min_gb: 5, max_gb: 500, months: [1, 3, 6, 12], size_discounts: [[25, 10], [10, 5]], month_discounts: [[12, 30], [6, 20], [3, 10]] });
   const shown = await call("GET", "support/info", { headers: { Origin: "https://albatrossvpn.online" } });
   assert.deepEqual(shown.body.stars, on);
   assert.equal(shown.body.telegram, "MockSupportBot");
   // The rates make the prices.
   const cheaper = await put({ stars_usd_toman: "540000" });
-  assert.equal(cheaper.body.stars_packages[1].stars, 15);
-  assert.equal((await call("GET", "public")).body.stars.packages[1].stars, 15);
+  assert.equal(cheaper.body.stars_packages[1].stars, 14);
+  assert.equal((await call("GET", "public")).body.stars.packages[1].stars, 14);
   await put({ stars_usd_toman: "270000", stars_enabled: false });
   assert.equal((await call("GET", "public")).body.stars, null);
   await put({ telegram_bot_token: "" });

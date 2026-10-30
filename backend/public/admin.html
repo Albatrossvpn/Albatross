@@ -146,8 +146,11 @@
       <label class="field"><span>Price of 1 GB (toman)</span><input id="t-stars-price" type="number" min="1" step="1"></label>
       <label class="field"><span>Price of $1 (toman)</span><input id="t-stars-usd" type="number" min="1000" step="1"></label>
       <label class="field"><span>1,000 Stars are worth to you ($)</span><input id="t-stars-worth" type="number" min="1" max="100" step="1"></label>
-      <label class="field"><span>A package is valid (days, 0 = no end)</span><input id="t-stars-days" type="number" min="0" max="3650" step="1"></label>
+      <label class="field"><span>A month lasts (days, 0 = no end)</span><input id="t-stars-days" type="number" min="0" max="3650" step="1"></label>
+      <label class="field"><span>Less for more data a month (GB:%)</span><input id="t-stars-size" type="text" placeholder="10:5,25:10,50:15,100:20"></label>
+      <label class="field"><span>Less for more months (months:%)</span><input id="t-stars-months" type="text" placeholder="3:10,6:20,12:30"></label>
     </div>
+    <p class="muted small">Buyers pick a package or build their own plan in the bot: 5 to 500 GB a month, for 1, 3, 6 or 12 months. A plan gives all its data at once and lasts its months; the price follows from the GB price, less the discount for the data a month and the one for the months (empty: none).</p>
     <p class="muted small" id="t-stars-preview"></p>
     <div class="error" id="t-error" role="alert"></div>
     <div class="actions"><button type="button" class="btn" id="t-cancel">Close</button><button class="btn primary">Save</button></div>

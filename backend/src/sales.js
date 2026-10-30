@@ -8,8 +8,21 @@ import { DAY, TIERS, hashPassword, randomPassword, tierForQuota, tierOf } from "
 const GB = 1024 ** 3;
 const now = () => Math.floor(Date.now() / 1000);
 
-/** The packages on sale, in GB. A bigger one is not cheaper per GB, but its size earns a plan: 10 GB Silver, 100 GB Gold. */
+/**
+ * The ready-made packages, in GB a month: where the store starts. A buyer
+ * can make any plan of their own from them (plan): more or less data, and
+ * one to twelve months. A plan gives all its months' data at once and lasts
+ * that many months; its total earns the plan (10 GB Silver, 100 GB Gold).
+ */
 export const PACKAGES = [5, 10, 25, 50, 100];
+
+/** The lengths a plan can have, in months. */
+export const MONTHS = [1, 3, 6, 12];
+
+/** The data a plan can have a month: from MIN_GB to MAX_GB, in steps that grow with it (stepOf). */
+export const MIN_GB = 5;
+export const MAX_GB = 500;
+export const stepOf = (gb) => (gb < 50 ? 5 : gb < 200 ? 10 : 50);
 
 // The settings (the administration panel's), as the service starts: selling
 // is off until the owner has tried a payment and turns it on.
@@ -18,7 +31,11 @@ export const SALES_DEFAULTS = {
   stars_price_toman: "10000", // what 1 GB costs, in toman
   stars_usd_toman: "270000", // what a dollar costs, in toman
   stars_usd_per_1000: "13", // what 1,000 Stars are worth to the seller, in dollars (Telegram pays out about 13)
-  stars_valid_days: "30", // days a package is valid; 0: it never ends
+  stars_valid_days: "30", // days a month of a plan lasts; 0: it never ends
+  // Less per GB for more data a month, and for more months: "GB:percent" and
+  // "months:percent", the largest step reached counts.
+  stars_size_discounts: "10:5,25:10,50:15,100:20",
+  stars_month_discounts: "3:10,6:20,12:30",
 };
 /** What the panel may set (inclusive). */
 export const SALES_RANGE = {
@@ -27,6 +44,17 @@ export const SALES_RANGE = {
   stars_usd_per_1000: [1, 100],
   stars_valid_days: [0, 3650],
 };
+
+/** Parses "10:5,25:10" into [[10, 5], [25, 10]], highest first; null when it is not that shape. */
+export function parseSteps(v) {
+  const s = String(v ?? "").trim();
+  if (s === "") return [];
+  if (!/^\d{1,4}:\d{1,2}(,\d{1,4}:\d{1,2}){0,9}$/.test(s)) return null;
+  const steps = s.split(",").map((x) => x.split(":").map(Number));
+  if (steps.some(([, pct]) => pct > 90)) return null;
+  return steps.sort((a, b) => b[0] - a[0]);
+}
+const stepPct = (steps, n) => (steps.find(([at]) => n >= at) || [0, 0])[1];
 
 /** The selling settings, as numbers. */
 export async function config(env) {
@@ -39,21 +67,49 @@ export async function config(env) {
     usdToman: Number(s.stars_usd_toman),
     starsPer1000: Number(s.stars_usd_per_1000),
     days: Number(s.stars_valid_days),
+    sizeSteps: parseSteps(s.stars_size_discounts) || parseSteps(SALES_DEFAULTS.stars_size_discounts),
+    monthSteps: parseSteps(s.stars_month_discounts) || parseSteps(SALES_DEFAULTS.stars_month_discounts),
   };
 }
 
-/** The Stars a package of `gb` costs: what it is worth in dollars (price per GB over the dollar's price), over what a Star is worth to the seller, rounded up. */
-export function starsFor(gb, cfg) {
-  const dollars = (gb * cfg.priceToman) / cfg.usdToman;
+/**
+ * The Stars `gb` a month for `months` cost: what the data is worth in dollars
+ * (price per GB over the dollar's price), less the discount for the data a
+ * month and the one for the months, over what a Star is worth to the seller,
+ * rounded up.
+ */
+export function starsFor(gb, cfg, months = 1) {
+  const off = (1 - stepPct(cfg.sizeSteps || [], gb) / 100) * (1 - stepPct(cfg.monthSteps || [], months) / 100);
+  const dollars = ((gb * months * cfg.priceToman) / cfg.usdToman) * off;
   return Math.max(1, Math.ceil(dollars / (cfg.starsPer1000 / 1000) - 1e-9));
 }
 
-/** The packages with their prices and the plan each earns. */
+/** Whether `gb` a month for `months` is a plan the store sells. */
+export const validPlan = (gb, months) => Number.isInteger(gb) && gb >= MIN_GB && gb <= MAX_GB && gb % stepOf(gb) === 0 && MONTHS.includes(months);
+
+/**
+ * A plan of `gb` a month for `months`: its total data, days, Stars, the
+ * saving against paying month by month at the full price, and the plan its
+ * total earns. Null for a plan the store does not sell.
+ */
+export function plan(cfg, gb, months = 1) {
+  gb = Number(gb);
+  months = Number(months);
+  if (!validPlan(gb, months)) return null;
+  const total = gb * months;
+  const tier = tierForQuota(total * GB);
+  const stars = starsFor(gb, cfg, months);
+  const full = Math.ceil(((gb * months * cfg.priceToman) / cfg.usdToman) / (cfg.starsPer1000 / 1000) - 1e-9);
+  return {
+    gb, months, total, stars, days: cfg.days > 0 ? cfg.days * months : 0,
+    save: full > stars ? Math.round((1 - stars / full) * 100) : 0,
+    tier, plan: TIERS[tier].name, devices: TIERS[tier].devices,
+  };
+}
+
+/** The ready-made packages, for a month, with their prices and the plan each earns. */
 export function catalog(cfg) {
-  return PACKAGES.map((gb) => {
-    const tier = tierForQuota(gb * GB);
-    return { gb, stars: starsFor(gb, cfg), tier, plan: TIERS[tier].name, devices: TIERS[tier].devices };
-  });
+  return PACKAGES.map((gb) => plan(cfg, gb, 1));
 }
 
 // ---------- Orders and payments ----------

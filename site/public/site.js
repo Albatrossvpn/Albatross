@@ -64,13 +64,16 @@
         var stars = document.createElement("span");
         stars.textContent = "\u2B50 " + (+p.stars);
         var plan = document.createElement("small");
-        plan.textContent = String(p.plan || "").slice(0, 20);
+        plan.textContent = String(p.plan || "").slice(0, 20) + (+p.save > 0 ? " \u00B7 " + (+p.save) + "% off" : "");
         d.appendChild(gb);
         d.appendChild(stars);
         d.appendChild(plan);
         packs.appendChild(d);
       });
       document.getElementById("buy-days").textContent = st.days > 0 ? (+st.days) + " days" : "without an end date";
+      // What a longer plan saves: the months' discounts, largest first.
+      var c = st.custom || {}, steps = (c.month_discounts || []).slice().reverse().filter(function (s) { return +s[1] > 0; });
+      if (steps.length) document.getElementById("buy-save").textContent = "Longer plans cost less: " + steps.map(function (s) { return (+s[0]) + " months " + (+s[1]) + "% off"; }).join(", ") + ".";
       document.getElementById("buy-link").href = "https://t.me/" + st.bot + "?start=buy";
       buy.hidden = false;
     }).catch(function () {});
