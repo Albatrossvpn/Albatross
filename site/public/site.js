@@ -3,20 +3,21 @@
 // (or while it loads) the buttons lead to the list of all downloads on this
 // site. Visitors are never sent to GitHub, except on the site's own mirror
 // on GitHub Pages (for networks where this site's name is filtered), where
-// the files come from the releases there.
+// the files come from the public copies of the releases (alba-data, which
+// deploy/data-repo/mirror.sh keeps, along with the mirror itself).
 (function () {
   "use strict";
   document.querySelectorAll("[data-year]").forEach(function (e) { e.textContent = String(new Date().getFullYear()); });
   var mirror = /\.github\.io$/.test(location.hostname);
-  var releases = "https://github.com/Albatrossvpn/Albatross/releases";
+  var releases = "https://github.com/Albatrossvpn/alba-data/releases";
+  var base = "/" + (location.pathname.split("/")[1] || "");
   if (mirror) {
     // The mirror holds every page of the site under the repository's name
-    // (pages.yml puts it in front of each root-relative address), so its
+    // (mirror.sh puts it in front of each root-relative address), so its
     // links stay on it; only the list of downloads is the releases there.
-    var base = "/" + (location.pathname.split("/")[1] || "");
     document.querySelectorAll('a[href^="/download/"], a[href^="' + base + '/download/"]').forEach(function (a) { a.href = releases; });
   }
-  var urls = mirror ? ["https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json"] : [
+  var urls = mirror ? [base + "/update.json"] : [
     "/update.json"
   ];
   function tryNext(i) {
@@ -30,9 +31,8 @@
       var a = document.querySelector('[data-dl="' + key + '"]');
       var name = f.urls && f.urls[0] ? f.urls[0].split("/").pop() : "";
       if (a && mirror) {
-        // On the mirror: the same file from the release on GitHub.
-        var gh = (f.urls || []).filter(function (u) { return /^https:\/\/github\.com\//.test(u); })[0];
-        if (gh) a.href = gh;
+        // On the mirror: the same file from the public copy of the release.
+        if (v && /^(Albatross-\d+\.\d+\.\d+-android\.apk|Albatross-Setup-\d+\.\d+\.\d+\.exe)$/.test(name)) a.href = releases + "/download/v" + v + "/" + name;
       } else if (a && /^(Albatross-\d+\.\d+\.\d+-android\.apk|Albatross-Setup-\d+\.\d+\.\d+\.exe)$/.test(name)) {
         // Only a file this site stores itself, so visitors never leave it.
         var href = "/download/" + name;

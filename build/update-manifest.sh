@@ -53,7 +53,9 @@ files = {}
 for a in rel["assets"]:
     for part, names in keys.items():
         if part in a["name"] and (a.get("digest") or "").startswith("sha256:"):
-            urls = ([f"{site}/download/{a['name']}"] if a["name"] in stored else []) + [f"{m}/dl/v{v}/{a['name']}" for m in mirrors] + [a["browser_download_url"]]
+            # GitHub: the public copy of the release (alba-data's mirror.yml
+            # makes it within hours; this repository is private).
+            urls = ([f"{site}/download/{a['name']}"] if a["name"] in stored else []) + [f"{m}/dl/v{v}/{a['name']}" for m in mirrors] + [f"https://github.com/Albatrossvpn/alba-data/releases/download/v{v}/{a['name']}"]
             for key in names:
                 files[key] = {"urls": urls, "sha256": a["digest"][7:]}
 path = sys.argv[1]

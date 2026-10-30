@@ -168,6 +168,9 @@ jobs:
 
   build:
     needs: test
+    # A private repository's pull requests get the tests (test, backend),
+    # not the builds: its free minutes are few, and a release builds anyway.
+    if: github.event_name != 'pull_request' || !github.event.repository.private
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
