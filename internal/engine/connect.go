@@ -268,15 +268,10 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 			shut := e.reg.Regime.severity() >= regimeAllowlist.severity()
 			e.mu.Unlock()
 			wait := 2 * time.Second
-			switch {
-			case shut:
-				e.setStatus(StatusSearching, "Only domestic sites answer on this network. Trying the in-country relays, the DNS tunnel and the ping carrier…")
+			if shut {
 				wait = 10 * time.Second
-			case time.Now().After(deadline):
-				e.setStatus(StatusSearching, fmt.Sprintf("No server in %s yet. Still looking; you will be connected as soon as one is found.", name))
-			default:
-				e.setStatus(StatusSearching, fmt.Sprintf("Looking for a server in %s…", name))
 			}
+			e.setStatus(StatusSearching, e.searchMessage(name, shut, time.Now().After(deadline)))
 			if triedRecent && attempt%5 == 1 {
 				e.reprobeRegime("no server to connect to")
 			}
@@ -325,6 +320,38 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 			exclude = map[string]bool{}
 		}
 	}
+}
+
+// searchMessage is what the app says while it looks for a server. With a
+// protocol chosen it names that protocol, because it tries nothing else (a
+// line about the in-country relays and the DNS tunnel would say it is trying
+// what the user did not choose).
+func (e *Engine) searchMessage(place string, shut, late bool) string {
+	e.mu.Lock()
+	chosen := e.settings.Protocol
+	e.mu.Unlock()
+	if chosen != "" {
+		label := chosen
+		for _, p := range ProtocolChoices() {
+			if p.Value == chosen {
+				label = p.Label
+			}
+		}
+		switch {
+		case shut:
+			return fmt.Sprintf("Only domestic sites answer on this network, so %s cannot connect right now. Choose Automatic to try the in-country relays, the DNS tunnel and the ping carrier.", label)
+		case late:
+			return fmt.Sprintf("No %s server works in %s yet. Still looking; you will be connected as soon as one is found, or choose Automatic.", label, place)
+		}
+		return fmt.Sprintf("Looking for a %s server in %s…", label, place)
+	}
+	switch {
+	case shut:
+		return "Only domestic sites answer on this network. Trying the in-country relays, the DNS tunnel and the ping carrier…"
+	case late:
+		return fmt.Sprintf("No server in %s yet. Still looking; you will be connected as soon as one is found.", place)
+	}
+	return fmt.Sprintf("Looking for a server in %s…", place)
 }
 
 // pickGroup chooses the servers for a connection: the fastest in country
@@ -1279,17 +1306,23 @@ type ConnInfo struct {
 	Server      string `json:"server"`
 	Proto       string `json:"proto"`
 	Security    string `json:"security"`
-	ExitIP      string `json:"exit_ip"`
-	Delay       int    `json:"delay"`
-	Since       int64  `json:"since"`
-	Up          int64  `json:"up"`
-	Down        int64  `json:"down"`
-	UpRate      int64  `json:"up_rate"`
-	DownRate    int64  `json:"down_rate"`
-	Group       int    `json:"group"`
-	Ready       int    `json:"ready"` // backups known to work right now
-	Mode        string `json:"mode"`
-	ProxyAddr   string `json:"proxy_addr"`
+	// Method is the warp-plus method a connection runs ("warp", "gool",
+	// "psiphon", "masque", "masque2" or "tor"; every one has Proto "warpplus"),
+	// Carrier a way through that is not a protocol of its own ("dns" for a DNS
+	// tunnel, "icmp" for the ping carrier). The screen names both.
+	Method    string `json:"method,omitempty"`
+	Carrier   string `json:"carrier,omitempty"`
+	ExitIP    string `json:"exit_ip"`
+	Delay     int    `json:"delay"`
+	Since     int64  `json:"since"`
+	Up        int64  `json:"up"`
+	Down      int64  `json:"down"`
+	UpRate    int64  `json:"up_rate"`
+	DownRate  int64  `json:"down_rate"`
+	Group     int    `json:"group"`
+	Ready     int    `json:"ready"` // backups known to work right now
+	Mode      string `json:"mode"`
+	ProxyAddr string `json:"proxy_addr"`
 }
 
 func (e *Engine) connInfo() *ConnInfo {
@@ -1317,10 +1350,15 @@ func (e *Engine) connInfo() *ConnInfo {
 	}
 	info.CountryName = countryName(info.Country)
 	info.Flag = geo.Flag(info.Country)
+	var srv *Server
 	if active != nil {
-		info.Server, info.Proto, info.Security = active.server.Name, active.server.Proto, active.server.Security
+		srv = active.server
 	} else if len(c.servers) > 0 {
-		info.Server, info.Proto, info.Security = c.servers[0].Name, c.servers[0].Proto, c.servers[0].Security
+		srv = c.servers[0]
+	}
+	if srv != nil {
+		info.Server, info.Proto, info.Security = srv.Name, srv.Proto, srv.Security
+		info.Method, info.Carrier = srv.method(), srv.carrier()
 	}
 	return info
 }

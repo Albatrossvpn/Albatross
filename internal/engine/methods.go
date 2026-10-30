@@ -42,14 +42,36 @@ func methodNodes(warpPlus, usque bool) []*node.Node {
 var methodsMu sync.Mutex
 var methodsTested = map[string]time.Time{}
 
-// refreshWarp tests the warp-plus methods that are due. They are slow to
-// start, so only a few run at a time, and the user's chosen country goes
-// first.
-func (e *Engine) refreshWarp() {
+// methodsWanted says which built-in methods to run. The WARP methods and Tor
+// are two protocols of their own ("warp" and "tor", see Server.matches):
+// Automatic runs both while the setting for them is on, a chosen one runs
+// that one whatever the setting says (nothing else would ever start the
+// method the user asked for), and any other chosen protocol runs neither.
+func methodsWanted(s Settings) (warp, tor bool) {
+	switch s.Protocol {
+	case "":
+		return s.Warp, s.Warp
+	case "warp":
+		return true, false
+	case "tor":
+		return false, true
+	}
+	return false, false
+}
+
+// chosenRetry is how soon a method the user chose is tried again while
+// nothing is connected: the choice is what they are waiting for.
+const chosenRetry = 5 * time.Minute
+
+// refreshWarp tests the warp-plus methods that are due (warp: the WARP and
+// Psiphon ones; tor: Tor). They are slow to start, so only a few run at a
+// time, and the user's chosen country goes first.
+func (e *Engine) refreshWarp(warp, tor bool) {
 	e.mu.Lock()
 	target := e.target
 	searching := e.wantConnect && e.conn == nil
 	national := e.reg.Regime == regimeNational
+	chosen := e.settings.Protocol == "warp" || e.settings.Protocol == "tor"
 	e.mu.Unlock()
 	if national {
 		return // WARP, Psiphon and Tor need foreign addresses
@@ -57,13 +79,18 @@ func (e *Engine) refreshWarp() {
 	now := time.Now()
 	var due []*node.Node
 	methodsMu.Lock()
-	for _, n := range methodNodes(e.bin.WarpPlus != "", e.bin.Usque != "") {
-		every := 3 * time.Hour
-		if searching || (target != "" && n.WPCountry == target) {
-			every = 30 * time.Minute
-		}
-		if now.Sub(methodsTested[n.Key()]) >= every {
-			due = append(due, n)
+	if warp {
+		for _, n := range methodNodes(e.bin.WarpPlus != "", e.bin.Usque != "") {
+			every := 3 * time.Hour
+			if searching || (target != "" && n.WPCountry == target) {
+				every = 30 * time.Minute
+			}
+			if chosen && searching {
+				every = chosenRetry
+			}
+			if now.Sub(methodsTested[n.Key()]) >= every {
+				due = append(due, n)
+			}
 		}
 	}
 	methodsMu.Unlock()
@@ -90,14 +117,17 @@ func (e *Engine) refreshWarp() {
 	// Tor is the last resort and slow to start, so it is tried while
 	// nothing else connects and otherwise only now and then, outside the
 	// warp-plus turns.
-	if tor := node.WarpPlus("tor", ""); e.bin.Tor != "" {
+	if torNode := node.WarpPlus("tor", ""); tor && e.bin.Tor != "" {
 		every := 12 * time.Hour
 		if searching {
 			every = 30 * time.Minute
 		}
+		if chosen && searching {
+			every = chosenRetry
+		}
 		methodsMu.Lock()
-		if now.Sub(methodsTested[tor.Key()]) >= every {
-			due = append(due, tor)
+		if now.Sub(methodsTested[torNode.Key()]) >= every {
+			due = append(due, torNode)
 		}
 		methodsMu.Unlock()
 	}

@@ -221,3 +221,28 @@ func TestProtocolName(t *testing.T) {
 		}
 	}
 }
+
+// A connection is named by what it really is: Tor is not "WARP+", and a
+// server reached through a DNS tunnel says so instead of passing for the
+// protocol it carries.
+func TestConnLabel(t *testing.T) {
+	for _, c := range []struct {
+		info engine.ConnInfo
+		want string
+	}{
+		{engine.ConnInfo{Proto: "warpplus", Method: "tor"}, "Tor"},
+		{engine.ConnInfo{Proto: "warpplus", Method: "warp"}, "Cloudflare WARP"},
+		{engine.ConnInfo{Proto: "warpplus", Method: "gool"}, "WARP in WARP"},
+		{engine.ConnInfo{Proto: "warpplus", Method: "psiphon"}, "Psiphon"},
+		{engine.ConnInfo{Proto: "warpplus", Method: "masque"}, "WARP · MASQUE"},
+		{engine.ConnInfo{Proto: "warpplus"}, "WARP+"},
+		{engine.ConnInfo{Proto: "vmess", Carrier: "dns"}, "VMess · DNS tunnel"},
+		{engine.ConnInfo{Proto: "vmess", Carrier: "icmp"}, "VMess · ping tunnel"},
+		{engine.ConnInfo{Proto: "vless", Security: "reality"}, "VLESS Reality"},
+		{engine.ConnInfo{Proto: "tuic"}, "TUIC"},
+	} {
+		if got := connLabel(&c.info); got != c.want {
+			t.Errorf("connLabel(%+v) = %q, want %q", c.info, got, c.want)
+		}
+	}
+}

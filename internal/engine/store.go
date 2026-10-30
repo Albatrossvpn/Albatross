@@ -94,6 +94,33 @@ func (s *Server) matches(protocol string) bool {
 	return s.Proto == protocol
 }
 
+// method is the warp-plus method a server runs ("warp", "gool", "psiphon",
+// "masque", "masque2" or "tor"), "" for any other server.
+func (s *Server) method() string {
+	if s.Proto != "warpplus" {
+		return ""
+	}
+	if n := s.Node(); n != nil {
+		return n.WPMode
+	}
+	return ""
+}
+
+// carrier names a way through that is not a protocol of its own: "dns" for a
+// DNS tunnel, "icmp" for the ping carrier, "" for the plain network.
+func (s *Server) carrier() string {
+	n := s.Node()
+	switch {
+	case n == nil:
+		return ""
+	case n.DNSTunnel():
+		return "dns"
+	case n.ICMP():
+		return "icmp"
+	}
+	return ""
+}
+
 // usable reports whether the server is worth connecting to now.
 func (s *Server) usable(now time.Time) bool {
 	return s.Fails < 3 && now.Sub(s.LastOK) < 6*time.Hour

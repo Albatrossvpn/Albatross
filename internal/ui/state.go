@@ -74,6 +74,31 @@ func protocolName(proto, security string) string {
 	return name
 }
 
+// methodNames are the warp-plus methods as the screen names them, and
+// carrierNames the ways through that are not protocols of their own.
+var (
+	methodNames = map[string]string{
+		"warp": "Cloudflare WARP", "gool": "WARP in WARP", "psiphon": "Psiphon",
+		"masque": "WARP · MASQUE", "masque2": "WARP · MASQUE (TCP)", "tor": "Tor",
+	}
+	carrierNames = map[string]string{"dns": "DNS tunnel", "icmp": "ping tunnel"}
+)
+
+// connLabel is how a connection is named: its protocol, or its method for
+// warp-plus (Tor is not "WARP+"), and the carrier when it is not the plain
+// network, so a server reached through a DNS tunnel never passes for the
+// protocol it carries.
+func connLabel(c *engine.ConnInfo) string {
+	name := protocolName(c.Proto, c.Security)
+	if m, ok := methodNames[c.Method]; ok {
+		name = m
+	}
+	if car, ok := carrierNames[c.Carrier]; ok {
+		name += " · " + car
+	}
+	return name
+}
+
 type region struct {
 	Code string `json:"code"`
 	Name string `json:"name"`
@@ -131,7 +156,7 @@ func publicState(s engine.Snapshot) state {
 	}
 	if c := s.Conn; c != nil {
 		out.Conn = &conn{Country: c.Country, CountryName: c.CountryName, Flag: c.Flag, Delay: c.Delay,
-			Protocol: protocolName(c.Proto, c.Security), Since: c.Since,
+			Protocol: connLabel(c), Since: c.Since,
 			Up: c.Up, Down: c.Down, UpRate: c.UpRate, DownRate: c.DownRate}
 	}
 	return out

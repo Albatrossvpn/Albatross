@@ -106,8 +106,8 @@ func (e *Engine) refreshLoop() {
 			go e.crowdReport(e.ctx)
 		}
 		e.mu.Lock()
-		// The WARP methods are their own protocol; a chosen one excludes them.
-		warp, clean := e.settings.Warp && e.settings.Protocol == "", e.settings.CleanIP
+		warp, tor := methodsWanted(e.settings)
+		clean := e.settings.CleanIP
 		e.mu.Unlock()
 		if clean && e.cf.Age() > 2*time.Hour {
 			found := e.cf.Scan(e.ctx, 400, 8)
@@ -115,8 +115,8 @@ func (e *Engine) refreshLoop() {
 				e.logf("info", "%d clean edge addresses found (best: %d ms).", len(found), found[0].Latency/time.Millisecond)
 			}
 		}
-		if warp {
-			e.refreshWarp()
+		if warp || tor {
+			e.refreshWarp(warp, tor)
 		}
 		e.refreshEdge()
 		select {
@@ -568,6 +568,9 @@ func (e *Engine) pickBatch(size int) []candidate {
 	allowPlain := e.settings.AllowPlain
 	protocol := e.settings.Protocol
 	wantProto := protoCodes[protocol] // 0 = any
+	// The built-in methods are not servers of the pool: refreshWarp tests
+	// them, and the pool has nothing for a choice of them to try.
+	methodOnly := protocol == "warp" || protocol == "tor"
 	haveXray := e.bin.Xray != ""
 	targetHasServers := false
 	// Protocols with a working server now; the others are stocked first,
@@ -640,6 +643,9 @@ func (e *Engine) pickBatch(size int) []candidate {
 		tb = [2]byte{target[0], target[1]}
 	}
 	e.pool.Each(func(en *pool.Entry) {
+		if methodOnly {
+			return
+		}
 		switch en.State {
 		case pool.StateRejected, pool.StateOK:
 			return
@@ -663,8 +669,11 @@ func (e *Engine) pickBatch(size int) []candidate {
 		if en.Engine == 2 && !haveXray {
 			return
 		}
-		if shut && !canGetOut(reg, regProbe, en) {
-			// Only what the regime leaves a path for is worth a test.
+		if shut && wantProto == 0 && !canGetOut(reg, regProbe, en) {
+			// Only what the regime leaves a path for is worth a test. A
+			// protocol the user chose is tried anyway: they asked for it,
+			// and a regime read wrongly must not decide for them (a failure
+			// there costs the server nothing, see recordFail).
 			return
 		}
 		sc := 0.0
