@@ -2,11 +2,13 @@ package engine
 
 import (
 	"context"
+	"encoding/base32"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -77,6 +79,12 @@ type AccountState struct {
 	Plans       map[string]string `json:"plans,omitempty"`
 	PlanDevices map[string]int    `json:"plan_devices,omitempty"`
 	SiteURL     string            `json:"site_url,omitempty"`
+	// Store is what can be bought, paid with Telegram Stars in the bot:
+	// BuyURL opens the bot's store, RenewURL the same store set to recharge
+	// this account (empty when not signed in).
+	Store    *account.Store `json:"store,omitempty"`
+	BuyURL   string         `json:"buy_url,omitempty"`
+	RenewURL string         `json:"renew_url,omitempty"`
 	// Progress says what signing in is doing right now, while it is:
 	// finding a server to go through can take a while.
 	Progress string `json:"progress,omitempty"`
@@ -130,6 +138,14 @@ func (e *Engine) Account() AccountState {
 	e.mu.Unlock()
 	st := AccountState{Enabled: true, SiteURL: e.acct.Site(), Progress: step}
 	v := e.acct.View()
+	if s := e.acct.Store(); s != nil && botName.MatchString(s.Bot) {
+		st.Store, st.BuyURL = s, "https://t.me/"+s.Bot+"?start=buy"
+		if v.SignedIn {
+			st.RenewURL = renewURL(s.Bot, v.Info.Username)
+		}
+	} else if !v.SignedIn {
+		e.askStore()
+	}
 	if !v.SignedIn {
 		return st
 	}
@@ -143,6 +159,39 @@ func (e *Engine) Account() AccountState {
 		st.Message = limitMessage(why, i)
 	}
 	return st
+}
+
+// botName is a Telegram bot's username.
+var botName = regexp.MustCompile(`^[A-Za-z0-9_]{5,32}$`)
+
+// renewURL opens the bot's store set to recharge the account: the bot reads
+// the username from the link (start=rn and the name in base32, which a
+// link's start may carry), so the buyer does not type it. A name too long
+// for a link gets the plain store.
+func renewURL(bot, username string) string {
+	if len(username) < 3 || len(username) > 32 {
+		return "https://t.me/" + bot + "?start=buy"
+	}
+	return "https://t.me/" + bot + "?start=rn" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString([]byte(username)))
+}
+
+// storeEvery is how often the sign-in screen asks the service what is on
+// sale, while it does not know.
+const storeEvery = 10 * time.Minute
+
+// askStore asks the service, in the background, what is on sale, for the
+// sign-in screen to offer buying an account; at most once every storeEvery.
+func (e *Engine) askStore() {
+	now := time.Now().Unix()
+	last := e.storeAsked.Load()
+	if now-last < int64(storeEvery/time.Second) || !e.storeAsked.CompareAndSwap(last, now) {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		e.acct.FetchStore(ctx)
+	}()
 }
 
 // Login signs the user in to the account service.

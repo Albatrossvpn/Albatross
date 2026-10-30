@@ -1065,9 +1065,66 @@ function copyText(text) {
   if (ok || !navigator.clipboard) return Promise.resolve(ok);
   return navigator.clipboard.writeText(text).then(function () { return true; }, function () { return false; });
 }
+// The store is the service's Telegram bot, where data is paid with
+// Stars: the app shows what is on sale and opens the bot, set to recharge
+// the signed-in account (renew_url) or to buy a new one (buy_url).
+function storeLink() {
+  var a = (state && state.account) || {};
+  return a.renew_url || a.buy_url || "";
+}
+function openStore(note) {
+  var url = storeLink();
+  if (!url) return false;
+  api("POST", "/api/open", { url: url }).then(function () { toast(note || "Opening the store in Telegram…"); }, function (e) { toast(e.message); });
+  return true;
+}
+function devicesText(n) { return n === 0 ? "Unlimited devices" : n === 1 ? "1 device" : n + " devices"; }
+var shopShown = "";
+function renderShop(a) {
+  var s = a.store;
+  var key = JSON.stringify(s || null) + (a.renew_url || "");
+  if (key === shopShown) return;
+  shopShown = key;
+  $("shop").classList.toggle("hidden", !s);
+  $("plans-hint").textContent = !s ? "Plans are sold where you got your account. Your account, its data and devices carry over." :
+    a.signed_in ? "Paid with Telegram Stars in our Telegram bot. The data is added to " + a.username + " at once; its devices carry over." :
+      "Paid with Telegram Stars in our Telegram bot, which sends the account's username and password at once.";
+  if (!s) return;
+  var days = s.days ? s.days + " days" : "No end";
+  var rows = (s.packages || []).map(function (p) {
+    return '<button type="button" class="shop-item" data-gb="' + p.gb + '"><span class="si-gb">' + p.gb + "<small>GB</small></span>" +
+      '<span class="si-mid">' + medal(String(p.plan || "").toLowerCase(), true) + "<small>" + esc(devicesText(p.devices) + " · " + days) + "</small></span>" +
+      '<span class="si-price">⭐ ' + p.stars + (p.save ? '<small class="si-save">Save ' + p.save + "%</small>" : "") + "</span></button>";
+  });
+  var c = s.custom;
+  if (c && c.months && c.months.length) {
+    var months = c.months.length > 1 ? c.months.slice(0, -1).join(", ") + " or " + c.months[c.months.length - 1] : String(c.months[0]);
+    rows.push('<button type="button" class="shop-item own"><span class="si-gb">+</span><span class="si-mid"><b>Your own plan</b><small>' +
+      esc(c.min_gb + " to " + c.max_gb + " GB a month, for " + months + " months. More data and more months cost less a GB.") + '</small></span><span class="si-price">›</span></button>');
+  }
+  $("shop-list").innerHTML = rows.join("");
+}
+$("shop-list").addEventListener("click", function (e) {
+  var item = e.target.closest(".shop-item");
+  if (!item) return;
+  openStore(item.dataset.gb ? "Choose " + item.dataset.gb + " GB in Telegram and pay with Stars." : "Choose “Build your own plan” in Telegram.");
+});
+function onRenew() { openStore("Choose a package in Telegram: it is added to your account."); }
+$("acc-renew").addEventListener("click", onRenew);
+$("acc-buy").addEventListener("click", onRenew);
+$("login-buy").addEventListener("click", function () { openStore("Choose a package in Telegram: the bot sends your username and password."); });
+
 function openUpgrade(tier) {
   var name = PLAN_NAMES[tier] || "a higher";
   var user = state && state.account && state.account.username;
+  // A plan on sale comes with enough data: the smallest package that brings it.
+  var store = state && state.account && state.account.store;
+  var pack = store && (store.packages || []).filter(function (p) { return String(p.plan || "").toLowerCase() === tier; })[0];
+  if (pack && storeLink()) {
+    $("plan-modal").classList.add("hidden");
+    openStore("Choose " + pack.gb + " GB or more in Telegram: " + name + " comes with it.");
+    return;
+  }
   var text = "Hello, please move my Albatross account" + (user ? " \u201c" + user + "\u201d" : "") + " to the " + name + " plan.";
   $("plan-modal").classList.add("hidden");
   copyText(text).then(function (ok) {
@@ -1096,6 +1153,7 @@ each(document.querySelectorAll("label[data-feature]"), function (el) {
 var plansShown = "";
 function renderPlans() {
   var a = state.account || {}, mine = a.signed_in ? a.tier : "";
+  renderShop(a);
   var devices = a.plan_devices || {}, plans = a.plans || {};
   var key = mine + JSON.stringify(plans) + JSON.stringify(devices) + state.mobile;
   if (key === plansShown) return;
@@ -1139,6 +1197,7 @@ function renderAccount(a) {
   planBadge($("plan-chip"), a.signed_in ? a.tier : "");
   planBadge($("acc-plan"), a.signed_in ? a.tier : "");
   $("login").classList.toggle("hidden", !needLogin);
+  $("login-buy").classList.toggle("hidden", !a.buy_url);
   $("account-card").classList.toggle("hidden", !a.signed_in);
   if (!a.signed_in) return;
   $("account-card").className = "member " + (PLAN_NAMES[a.tier] ? a.tier : "");
@@ -1154,6 +1213,13 @@ function renderAccount(a) {
   if (a.expires_at) dates.push("Expires " + fmtDate(a.expires_at));
   if (!a.quota_bytes && !a.max_seconds && !a.expires_at) dates.push("No limits");
   $("acc-dates").textContent = dates.join(" · ");
+  // Recharging: in plain sight when the account is at a limit, nearly out
+  // of data or about to end; a link otherwise.
+  var soon = a.expires_at && a.expires_at * 1000 - Date.now() < 3 * 86400000;
+  var low = a.quota_bytes && a.used_bytes >= 0.8 * a.quota_bytes;
+  var urgent = !!a.renew_url && !!(a.message || soon || low);
+  $("acc-renew").classList.toggle("hidden", !urgent);
+  $("acc-buy").classList.toggle("hidden", !a.renew_url || urgent);
 }
 
 // What the connection protects right now, from what the app knows.
