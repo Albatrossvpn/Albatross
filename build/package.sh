@@ -36,8 +36,22 @@ numeric="$(echo "$VERSION" | sed -E 's/^([0-9]+)\.([0-9]+)\.([0-9]+).*/\1.\2.\3.
 [[ "$numeric" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.0$ ]] || numeric="0.0.0.0"
 go run github.com/tc-hib/go-winres@v0.3.3 make --in build/windows/winres.json --out cmd/albatross/rsrc \
   --arch amd64 --product-version "$numeric" --file-version "$numeric"
-GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath \
-  -ldflags "-s -w -H windowsgui -X main.version=$VERSION -X github.com/Albatrossvpn/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/Albatrossvpn/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.WorkerMirror=${MIRROR_URL:-${ACCOUNT_URL:-}} -X github.com/Albatrossvpn/vp/internal/engine.UpdateKey=${UPDATE_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.DomesticMirror=${DOMESTIC_MIRROR:-}" -o "$out/Albatross.exe" ./cmd/albatross
+# The domestic mirror is hidden in the binary (internal/obf): injected
+# encoded and decoded at runtime, so `strings` on the app does not show it.
+mirror="${DOMESTIC_MIRROR:-}"
+[ -n "$mirror" ] && mirror="$(go run ./cmd/obf "$mirror")"
+ldflags="-s -w -H windowsgui -X main.version=$VERSION -X github.com/Albatrossvpn/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/Albatrossvpn/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.WorkerMirror=${MIRROR_URL:-${ACCOUNT_URL:-}} -X github.com/Albatrossvpn/vp/internal/engine.UpdateKey=${UPDATE_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.DomesticMirror=${mirror}"
+if [ "${GARBLE:-0}" = 1 ]; then
+  # garble obfuscates our own code — its identifiers and in-source string
+  # literals; the cores are third-party, downloaded prebuilt, and untouched.
+  # It needs a Go toolchain in a real GOROOT, not one GOTOOLCHAIN fetched
+  # into the module cache (GO127_BIN, set by the workflow), so GOTOOLCHAIN=local.
+  echo "building Albatross.exe with garble"
+  PATH="${GO127_BIN:+$GO127_BIN:}$PATH" GOTOOLCHAIN=local GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+    garble -literals build -trimpath -ldflags "$ldflags" -o "$out/Albatross.exe" ./cmd/albatross
+else
+  GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" -o "$out/Albatross.exe" ./cmd/albatross
+fi
 
 fetch() {
   [ -s "$2" ] || curl -fsSL --retry 4 --retry-delay 3 -o "$2" "$1"
