@@ -1,6 +1,6 @@
 # Albatross
 
-A VPN client for Windows and Android. Pick a location, press the button, and it connects to the lowest-latency server there. It keeps a group of ready backups in the same location, so if the server in use drops, traffic moves to a backup within a second and the location does not change.
+A VPN client for Windows and Android (64-bit phones). Pick a location, press the button, and it connects to the lowest-latency server there. It keeps a group of ready backups in the same location, so if the server in use drops, traffic moves to a backup within a second and the location does not change.
 
 ## Features
 
@@ -49,7 +49,7 @@ Every server runs through sing-box. Servers only Xray supports are served by an 
 
 ```sh
 go test ./...
-VERSION=0.1.0 bash build/package.sh      # dist/Albatross + portable zip (needs curl, unzip, zip)
+VERSION=0.1.0 bash build/package.sh      # dist/Albatross (needs curl, unzip)
 iscc /DAppVersion=0.1.0 build/windows/installer.iss   # on Windows, needs Inno Setup 6
 ```
 
