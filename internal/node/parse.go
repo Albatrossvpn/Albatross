@@ -1215,6 +1215,24 @@ func EachText(text string, fn func(*Node)) (seen int) {
 	if len(configs) > 0 && !html {
 		return len(configs)
 	}
+	// Quantumult X server lines are not share links, so the scheme regex
+	// below never finds them; a text that looks like them gets its own pass.
+	var qx []*Node
+	if quantumultHint(cfg) {
+		qx = ParseQuantumult(cfg)
+		for _, n := range qx {
+			fn(n)
+		}
+	}
+	// Surge (and much of Loon) writes the type, host and port first, then
+	// named options; its lines do not collide with Quantumult X's.
+	var surge []*Node
+	if surgeHint(cfg) {
+		surge = ParseSurge(cfg)
+		for _, n := range surge {
+			fn(n)
+		}
+	}
 	links := ExtractLinks(text)
 	for _, l := range links {
 		// The methods (warp-plus, the serverless one) are the app's own:
@@ -1223,7 +1241,7 @@ func EachText(text string, fn func(*Node)) (seen int) {
 			fn(n)
 		}
 	}
-	return len(configs) + len(links)
+	return len(configs) + len(qx) + len(surge) + len(links)
 }
 
 // Link returns a string that ParseLink turns back into this node: the
