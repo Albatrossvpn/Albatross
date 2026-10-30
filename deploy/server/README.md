@@ -30,7 +30,6 @@ rest:
 | Mieru (TCP) | 2086/tcp |
 | Brook over WebSocket + TLS | 2095/tcp |
 | WStunnel (SOCKS5 inside WebSocket + TLS) | 2097/tcp |
-| Snell v4 (Surge's protocol; its closed-source server is checked against a pinned checksum) | 8448/tcp and 8448/udp |
 | AmneziaWG (WireGuard with junk packets and masked headers) | 8447/udp |
 | OpenConnect / AnyConnect (ocserv; official clients only, see `links-external.txt`) | 2099/tcp+udp |
 

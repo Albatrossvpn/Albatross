@@ -46,12 +46,6 @@ JUICITY_VERSION="${JUICITY_VERSION:-0.5.0}"
 MIERU_VERSION="${MIERU_VERSION:-3.39.0}"
 BROOK_VERSION="${BROOK_VERSION:-20270101}"
 WSTUNNEL_VERSION="${WSTUNNEL_VERSION:-11.1.0}"
-# Snell (Surge's protocol): its server is a closed-source program published
-# only at dl.nssurge.com, so it is pinned by checksum, and v4.1.1 is the
-# version mihomo's v4 client (the app's helper) was made for.
-SNELL_VERSION="${SNELL_VERSION:-4.1.1}"
-SNELL_SHA256_AMD64="${SNELL_SHA256_AMD64:-cc2271b79c7506888b34e651e8741b3aa7fc7d5f60aa65ef8bb096f3313a193b}"
-SNELL_SHA256_ARM64="${SNELL_SHA256_ARM64:-38d4cdc03dcdb3608af8594df83e1795265167fafc5d802f815148908902d758}"
 # NaiveProxy's server is Caddy with klzgrad's forward proxy, which builds
 # its releases on a Caddy patched for it (the newest needs that patch's
 # idle timeouts): on x86-64 its release is taken, checked against the
@@ -102,7 +96,6 @@ P_WST=2097           # WStunnel: SOCKS5 inside WebSocket + TLS
 P_OC=2099            # OpenConnect (AnyConnect), TCP and UDP; for other clients, see links-external.txt
 P_JUICITY=8446       # Juicity (QUIC, UDP)
 P_AWG=8447           # AmneziaWG (UDP)
-P_SNELL=8448         # Snell v4 (TCP, and UDP for its UDP relay)
 P_DECOY=18080        # loopback: the web page probes of the TLS ports get
 P_SS=8388            # Shadowsocks 2022 (TCP and UDP)
 P_STLS=8445          # Shadowsocks 2022 behind ShadowTLS v3 (TCP): a real TLS handshake with REALITY_DEST
@@ -198,7 +191,6 @@ secrets() {
   grep -q "^STLS_PASS=" "$f" || echo "STLS_PASS=$("$SB" generate rand --hex 16)" >>"$f"
   grep -q "^SSH_PASS=" "$f" || echo "SSH_PASS=$("$SB" generate rand --hex 16)" >>"$f"
   grep -q "^WST_PATH=" "$f" || echo "WST_PATH=$("$SB" generate rand --hex 12)" >>"$f"
-  grep -q "^SNELL_PSK=" "$f" || echo "SNELL_PSK=$("$SB" generate rand --hex 16)" >>"$f"
   # shellcheck disable=SC1090
   . "$f"
 }
@@ -236,7 +228,7 @@ certificate() {
   ln -sf "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" "$CERT"
   ln -sf "/etc/letsencrypt/live/$DOMAIN/privkey.pem" "$KEY"
   mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-  printf '#!/bin/sh\nsystemctl restart albatross-sing-box albatross-xray\nfor s in albatross-naive albatross-juicity albatross-brook albatross-wstunnel albatross-snell ocserv; do systemctl try-restart "$s" 2>/dev/null; done\n' >/etc/letsencrypt/renewal-hooks/deploy/albatross
+  printf '#!/bin/sh\nsystemctl restart albatross-sing-box albatross-xray\nfor s in albatross-naive albatross-juicity albatross-brook albatross-wstunnel ocserv; do systemctl try-restart "$s" 2>/dev/null; done\n' >/etc/letsencrypt/renewal-hooks/deploy/albatross
   # Renewal needs port 80, which the HTTP inbound holds.
   mkdir -p /etc/letsencrypt/renewal-hooks/pre /etc/letsencrypt/renewal-hooks/post
   printf '#!/bin/sh\nsystemctl stop albatross-sing-box\n' >/etc/letsencrypt/renewal-hooks/pre/albatross
@@ -409,10 +401,10 @@ free_port53() {
 firewall() {
   # Oracle's Ubuntu images reject everything but SSH in iptables; the
   # cloud's own security list must allow the same ports (see README).
-  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_OVPN $P_TGO $P_NAIVE $P_MIERU $P_BROOK $P_WST $P_SNELL $P_OC 22 80; do
+  for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_OVPN $P_TGO $P_NAIVE $P_MIERU $P_BROOK $P_WST $P_OC 22 80; do
     iptables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p tcp --dport "$p" -j ACCEPT
   done
-  for p in $P_SS $P_HY2 $P_TUIC $P_JUICITY $P_AWG $P_SNELL $P_OC $HOP_RANGE; do
+  for p in $P_SS $P_HY2 $P_TUIC $P_JUICITY $P_AWG $P_OC $HOP_RANGE; do
     iptables -C INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || iptables -I INPUT -p udp --dport "$p" -j ACCEPT
   done
   # Hysteria 2 port hopping: the whole range, and UDP 53, land on its one
@@ -448,10 +440,10 @@ firewall() {
   iptables -C INPUT -p icmp --icmp-type echo-request -j ACCEPT 2>/dev/null || iptables -I INPUT -p icmp --icmp-type echo-request -j ACCEPT
   # The same ports over IPv6, where the machine has an address.
   if command -v ip6tables >/dev/null; then
-    for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_OVPN $P_TGO $P_NAIVE $P_MIERU $P_BROOK $P_WST $P_SNELL $P_OC 22 80; do
+    for p in $P_REALITY $P_XHTTP $P_TROJAN $P_WS $P_GRPC $P_UPGRADE $P_ANYTLS $P_SS $P_STLS $P_TCP53 $P_OVPN $P_TGO $P_NAIVE $P_MIERU $P_BROOK $P_WST $P_OC 22 80; do
       ip6tables -C INPUT -p tcp --dport "$p" -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p tcp --dport "$p" -j ACCEPT
     done
-    for p in $P_SS $P_HY2 $P_TUIC $P_JUICITY $P_AWG $P_SNELL $P_OC; do
+    for p in $P_SS $P_HY2 $P_TUIC $P_JUICITY $P_AWG $P_OC; do
       ip6tables -C INPUT -p udp --dport "$p" -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p udp --dport "$p" -j ACCEPT
     done
     ip6tables -C INPUT -p ipv6-icmp -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p ipv6-icmp -j ACCEPT
@@ -639,7 +631,6 @@ v6_links() {
   vmess_link "$IP6" "$P_HTTP" "" "$n-HTTP80"
   [ "$DRY_RUN" = 1 ] || printf 'ssh://tunnel:%s@%s:22?hk=%s#%s-SSH\n' "$SSH_PASS" "$h" "$(urlenc "$(ssh_hostkey)")" "$n"
   [ "$SIDECARS" = 1 ] && echo "mieru://albatross:$PASS@$h:$P_MIERU?protocol=tcp&mtu=1400#$n-Mieru"
-  [ "$SIDECARS" = 1 ] && snell_link "$h"
   awg_link "$h"
 }
 
@@ -666,16 +657,7 @@ sidecar_links() {
   echo "mieru://albatross:$PASS@$h:$P_MIERU?protocol=tcp&mtu=1400#$n-Mieru"
   echo "brook://wssserver?wssserver=$(urlenc "wss://$DOMAIN:$P_BROOK/ws")&password=$PASS&name=$n-Brook"
   echo "wstunnel://$DOMAIN:$P_WST?path=$WST_PATH#$n-WStunnel"
-  snell_link "$h"
   awg_link "$h"
-}
-
-# snell_link prints the Snell link once its server is installed (or while
-# writing the configs for a test).
-snell_link() {
-  if [ "$DRY_RUN" = 1 ] || [ -x /usr/local/bin/snell-server ]; then
-    echo "snell://$SNELL_PSK@$1:$P_SNELL?version=4#Albatross-Snell"
-  fi
 }
 
 # sidecar_setup installs and runs the server side of the sidecar
@@ -776,37 +758,7 @@ EOF
   awg_setup
   openconnect_setup
   rm -rf "$tmp"
-  # A closed-source program from one address: when it cannot be had, the
-  # other protocols are not held up and no Snell link is made.
-  snell_setup || echo "Snell is not set up; the other protocols are." >&2
   sidecar_services
-}
-
-# snell_setup installs Snell's server (checked against its pinned checksum)
-# and writes its configuration, which holds the pre-shared key.
-snell_setup() {
-  local z sum tmp
-  case "$(arch)" in
-    amd64) z=amd64; sum="$SNELL_SHA256_AMD64" ;;
-    arm64) z=aarch64; sum="$SNELL_SHA256_ARM64" ;;
-    *) echo "Snell has no server program for this machine" >&2; return 1 ;;
-  esac
-  if [ ! -x /usr/local/bin/snell-server ] || [ "$(cat /usr/local/lib/albatross-snell.version 2>/dev/null)" != "$SNELL_VERSION" ]; then
-    tmp="$(mktemp -d)"
-    curl -fsSL --max-time 120 -o "$tmp/snell.zip" "https://dl.nssurge.com/snell/snell-server-v$SNELL_VERSION-linux-$z.zip" || { rm -rf "$tmp"; return 1; }
-    echo "$sum  $tmp/snell.zip" | sha256sum -c --quiet - || { echo "Snell: the download does not match its checksum" >&2; rm -rf "$tmp"; return 1; }
-    unzip -q -o "$tmp/snell.zip" snell-server -d "$tmp" || { rm -rf "$tmp"; return 1; }
-    install -m 755 "$tmp/snell-server" /usr/local/bin/snell-server
-    echo "$SNELL_VERSION" >/usr/local/lib/albatross-snell.version
-    rm -rf "$tmp"
-  fi
-  (umask 077; cat >"$OUT/snell.conf" <<SNELLCONF
-[snell-server]
-listen = ::0:$P_SNELL
-psk = $SNELL_PSK
-ipv6 = false
-SNELLCONF
-  )
 }
 
 # awg_setup writes the AmneziaWG interface: one peer (the app), the junk
@@ -943,33 +895,9 @@ EOF
   unit juicity "Juicity" "/usr/local/bin/juicity-server run -c $OUT/juicity.json"
   unit brook "Brook" "/usr/local/bin/brook wssserver --domainaddress $DOMAIN:$P_BROOK --cert $CERT --certkey $KEY --password $PASS"
   unit wstunnel "WStunnel" "/usr/local/bin/wstunnel server --restrict-http-upgrade-path-prefix $WST_PATH --tls-certificate $CERT --tls-private-key $KEY wss://[::]:$P_WST"
-  local snell=""
-  if [ -x /usr/local/bin/snell-server ] && [ -s "$OUT/snell.conf" ]; then
-    snell="albatross-snell"
-    # Closed source: no new privileges, no view of the home directories, and
-    # nothing writable but its own temporary files.
-    cat >/etc/systemd/system/albatross-snell.service <<SNELLUNIT
-[Unit]
-Description=Albatross server (Snell)
-After=network-online.target
-[Service]
-ExecStart=/usr/local/bin/snell-server -c $OUT/snell.conf
-Restart=always
-RestartSec=3
-LimitNOFILE=1048576
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-PrivateDevices=yes
-ReadOnlyPaths=$OUT
-[Install]
-WantedBy=multi-user.target
-SNELLUNIT
-  fi
   systemctl daemon-reload
-  systemctl enable --now albatross-naive albatross-juicity albatross-brook albatross-wstunnel $snell awg-quick@awg0 ocserv >/dev/null 2>&1
-  systemctl restart albatross-naive albatross-juicity albatross-brook albatross-wstunnel $snell awg-quick@awg0 ocserv
+  systemctl enable --now albatross-naive albatross-juicity albatross-brook albatross-wstunnel awg-quick@awg0 ocserv >/dev/null 2>&1
+  systemctl restart albatross-naive albatross-juicity albatross-brook albatross-wstunnel awg-quick@awg0 ocserv
 }
 
 # dns_links prints one DNS tunnel link per tunnel name.
