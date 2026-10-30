@@ -1223,13 +1223,28 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		}, map[string]any{"action": "route", "server": "local"}))
 	}
 	if o.secureOnly {
+		plainPorts := []int{21, 23, 25, 80, 110, 143}
+		if r, ok := findRegion(o.bypass); ok {
+			// Through the proxy port a site comes by name, so a region's
+			// plain-HTTP site that the name lists miss could not be told by
+			// its address and was refused below, for good: a refused
+			// connection is never learned (learn.go). Such connections, and
+			// only those, are looked up with the local resolver first, and
+			// the region's go direct. Through the tunnel they come by
+			// address already and the lookup does nothing.
+			rules = append(rules,
+				map[string]any{"protocol": []string{"http"}, "action": "resolve", "server": "local"},
+				map[string]any{"network": "tcp", "port": plainPorts, "action": "resolve", "server": "local"},
+				map[string]any{"rule_set": []string{r.geoIPTag()}, "outbound": "direct"},
+			)
+		}
 		// Last among the rules that send traffic elsewhere, so local sites
 		// and the local network (which never reach a server) are untouched.
 		// HTTP is recognised by its content on any port, the rest by the
 		// ports of plaintext protocols: FTP, telnet, SMTP, HTTP, POP3, IMAP.
 		rules = append(rules,
 			map[string]any{"protocol": []string{"http"}, "action": "reject"},
-			map[string]any{"network": "tcp", "port": []int{21, 23, 25, 80, 110, 143}, "action": "reject"},
+			map[string]any{"network": "tcp", "port": plainPorts, "action": "reject"},
 		)
 	}
 	// Sites that sign people out when their address changes keep one exit
