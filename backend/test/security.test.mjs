@@ -148,11 +148,17 @@ test("the administrator sign-in is held to a total across all addresses", async 
 test("the account service is never served over plain HTTP; the website is", async () => {
   const bucket = { list: async () => ({ objects: [] }), head: async () => null, get: async () => null };
   const viaEdge = { headers: { "CF-Ray": "8d2f0c3a1b2c3d4e-DXB" } };
-  for (const path of ["/download/", "/update.json", "/list/nothing"]) {
-    const env = { FILES: bucket, ASSETS: { fetch: async () => new Response("asset") } };
-    const res = await website.fetch(new Request(`http://albatrossvpn.online${path}`, viaEdge), env, { waitUntil() {} });
-    assert.notEqual(res.status, 301, path);
-    assert.notEqual(res.status, 308, path);
+  const siteEnv = { FILES: bucket, ASSETS: { fetch: async () => new Response("asset") } };
+  for (const path of ["/", "/download/", "/privacy"]) {
+    const res = await website.fetch(new Request(`http://albatrossvpn.online${path}`, viaEdge), siteEnv, { waitUntil() {} });
+    assert.equal(res.status, 200, path);
+    assert.equal(res.headers.get("Strict-Transport-Security") ?? "max-age=0", "max-age=0", path);
+  }
+  // What could be swapped on the way to harm someone stays HTTPS only.
+  for (const path of ["/download/Albatross-1.1.0-android.apk", "/update.json", "/list/main/fresh.txt"]) {
+    const res = await website.fetch(new Request(`http://albatrossvpn.online${path}`, viaEdge), siteEnv, { waitUntil() {} });
+    assert.equal(res.status, 301, path);
+    assert.equal(res.headers.get("Location"), `https://albatrossvpn.online${path}`);
     assert.equal(res.headers.get("Strict-Transport-Security"), "max-age=0", path);
   }
   for (const [worker, host, path, env] of [

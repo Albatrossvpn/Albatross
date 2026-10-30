@@ -6,10 +6,11 @@
 // never reach GitHub themselves. /list/<path> serves the app's own files
 // from the same storage, one more address for the apps.
 import { FILE_NAME, serveFile, serveList } from "../../backend/src/files.js";
-import { armor, securityTxt } from "../../backend/src/headers.js";
+import { armor, httpsRedirect, securityTxt } from "../../backend/src/headers.js";
 
 const OPEN = { "Strict-Transport-Security": "max-age=0" };
 const serve = (response) => armor(response, OPEN);
+const SENSITIVE = /^\/(?:update\.json$|list\/|download\/[^/]+$)/;
 
 const MANIFEST = [
   "https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json",
@@ -22,8 +23,14 @@ export default {
     // What the Worker answers itself carries the security headers; the static
     // pages carry theirs from public/_headers. The website answers over plain
     // HTTP as well as HTTPS (where HTTPS is blocked, HTTP may still get
-    // through), so it asks no browser to insist on HTTPS. The account service,
-    // where passwords are typed, stays HTTPS only.
+    // through), so it asks no browser to insist on HTTPS. What could be
+    // swapped on the way to harm someone stays HTTPS only: the release
+    // files, the release manifest and the server lists (and the account
+    // service, where passwords are typed).
+    if (SENSITIVE.test(url.pathname)) {
+      const insecure = httpsRedirect(request);
+      if (insecure) return serve(insecure);
+    }
     if (url.pathname === "/.well-known/security.txt") return serve(securityTxt(request, "support@albatrossvpn.online"));
     if (url.pathname === "/update.json") return serve((await serveList(request, env.FILES, "main/update.json")) || (await manifest()));
     if (url.pathname.startsWith("/list/")) {
