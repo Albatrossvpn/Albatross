@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the Android app: the Go engine as an Android library (gomobile),
-# the cores as native libraries, and one APK for every phone in dist/
-# (64 and 32-bit ARM, Android 6 and up; ABIS picks others).
+# the cores as native libraries, and one APK in dist/ for 64-bit ARM phones,
+# Android 6 and up. BUILD_ABIS adds x86_64 for the emulator tests in CI (its
+# APK is built apart); 32-bit phones are no longer built for.
 #
 # Needs Go, Java 17+, and an Android SDK with the NDK
 # (ANDROID_HOME, and ANDROID_NDK_HOME or an NDK under $ANDROID_HOME/ndk).
@@ -321,12 +322,20 @@ cores() { # abi sing-box-arch xray-asset warp-plus-asset
   sidecars "$abi"
   chmod 755 "$out"/*.so
 }
+# The phones built for: 64-bit ARM, and the emulator's x86_64 only where
+# the tests ask for it.
+BUILD_ABIS="${BUILD_ABIS:-arm64-v8a}"
+want() { [[ " $BUILD_ABIS " == *" $1 "* ]]; }
 cores arm64-v8a arm64 Xray-android-arm64-v8a.zip warp-plus_android-arm64.zip
 tidy "the cores for arm64-v8a"
-cores armeabi-v7a arm "" ""
-tidy "the cores for armeabi-v7a"
-cores x86_64 amd64 Xray-android-amd64.zip ""
-tidy "the cores for x86_64"
+if want armeabi-v7a; then
+  cores armeabi-v7a arm "" ""
+  tidy "the cores for armeabi-v7a"
+fi
+if want x86_64; then
+  cores x86_64 amd64 Xray-android-amd64.zip ""
+  tidy "the cores for x86_64"
+fi
 
 # Tor, the last resort. Its Android bundle holds executables (libTor.so is
 # one, despite the name) that need only the system's libraries. They ship
@@ -355,8 +364,8 @@ tor() { # abi bundle-platform
   done
 }
 tor arm64-v8a android-aarch64
-tor armeabi-v7a android-armv7
-tor x86_64 android-x86_64
+if want armeabi-v7a; then tor armeabi-v7a android-armv7; fi
+if want x86_64; then tor x86_64 android-x86_64; fi
 mkdir -p "$app/src/main/assets/licenses"
 printf 'Tor and its pluggable transports are from the Tor Project (https://www.torproject.org), under the 3-clause BSD license.\n' > "$app/src/main/assets/licenses/tor-LICENSE.txt"
 
@@ -377,7 +386,10 @@ printf "The engine's root certificates are Mozilla's (https://wiki.mozilla.org/C
 go clean -modcache > /dev/null 2>&1 || true
 disk "dropping the helpers' modules"
 go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
-PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target=android/arm64,android/arm,android/amd64 -androidapi "$api" \
+targets="android/arm64"
+if want armeabi-v7a; then targets="$targets,android/arm"; fi
+if want x86_64; then targets="$targets,android/amd64"; fi
+PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target="$targets" -androidapi "$api" \
   -javapkg app.albatross -trimpath \
   -ldflags "-s -w -extldflags=-Wl,-z,max-page-size=16384 -X github.com/Albatrossvpn/vp/mobile.Version=$VERSION -X github.com/Albatrossvpn/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/Albatrossvpn/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.WorkerMirror=${MIRROR_URL:-${ACCOUNT_URL:-}} -X github.com/Albatrossvpn/vp/internal/engine.UpdateKey=${UPDATE_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.DomesticMirror=${DOMESTIC_MIRROR:-}" \
   -o "$app/libs/albatross.aar" ./mobile
@@ -389,7 +401,8 @@ mkdir -p "$tmp/aar" && (cd "$tmp/aar" && unzip -oq "$app/libs/albatross.aar" 'jn
 check_alignment "$jni"/*/*.so "$tmp"/aar/jni/*/*.so
 
 cd "$root/android"
-VERSION="$VERSION" ./gradlew --no-daemon -q assembleRelease
+# The APK people install: 64-bit ARM (and 32-bit only if asked for).
+ABIS="arm64-v8a$(want armeabi-v7a && echo ,armeabi-v7a || true)" VERSION="$VERSION" ./gradlew --no-daemon -q assembleRelease
 apk="$dist/Albatross-$VERSION-android.apk"
 cp app/build/outputs/apk/release/app-release.apk "$apk"
 disk "the APK"

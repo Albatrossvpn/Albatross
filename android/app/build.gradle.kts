@@ -24,7 +24,7 @@ android {
         // One APK for every phone, 64 and 32-bit ARM. The emulator test
         // builds x86_64 alone (ABIS=x86_64).
         ndk {
-            abiFilters += (System.getenv("ABIS") ?: "arm64-v8a,armeabi-v7a").split(",")
+            abiFilters += (System.getenv("ABIS") ?: "arm64-v8a").split(",")
         }
     }
 

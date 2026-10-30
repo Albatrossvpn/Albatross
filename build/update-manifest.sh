@@ -44,11 +44,11 @@ rel = json.load(open("rel.json"))
 site = os.environ["SITE_URL"].rstrip("/")
 stored = set(open("stored.txt").read().split())
 mirrors = [m.strip().rstrip("/") for m in os.environ.get("ACCOUNT_URL", "").split(",") if m.strip()]
-# The one APK serves every ABI; 0.3.3 and earlier read only the
-# arm64-v8a entry. The website comes first, then the account
+# The APK is for 64-bit ARM phones (32-bit ones are no longer built
+# for); 0.3.3 and earlier read only the arm64-v8a entry. The website comes first, then the account
 # service, then GitHub as the last resort for the app alone; the
 # SHA-256 guards the file either way.
-keys = {"-android.apk": ["android-arm64-v8a", "android-armeabi-v7a"], "Setup-": ["windows"]}
+keys = {"-android.apk": ["android-arm64-v8a"], "Setup-": ["windows"]}
 files = {}
 for a in rel["assets"]:
     for part, names in keys.items():
@@ -73,7 +73,7 @@ m["download_url"] = page
 if os.environ["FORCE"] == "true":
     # A forced update with a platform's file missing would cut
     # those users off with nothing to update to.
-    bad = [k for k in ("android-arm64-v8a", "android-armeabi-v7a", "windows")
+    bad = [k for k in ("android-arm64-v8a", "windows")
            if not re.fullmatch(r"[0-9a-fA-F]{64}", files.get(k, {}).get("sha256", ""))
            or not files[k]["urls"][0].startswith("https://")]
     if bad:

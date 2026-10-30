@@ -358,6 +358,13 @@ jobs:
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/albatross.jks"
             export ALBATROSS_KEYSTORE="$RUNNER_TEMP/albatross.jks"
           fi
+          # 64-bit phones only; the emulator's x86_64 for the tests of a
+          # commit, never in a release.
+          if [ -n "$RELEASE" ] || [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            export BUILD_ABIS="arm64-v8a"
+          else
+            export BUILD_ABIS="arm64-v8a x86_64"
+          fi
           bash build/android/build.sh
           apk="$(ls dist/*-android.apk)"
           # A release's sign-in is not tried on the emulators: look for the
@@ -586,7 +593,7 @@ jobs:
           enableCrossOsArchive: true
           fail-on-cache-miss: true
       # One download per platform: the Windows installer and one Android
-      # APK for every phone.
+      # APK, for 64-bit phones.
       - name: Name the APK
         run: mv dist/*-android.apk "Albatross-${{ needs.build.outputs.version }}-android.apk"
       - uses: softprops/action-gh-release@v3
@@ -602,7 +609,7 @@ jobs:
           # installs the first build signed with the release key only after
           # the old app is removed.
           body: |
-            Android: one APK for every phone, Android 6 and newer, 64 and 32-bit. If you have 0.3.1 or older, uninstall it before installing this version (one time only). Later updates install over it.
+            Android: one APK for 64-bit phones, Android 6 and newer. If you have 0.3.1 or older, uninstall it before installing this version (one time only). Later updates install over it.
           fail_on_unmatched_files: true
           files: |
             Albatross-*-android.apk

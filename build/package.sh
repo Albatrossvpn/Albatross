@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds dist/Albatross (the app plus every core it runs) and a portable zip.
+# Builds dist/Albatross (the app plus every core it runs). There is no portable zip: the installer is the one Windows download.
 # The Windows installer is made from dist/Albatross by build/windows/installer.iss.
 set -euo pipefail
 
@@ -146,8 +146,4 @@ Bundled components (see the licenses folder):
 TXT
 sed -i 's/$/\r/' "$out/README.txt"
 
-zip_name="Albatross-$VERSION-windows-amd64-portable.zip"
-rm -f "$dist/$zip_name"
-(cd "$dist" && zip -q -r -9 "$zip_name" Albatross)
-echo "built $dist/$zip_name"
 ls -la "$out" "$out/core"
