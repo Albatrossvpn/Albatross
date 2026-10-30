@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -68,5 +70,32 @@ func TestForgetDoesNotDeadlock(t *testing.T) {
 	}
 	if logs := e.Logs(); len(logs) == 0 || !strings.Contains(logs[len(logs)-1].Text, "gone") {
 		t.Fatalf("logs = %+v", logs)
+	}
+}
+
+// The first start of a version that judges servers anew forgets the
+// servers and test results kept from before, once, and keeps the copies of
+// the lists while asking for them again.
+func TestFreshStartForgetsOldResults(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "cache"), 0o755)
+	for _, f := range []string{"servers.json", "states.bin", "settings.json", "cache/sub-x.gz", "cache/sub-x.json"} {
+		os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644)
+	}
+	freshStart(dir)
+	for _, f := range []string{"servers.json", "states.bin", "cache/sub-x.json"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			t.Fatalf("%s kept", f)
+		}
+	}
+	for _, f := range []string{"settings.json", "cache/sub-x.gz"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Fatalf("%s gone", f)
+		}
+	}
+	os.WriteFile(filepath.Join(dir, "servers.json"), []byte("x"), 0o644)
+	freshStart(dir)
+	if _, err := os.Stat(filepath.Join(dir, "servers.json")); err != nil {
+		t.Fatal("forgot again on the next start")
 	}
 }
