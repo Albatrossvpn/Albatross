@@ -209,10 +209,14 @@ func (f *Fetcher) fetchOne(ctx context.Context, s Source) Result {
 			}
 		}
 		// The domestic mirrors, in their order: first when foreign
-		// addresses are cut, last otherwise.
-		if mode == ModeDomestic {
+		// addresses are cut, last otherwise; for the app's own files right
+		// after its own storage (ownFirst).
+		switch {
+		case mode == ModeDomestic:
 			attempts = append(dom, attempts...)
-		} else {
+		case isOwn(url):
+			attempts = ownFirst(attempts, dom)
+		default:
 			attempts = append(attempts, dom...)
 		}
 		// The proxy attempt belongs first whatever the mode.
@@ -485,6 +489,36 @@ func IsWorker(u string) bool {
 
 // ownRepo is the app's own repository, where the collector publishes.
 const ownRepo = "Albatrossvpn/Albatross"
+
+// isOwn says whether u is one of the app's own files on GitHub.
+func isOwn(u string) bool {
+	m := rawGitHubRe.FindStringSubmatch(u)
+	return m != nil && strings.EqualFold(m[1]+"/"+m[2], ownRepo)
+}
+
+// ownGitHubWait is the most each GitHub or CDN try of an own file may take.
+const ownGitHubWait = 10 * time.Second
+
+// ownFirst orders the tries of one of the app's own files: its own storage
+// (the Workers), then the domestic mirrors, then GitHub and its CDNs with a
+// short wait each. While the repository is private GitHub and the CDNs
+// answer 404 or, where filtered, nothing at all; a device whose Worker was
+// out of reach used to spend a minute on each of them before it got to the
+// mirror inside the country, which holds the same sealed files.
+func ownFirst(attempts, dom []attempt) []attempt {
+	var own, rest []attempt
+	for _, a := range attempts {
+		if IsWorker(a.url) {
+			own = append(own, a)
+			continue
+		}
+		if a.timeout == 0 || a.timeout > ownGitHubWait {
+			a.timeout = ownGitHubWait
+		}
+		rest = append(rest, a)
+	}
+	return append(append(own, dom...), rest...)
+}
 
 // githubAPI is the prefix of api.github.com contents URLs, which return
 // the raw file when asked for it.

@@ -259,3 +259,29 @@ func TestCollectedSourcesAreUnique(t *testing.T) {
 		}
 	}
 }
+
+// On a normal network the app's own files are asked of its own storage
+// first and then of the mirrors inside the country, before GitHub and its
+// CDNs, which answer nothing while the repository is private; those get a
+// short wait each. Other files keep their usual order.
+func TestOwnFilesDomesticBeforeGitHub(t *testing.T) {
+	defer func(a, b string) { WorkerMirror, DomesticMirror = a, b }(WorkerMirror, DomesticMirror)
+	WorkerMirror, DomesticMirror = "https://accounts.example", "http://5.6.7.8:8081/tok"
+	var mu sync.Mutex
+	var calls []string
+	client := &http.Client{Transport: roundTrip(func(r *http.Request) (*http.Response, error) {
+		mu.Lock()
+		calls = append(calls, r.URL.String())
+		mu.Unlock()
+		return nil, errors.New("offline")
+	})}
+	f := &Fetcher{Direct: client, Private: client, CacheDir: t.TempDir()}
+	f.Fetch(context.Background(), Source{ID: "own", URL: CentralBase + "hot.txt"})
+	if len(calls) < 3 || !IsWorker(calls[0]) || !IsDomestic(calls[1]) {
+		t.Fatalf("own file: %v", calls)
+	}
+	a := ownFirst([]attempt{{"direct", CentralBase + "hot.txt", client, 0}, {"mirror1", "https://accounts.example/list/servers/hot.txt", client, 0}}, nil)
+	if !IsWorker(a[0].url) || a[1].timeout != ownGitHubWait {
+		t.Fatalf("ownFirst: %+v", a)
+	}
+}
