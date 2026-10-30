@@ -22,6 +22,7 @@ while everything that is the project's own stays here, private:
 ## Files
 
 - **`collect.sh`, `discover.sh`:** one collection or discovery run, started by alba-data's `collect.yml` and `discover.yml`.
+- **`deploy.sh`:** deploys the account service and the website, started by alba-data's `deploy.yml` (by hand). The token needs Workers, D1 and Routes; the Workers' secrets are left as they are.
 - **`gen-release.py`:** writes alba-data's `release.yml` from `.github/workflows/build.yml`. Run it after every change to build.yml:
 
   ```sh
