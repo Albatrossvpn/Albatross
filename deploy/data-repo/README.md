@@ -10,6 +10,8 @@ while everything that is the project's own stays here, private:
 |---|---|
 | `.github/workflows/`: thin workflows that check this repository out with a token and run the scripts here | the code, the scripts, any comment describing how things work |
 | `servers` branch: the sealed lists only (`*.sealed`) | statistics (meta.json, source-stats.json), the sources and channels, Tor bridges, reach.json, any plain file |
+| releases: a copy of each release's APK and Windows installer (already public on the website) | |
+| `gh-pages` branch: the public website's mirror, minified, with the signed `update.json` | |
 
 - **Lists:** sealed with AES-256-GCM (`sources.SealKeyed`). The key changes every collection, and only signed-in users get it from the account service. The own servers are sealed with the build's key too.
 - **Builds between jobs:** go through the cache sealed with gpg (AES-256, SHA-512 key derivation, a key derived from `TOKEN_SECRET`), and are opened only by the job that needs them.
@@ -22,6 +24,7 @@ while everything that is the project's own stays here, private:
 ## Files
 
 - **`collect.sh`, `discover.sh`:** one collection or discovery run, started by alba-data's `collect.yml` and `discover.yml`.
+- **`mirror.sh`:** started by alba-data's `mirror.yml` every six hours. It copies the newest release's files into alba-data's releases, the public download fallback while this repository is private (`update.json` and the account service's `/dl/` name them). It also publishes the website's mirror on alba-data's GitHub Pages: Settings, then Pages, then "Deploy from a branch", `gh-pages`, `/ (root)`.
 - **`deploy.sh`:** deploys the account service and the website, started by alba-data's `deploy.yml` (by hand). The token needs Workers, D1 and Routes; the Workers' secrets are left as they are.
 - **`gen-release.py`:** writes alba-data's `release.yml` from `.github/workflows/build.yml`. Run it after every change to build.yml:
 

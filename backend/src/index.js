@@ -1190,7 +1190,8 @@ async function download(request, url, env) {
   const headers = {};
   const range = request.headers.get("Range");
   if (range) headers.Range = range;
-  const up = await fetch(`https://github.com/Albatrossvpn/Albatross/releases/download/${m[1]}/${m[2]}`, {
+  // The public copy of the release (alba-data): this repository is private.
+  const up = await fetch(`https://github.com/Albatrossvpn/alba-data/releases/download/${m[1]}/${m[2]}`, {
     headers,
     redirect: "follow",
     cf: { cacheTtl: 86400, cacheEverything: true },

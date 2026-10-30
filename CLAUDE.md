@@ -4,6 +4,7 @@
 
 - **This repository is private and stays the only home of everything proprietary:** the code, the scripts, the workflows' logic, statistics, sources, keys, and anything readable about how the project works.
 - **The heavy work runs in the public repository Albatrossvpn/alba-data:** collection, discovery, builds and releases, on free minutes. So do the files GitHub must serve to the apps. See `deploy/data-repo/README.md`.
+- **The public copies:** alba-data's `mirror.yml` (`deploy/data-repo/mirror.sh`) copies each release's APK and installer into alba-data's releases, and publishes the public website's mirror (minified, no comments) on its GitHub Pages. Nothing else of this repository is public.
 - **What may go into alba-data:**
   - thin workflows that check this repository out with `SOURCE_TOKEN`;
   - files sealed with strong encryption: AES-256-GCM lists, and gpg AES-256 for anything handed between jobs.
