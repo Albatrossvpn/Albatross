@@ -6,6 +6,7 @@
 // never reach GitHub themselves. /list/<path> serves the app's own files
 // from the same storage, one more address for the apps.
 import { FILE_NAME, serveFile, serveList } from "../../backend/src/files.js";
+import { armor, securityTxt } from "../../backend/src/headers.js";
 
 const MANIFEST = [
   "https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json",
@@ -15,17 +16,28 @@ const MANIFEST = [
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === "/update.json") return (await serveList(request, env.FILES, "main/update.json")) || manifest();
+    // What the Worker answers itself carries the security headers; the static
+    // pages carry theirs from public/_headers.
+    if (url.pathname === "/.well-known/security.txt") return armor(securityTxt(request, "support@albatrossvpn.online"));
+    if (url.pathname === "/update.json") return armor((await serveList(request, env.FILES, "main/update.json")) || (await manifest()));
     if (url.pathname.startsWith("/list/")) {
       const r = await serveList(request, env.FILES, url.pathname.slice("/list/".length));
-      return r || new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      return armor(r || new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }));
     }
     const m = /^\/download\/([^/]*)$/.exec(url.pathname);
     if (!m) return env.ASSETS.fetch(request);
-    if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
-    if (!m[1]) return index(env.FILES);
-    const r = await serveFile(request, env.FILES, decodeURIComponent(m[1]));
-    return r || new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return armor(new Response("Method not allowed", { status: 405, headers: { Allow: "GET, HEAD" } }));
+    }
+    if (!m[1]) return armor(await index(env.FILES));
+    let name;
+    try {
+      name = decodeURIComponent(m[1]);
+    } catch {
+      return armor(new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }));
+    }
+    const r = await serveFile(request, env.FILES, name);
+    return armor(r || new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } }));
   },
 };
 
@@ -58,7 +70,7 @@ async function index(bucket) {
   const rows = files.map((o) => `<li><a href="/download/${encodeURIComponent(o.key)}">${esc(o.key)}</a> <small>${mb(o.size)}</small></li>`).join("\n");
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Albatross downloads</title>
 <link rel="stylesheet" href="/site.css"><link rel="icon" href="/icon.svg"></head>
-<body><main class="wrap" style="max-width:720px;margin:48px auto;padding:0 16px"><h1>Downloads</h1>
+<body><main class="wrap downloads"><h1>Downloads</h1>
 <p class="muted">Every release file, served from Albatross's own storage. The SHA-256 of the current version is on the <a href="/#download">download page</a>; the app checks it before installing an update.</p>
 <ul class="plain">${rows || "<li>No files yet.</li>"}</ul>
 <p><a href="/">&larr; Back</a></p></main></body></html>`;

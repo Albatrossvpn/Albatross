@@ -5,6 +5,7 @@ import {
   versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, tierForQuota, tierOf, verify, verifyPassword,
 } from "./lib.js";
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
+import { armor, securityTxt } from "./headers.js";
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
 import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
 import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
@@ -47,6 +48,9 @@ const json = (data, status = 200) =>
 
 const now = () => Math.floor(Date.now() / 1000);
 
+/** The address to write to: the CONTACT_EMAIL variable when it holds one, else the project's own. */
+const contactOf = (env) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(env.CONTACT_EMAIL || "") ? env.CONTACT_EMAIL : "support@albatrossvpn.online");
+
 function randomUsernameSuffix() {
   const range = 1_000_000;
   const limit = Math.floor(0x1_0000_0000 / range) * range;
@@ -66,19 +70,22 @@ export default {
   },
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/list/")) return mirror(request, url, env);
-    if (url.pathname.startsWith("/dl/")) return download(request, url, env);
-    if (url.pathname.startsWith("/sub/")) return subscription(request, url, env);
+    // What the service answers itself carries the security headers; the
+    // static pages carry theirs from public/_headers.
+    if (url.pathname === "/.well-known/security.txt") return armor(securityTxt(request, contactOf(env)));
+    if (url.pathname.startsWith("/list/")) return armor(await mirror(request, url, env));
+    if (url.pathname.startsWith("/dl/")) return armor(await download(request, url, env));
+    if (url.pathname.startsWith("/sub/")) return armor(await subscription(request, url, env));
     if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
     // The websites' support chat is read from the website's own origin.
     const cors = url.pathname.startsWith("/api/v1/support/") ? (r) => supportCors(request, r) : (r) => r;
     try {
       if (!env.TOKEN_SECRET || env.TOKEN_SECRET.length < 24) throw new HttpError(503, "The service is not configured yet.");
-      return cors(await route(request, env, url, ctx));
+      return armor(cors(await route(request, env, url, ctx)));
     } catch (e) {
-      if (e instanceof HttpError) return cors(json({ error: e.message }, e.status));
+      if (e instanceof HttpError) return armor(cors(json({ error: e.message }, e.status)));
       console.error(e && e.stack ? e.stack : e);
-      return cors(json({ error: "Something went wrong. Try again." }, 500));
+      return armor(cors(json({ error: "Something went wrong. Try again." }, 500)));
     }
   },
 };
