@@ -209,8 +209,8 @@ type Running struct {
 	Failed   []*node.Node // warp-plus methods that could not connect
 	// Skipped were set aside to find a config Xray refused without naming
 	// it; nothing was learned about them.
-	Skipped []*node.Node
-	release  func()       // lets go of the shared tor
+	Skipped  []*node.Node
+	release  func() // lets go of the shared tor
 	released sync.Once
 }
 
