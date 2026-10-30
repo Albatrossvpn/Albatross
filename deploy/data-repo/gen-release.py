@@ -88,9 +88,15 @@ def checkout(indent, extra):
     # prints after this, each one on its own (a secret is masked only whole).
     lines += [f"{pad}- name: Mask", f"{pad}  shell: bash", f"{pad}  env:",
               f"{pad}    DOMESTIC_MIRROR: ${{{{ secrets.DOMESTIC_MIRROR }}}}",
+              f"{pad}    T: ${{{{ secrets.CLOUDFLARE_API_TOKEN }}}}",
+              f"{pad}    A: ${{{{ secrets.CLOUDFLARE_ACCOUNT_ID }}}}",
               f"{pad}  run: |",
               f"{pad}    IFS=', ' read -ra m <<<\"${{DOMESTIC_MIRROR:-}}\"",
-              f"{pad}    for x in \"${{m[@]}}\"; do [ -n \"$x\" ] && echo \"::add-mask::$x\" && echo \"::add-mask::${{x#*://}}\"; done; true"]
+              f"{pad}    for x in \"${{m[@]}}\"; do [ -n \"$x\" ] && echo \"::add-mask::$x\" && echo \"::add-mask::${{x#*://}}\"; done",
+              # The Cloudflare account, from the token when its secret is not set.
+              f"{pad}    id=\"$A\"",
+              f"{pad}    [ -n \"$id\" ] || [ -z \"$T\" ] || id=\"$(curl -fsS -H \"Authorization: Bearer $T\" https://api.cloudflare.com/client/v4/accounts 2>/dev/null | jq -r '.result[0].id // empty' 2>/dev/null)\"",
+              f"{pad}    if [ -n \"$id\" ]; then echo \"::add-mask::$id\"; echo \"CF_ACCOUNT=$id\" >> \"$GITHUB_ENV\"; fi; true"]
     return lines
 
 
@@ -163,6 +169,8 @@ text = text.replace("      version: ${{ steps.version.outputs.version }}\n",
 text = text.replace('          echo "version=$v" >> "$GITHUB_OUTPUT"\n',
                     '          echo "version=$v" >> "$GITHUB_OUTPUT"\n          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"\n', 1)
 text = text.replace("github.event_name != 'workflow_dispatch' || inputs.force_update", "inputs.force_update")
+# The account comes from the token when its secret is not set (the Mask step).
+text = text.replace("${{ secrets.CLOUDFLARE_ACCOUNT_ID }}", "${{ secrets.CLOUDFLARE_ACCOUNT_ID || env.CF_ACCOUNT }}")
 # Kept as secrets there, so they are masked in the public log.
 text = text.replace("${{ vars.DOMESTIC_MIRROR }}", "${{ secrets.DOMESTIC_MIRROR }}").replace("${{ vars.SITE_DOMAIN }}", "${{ secrets.SITE_DOMAIN }}")
 for needle in ["needs.build.outputs.sha", "RELEASE_REPO", "repository: " + PRIVATE, "sealed/"]:
