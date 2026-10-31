@@ -1,6 +1,11 @@
 import { $, ago, api, esc, fmtBytes, fmtDate, fmtTime, frame, meter, planBadge, toast } from "/site.js";
 
+// The sign-in stays in this browser (the privacy page says so), so a page
+// added to the Home Screen opens signed in; signing out or a refused token
+// forgets it.
+const KEEP = "albatross.session";
 let token = "";
+try { token = localStorage.getItem(KEEP) || ""; } catch {}
 let info;
 let acct; // the account as last shown
 
@@ -85,6 +90,7 @@ function renderTurnstile() {
 
 function signedOut() {
   token = "";
+  try { localStorage.removeItem(KEEP); } catch {}
   $("#auth").classList.remove("hidden");
   $("#dash").classList.add("hidden");
   $("#logout").classList.add("hidden");
@@ -245,7 +251,25 @@ async function load() {
 
 function start(r) {
   token = r.token;
+  try { localStorage.setItem(KEEP, token); } catch {}
   render(r.account);
+}
+
+// Browsers offer to save a password when a sign-in form is really submitted
+// and the page moves on. This form is sent by script, so after it succeeds
+// the browser is told: Chrome and Edge through the Credential Management API,
+// Safari and the rest by a navigation that follows the submit (the session is
+// kept, so the page comes back signed in).
+async function remember(form) {
+  const user = form.querySelector('[autocomplete="username"]').value.trim();
+  const pass = form.querySelector('input[type="password"]').value;
+  try {
+    if (window.PasswordCredential && navigator.credentials) {
+      await navigator.credentials.store(new PasswordCredential({ id: user, password: pass, name: user }));
+      return false;
+    }
+  } catch {}
+  return true;
 }
 
 async function submit(form, btn, err, path, body) {
@@ -255,6 +279,10 @@ async function submit(form, btn, err, path, body) {
   btn.setAttribute("aria-busy", "true");
   try {
     start(await api("POST", path, { body }));
+    if (await remember(form)) {
+      location.replace("/account");
+      return;
+    }
     form.reset();
     if (window.turnstile && turnstileId !== undefined) window.turnstile.reset(turnstileId);
   } catch (e) {
@@ -325,7 +353,8 @@ if (!dl.children.length) dl.innerHTML = `<span class="muted note">Downloads will
 
 // Apple devices: the page can live on the Home Screen like an app.
 const apple = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && "ontouchend" in document;
-$("#a2hs").classList.toggle("hidden", !apple || window.navigator.standalone === true || matchMedia("(display-mode: standalone)").matches);
+const installed = window.navigator.standalone === true || matchMedia("(display-mode: standalone)").matches;
+for (const id of ["#a2hs", "#a2hs-auth"]) $(id).classList.toggle("hidden", !apple || installed);
 renderApps();
 $("#apps").addEventListener("click", (e) => {
   const id = e.target.dataset.app;
