@@ -410,7 +410,11 @@ function drawGlobe(aim, busy) {
   ctx.stroke();
   var near = [], far = [];
   var size = Math.max(1.2, R / 110);
-  for (var i = 0; i < DOTS.length; i++) {
+  // A phone draws every other dot, each a little larger: the shape of the
+  // land stays and the work halves.
+  var stride = document.body.classList.contains("mobile") ? 2 : 1;
+  if (stride > 1) size *= 1.3;
+  for (var i = 0; i < DOTS.length; i += stride) {
     var d = DOTS[i], dl = d.lr - l0, cd = Math.cos(dl);
     var z = sp * d.sl + cp * d.cl * cd;
     if (z <= 0) continue;
@@ -467,9 +471,12 @@ function drawMini() {
   var ctx = f.ctx, w = f.w, h = f.h;
   var from = place(homeCode()), to = place(state.conn.country) || from;
   if (!from) from = to;
-  var span = Math.max(36, Math.abs(to.lon - from.lon) * 1.7, Math.abs(to.lat - from.lat) * 2.6);
+  // Never closer than a continent: the land is a 2° grid of dots, and
+  // zoomed past that it falls apart into scattered specks nobody can
+  // place. At this span the coasts read, and the pin is named below.
+  var span = Math.max(100, Math.abs(to.lon - from.lon) * 1.7, Math.abs(to.lat - from.lat) * 2.6);
   var v = { lon: (from.lon + to.lon) / 2, lat: (from.lat + to.lat) / 2 + span * 0.05, scale: w / span };
-  flatDots(ctx, w, h, v, "rgba(130, 156, 222, 0.6)", 1.8);
+  flatDots(ctx, w, h, v, "rgba(130, 156, 222, 0.72)", 2.2);
   var a = toXY(v, w, h, from), b = toXY(v, w, h, to);
   var c = { x: (a.x + b.x) / 2, y: Math.min(a.y, b.y) - Math.max(30, Math.abs(a.x - b.x) * 0.35) };
   var t = Math.min(1, (Date.now() - connectedAt) / 1600);
@@ -516,6 +523,16 @@ function drawMini() {
   ctx.strokeStyle = "#0f1b3d";
   ctx.lineWidth = 2;
   ctx.stroke();
+  // Name the place right at the pin, so there is no doubt where this is.
+  var name = state.conn.country_name || state.conn.country || "";
+  if (name) {
+    ctx.font = "700 12px system-ui, sans-serif";
+    var tw = ctx.measureText(name).width, lx = Math.min(w - tw - 8, Math.max(6, b.x + 11)), ly = b.y - 11;
+    ctx.fillStyle = "rgba(9, 18, 42, 0.8)";
+    ctx.fillRect(lx - 5, ly - 12, tw + 10, 17);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(name, lx, ly);
+  }
 }
 
 // One frame loop, only while it shows: smooth while something moves fast,
@@ -524,7 +541,11 @@ var lastFrame = 0;
 var raf = window.requestAnimationFrame || function (fn) { return setTimeout(function () { fn(Date.now()); }, 33); };
 function frame(now) {
   raf(frame);
-  var every = document.body.classList.contains("busy") ? 30 : document.body.classList.contains("on") ? 45 : 100;
+  // A phone gets fewer frames: it repaints every animated layer each one,
+  // and the globe is thousands of dots. Motion is per second, so nothing
+  // moves slower, it only redraws less often.
+  var mobile = document.body.classList.contains("mobile");
+  var every = document.body.classList.contains("busy") ? (mobile ? 50 : 30) : document.body.classList.contains("on") ? (mobile ? 80 : 45) : (mobile ? 250 : 100);
   if (now - lastFrame < every) return;
   var dt = Math.min(0.25, (now - lastFrame) / 1000);
   lastFrame = now;

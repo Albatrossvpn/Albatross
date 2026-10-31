@@ -638,3 +638,20 @@ textarea:focus { border-color: #2f5fe0; box-shadow: 0 0 0 3px rgba(47, 95, 224, 
 .login-new li + li { margin-top: 4px; }
 .login-new .btn { margin-top: 0; }
 .login { overflow-y: auto; }
+
+/* ---------- Motion on phones ----------
+   A phone's WebView repaints every animated layer each frame: several
+   decorative loops at once, a blurred backdrop and an animated height make
+   the screen stutter. Each animated element gets a layer of its own, the
+   purely decorative loops rest on phones (the busy spinner and the flying
+   mascot stay, slower), and anyone who asked their system for less motion
+   gets none. */
+.aurora, .power .halo, .power .ring, .mascot, .plan-badge::after, .sheen { will-change: transform, opacity; -webkit-backface-visibility: hidden; backface-visibility: hidden; }
+body.mobile .aurora, body.mobile .power .halo, body.mobile .plan-badge::after, body.mobile .sheen, body.mobile .mascot.sleep, body.mobile .mascot.sleep .zz { -webkit-animation: none; animation: none; }
+body.mobile .mascot.fly .wl, body.mobile .mascot.fly .wr { -webkit-animation-duration: 1.2s; animation-duration: 1.2s; }
+body.mobile .mascot.glide .wl, body.mobile .mascot.glide .wr { -webkit-animation-duration: 2.4s; animation-duration: 2.4s; }
+body.mobile .stage { transition: none; }
+body.mobile .sheet-backdrop, body.mobile .modal-backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(15, 27, 61, 0.55); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { -webkit-animation-duration: .01ms !important; animation-duration: .01ms !important; -webkit-animation-iteration-count: 1 !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
