@@ -70,22 +70,41 @@ async function manifest() {
 
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-/** The stored files, newest version first, as a plain page. */
+/** The current version's files, as a plain page. Only the current one: older
+ * versions are not offered, so nobody installs one by mistake. The current
+ * version is the one the release manifest sends installed copies to, or,
+ * when the manifest cannot be read, the newest stored. */
 async function index(bucket) {
   const list = await bucket.list({ limit: 200 });
-  const ver = (n) => (n.match(/(\d+)\.(\d+)\.(\d+)/) || [0, 0, 0, 0]).slice(1).map(Number);
-  const files = list.objects.filter((o) => FILE_NAME.test(o.key)).sort((a, b) => {
-    const [x, y] = [ver(a.key), ver(b.key)];
+  const ver = (n) => (n.match(/(\d+\.\d+\.\d+)/) || [, ""])[1];
+  const stored = list.objects.filter((o) => FILE_NAME.test(o.key));
+  const cmp = (a, b) => {
+    const [x, y] = [a.split(".").map(Number), b.split(".").map(Number)];
     for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return y[i] - x[i];
-    return a.key.localeCompare(b.key);
-  });
+    return 0;
+  };
+  let current = await currentVersion(bucket);
+  if (!current || !stored.some((o) => ver(o.key) === current)) current = stored.map((o) => ver(o.key)).sort(cmp)[0] || "";
+  const files = stored.filter((o) => ver(o.key) === current).sort((a, b) => a.key.localeCompare(b.key));
   const mb = (n) => (n / 1048576).toFixed(1) + " MB";
   const rows = files.map((o) => `<li><a href="/download/${encodeURIComponent(o.key)}">${esc(o.key)}</a> <small>${mb(o.size)}</small></li>`).join("\n");
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Albatross downloads</title>
 <link rel="stylesheet" href="/site.css"><link rel="icon" href="/icon.svg"></head>
-<body><main class="wrap downloads"><h1>Downloads</h1>
-<p class="muted">Every release file, served from Albatross's own storage. The SHA-256 of the current version is on the <a href="/#download">download page</a>; the app checks it before installing an update.</p>
+<body><main class="wrap downloads"><h1>Downloads${current ? " · " + esc(current) : ""}</h1>
+<p class="muted">The current version, served from Albatross's own storage. Its SHA-256 is on the <a href="/#download">download page</a>; the app checks it before installing an update.</p>
 <ul class="plain">${rows || "<li>No files yet.</li>"}</ul>
 <p><a href="/">&larr; Back</a></p></main></body></html>`;
   return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff" } });
+}
+
+/** The version the stored release manifest names, or "" when it cannot be read. */
+async function currentVersion(bucket) {
+  try {
+    const obj = await bucket.get("list/main/update.json");
+    if (!obj) return "";
+    const v = (await obj.json()).latest_version;
+    return typeof v === "string" && /^\d+\.\d+\.\d+$/.test(v) ? v : "";
+  } catch {
+    return "";
+  }
 }
