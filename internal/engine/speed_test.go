@@ -162,6 +162,12 @@ func TestSpeedRoundMovesOffSlowServer(t *testing.T) {
 			c.mu.Lock()
 			c.slowNet = time.Now()
 			c.switched, c.speedAt = time.Now().Add(-2*settleFor), time.Time{}
+			// Clear every member's last speed, so a backup measured slow in
+			// an earlier phase is not skipped as a known dud (it is fast now)
+			// and gets a fresh measurement.
+			for _, m := range c.members {
+				m.speed, m.speedAt = 0, time.Time{}
+			}
 			c.mu.Unlock()
 			e.speedRound(ctx, c, true)
 			if now() != from {
