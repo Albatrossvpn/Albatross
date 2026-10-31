@@ -15,12 +15,63 @@ const reasons = {
 const planName = (tier) => (info.tiers && info.tiers[tier] ? info.tiers[tier].name : tier);
 const planPill = (tier, cls) => planBadge(tier, planName(tier), cls);
 
+// Signing up: the form when the service lets anyone open an account, or else
+// a deep link into the Telegram bot's store, opened straight on a new
+// account (t.me/<bot>?start=signup). "" when neither is on offer.
+function signupKind() {
+  if (info.signup_open) return "form";
+  const bot = info.stars && info.stars.bot;
+  return bot && /^[A-Za-z0-9_]{5,32}$/.test(bot) ? "bot" : "";
+}
+
 function showTab(name) {
+  const kind = signupKind();
+  if (name === "signup" && !kind) name = "login";
   $("#login-form").classList.toggle("hidden", name !== "login");
-  $("#signup-form").classList.toggle("hidden", name !== "signup");
-  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === name);
-  $("#auth-sub").textContent = name === "login" ? "Sign in to see your usage." : "Create an account to get started.";
-  if (name === "signup") renderTurnstile();
+  $("#signup-form").classList.toggle("hidden", !(name === "signup" && kind === "form"));
+  $("#signup-bot").classList.toggle("hidden", !(name === "signup" && kind === "bot"));
+  for (const b of document.querySelectorAll("#tabs button")) {
+    b.classList.toggle("on", b.dataset.tab === name);
+    b.setAttribute("aria-selected", b.dataset.tab === name ? "true" : "false");
+  }
+  $("#auth-title").textContent = name === "login" ? "Welcome back" : "Create your account";
+  $("#auth-sub").textContent = name === "login"
+    ? "Sign in to manage your account and connect your devices."
+    : kind === "bot" ? "Accounts are opened in our Telegram bot, in about a minute." : "It takes a moment, and needs no email.";
+  if (name === "signup" && kind === "form") renderTurnstile();
+  const focus = name === "login" ? $("#l-user") : kind === "form" ? $("#s-user") : null;
+  if (focus && !matchMedia("(pointer: coarse)").matches) focus.focus();
+}
+
+// Show or hide a password; warn when Caps Lock is on; rate a new password.
+function wirePasswords() {
+  for (const b of document.querySelectorAll(".reveal")) {
+    b.addEventListener("click", () => {
+      const input = document.getElementById(b.dataset.for);
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      b.setAttribute("aria-pressed", show ? "true" : "false");
+      b.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      input.focus();
+    });
+  }
+  for (const input of document.querySelectorAll('.pw input')) {
+    const caps = input.closest(".field").querySelector(".caps");
+    const check = (e) => { if (e.getModifierState) caps.classList.toggle("hidden", !e.getModifierState("CapsLock")); };
+    input.addEventListener("keydown", check);
+    input.addEventListener("keyup", check);
+    input.addEventListener("blur", () => caps.classList.add("hidden"));
+  }
+  const meter = $("#s-strength");
+  $("#s-pass").addEventListener("input", (e) => {
+    const p = e.target.value;
+    let score = 0;
+    if (p.length >= 8) score++;
+    if (p.length >= 12) score++;
+    if (/[a-z]/.test(p) && /[A-Z]/.test(p)) score++;
+    if (/\d/.test(p) && /[^A-Za-z0-9]/.test(p)) score++;
+    meter.dataset.score = p ? String(Math.max(1, score)) : "0";
+  });
 }
 
 let turnstileId;
@@ -200,6 +251,8 @@ function start(r) {
 async function submit(form, btn, err, path, body) {
   err.textContent = "";
   btn.disabled = true;
+  btn.classList.add("busy");
+  btn.setAttribute("aria-busy", "true");
   try {
     start(await api("POST", path, { body }));
     form.reset();
@@ -208,26 +261,47 @@ async function submit(form, btn, err, path, body) {
     err.textContent = e.message;
   } finally {
     btn.disabled = false;
+    btn.classList.remove("busy");
+    btn.removeAttribute("aria-busy");
   }
 }
 
 info = await frame();
 const tabs = $("#tabs");
-if (info.signup_open) {
+if (signupKind()) {
   tabs.classList.remove("hidden");
-  tabs.innerHTML = `<button type="button" data-tab="login">Sign in</button><button type="button" data-tab="signup">Create account</button>`;
+  tabs.innerHTML = `<button type="button" role="tab" data-tab="login">Sign in</button><button type="button" role="tab" data-tab="signup">Sign up</button>`;
   tabs.addEventListener("click", (e) => e.target.dataset.tab && showTab(e.target.dataset.tab));
 }
-showTab(info.signup_open && location.hash === "#signup" ? "signup" : "login");
+if (signupKind() === "bot") $("#signup-link").href = `https://t.me/${info.stars.bot}?start=signup`;
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-tab-link]");
+  if (a) { e.preventDefault(); showTab(a.dataset.tabLink); }
+});
+wirePasswords();
+// /account#signup (or ?signup) opens on signing up: the link to share for a new account.
+showTab(location.hash === "#signup" || new URLSearchParams(location.search).has("signup") ? "signup" : "login");
 
+// The form's own checks, said in the page's words rather than the browser's.
+function invalid(form, err) {
+  const bad = [...form.querySelectorAll("input")].find((i) => !i.checkValidity());
+  if (!bad) return false;
+  err.textContent = bad.validity.valueMissing ? "Fill in your username and password."
+    : bad.id === "s-user" ? "A username has 3–32 letters, digits, dots, dashes or underscores."
+    : bad.id === "s-pass" ? "A password has at least 8 characters." : "Check what you typed.";
+  bad.focus();
+  return true;
+}
 $("#login-form").addEventListener("submit", (e) => {
   e.preventDefault();
-  submit(e.target, $("#l-btn"), $("#l-error"), "login", { username: $("#l-user").value, password: $("#l-pass").value });
+  if (invalid(e.target, $("#l-error"))) return;
+  submit(e.target, $("#l-btn"), $("#l-error"), "login", { username: $("#l-user").value.trim(), password: $("#l-pass").value });
 });
 $("#signup-form").addEventListener("submit", (e) => {
   e.preventDefault();
+  if (invalid(e.target, $("#s-error"))) return;
   const t = window.turnstile && turnstileId !== undefined ? window.turnstile.getResponse(turnstileId) : undefined;
-  submit(e.target, $("#s-btn"), $("#s-error"), "signup", { username: $("#s-user").value, password: $("#s-pass").value, turnstile: t });
+  submit(e.target, $("#s-btn"), $("#s-error"), "signup", { username: $("#s-user").value.trim(), password: $("#s-pass").value, turnstile: t });
 });
 $("#logout").addEventListener("click", signedOut);
 $("#pw-form").addEventListener("submit", async (e) => {

@@ -646,6 +646,11 @@ async function startTopic(c, user, topic, put) {
   const v = await viewOf(c, user.chat_id);
   if (topic === "human" || topic === "team") return openTicket(c, user);
   if (topic === "buy") return showStore(c, user, put);
+  if (topic === "signup") {
+    // The website's "Sign up": the store, going straight to a new account.
+    await setMode(c.env, user.chat_id, "signup");
+    return showStore(c, user, put);
+  }
   const renew = view.renewTarget(topic);
   if (renew) {
     // From the app: the store, for that account. "Add to my account" then
@@ -1379,12 +1384,13 @@ async function onStoreButton(c, user, kind, arg, edit, show, extra = "") {
   switch (kind) {
     case "s":
     case "b":
-      return edit(p ? v.builder(p, limitsOf(p.gb), shop.money) : v.store(shop.catalog, shop.days, shop.money));
+      return edit(p ? v.builder(p, limitsOf(p.gb), shop.money, user.mode === "signup") : v.store(shop.catalog, shop.days, shop.money));
     case "st":
       return show(v.terms(shop.days));
     case "sn": {
       if (!p) return edit(v.store(shop.catalog, shop.days, shop.money));
       if (!(await mayOrder(c, await idTag(c, chat)))) return tg.send(chat, v.SLOW_DOWN);
+      if (user.mode === "signup") await setMode(env, chat, "");
       return edit(v.checkout(await makeOrder(c, user, shop, p, "new"), p, shop.days, shop.money));
     }
     case "sr": {

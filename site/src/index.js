@@ -12,6 +12,12 @@ const OPEN = { "Strict-Transport-Security": "max-age=0" };
 const serve = (response) => armor(response, OPEN);
 const SENSITIVE = /^\/(?:update\.json$|list\/|download\/[^/]+$)/;
 
+// The downloads page is built here, so it carries the website's Google tag and
+// the same Content-Security-Policy as the static pages (public/_headers;
+// backend/test/site.test.mjs keeps the two the same).
+export const TAG = "<!-- Google tag (gtag.js) -->\n<script async src=\"https://www.googletagmanager.com/gtag/js?id=AW-18414057252\"></script>\n<script>\n  window.dataLayer = window.dataLayer || [];\n  function gtag(){dataLayer.push(arguments);}\n  gtag('js', new Date());\n\n  gtag('config', 'AW-18414057252');\n</script>";
+export const CSP = "default-src 'self'; script-src 'self' 'sha256-vBoBI9DEJX9qJCY6VmgV6QyvDPDvGyt7XimBk9zCNkY=' https://www.googletagmanager.com https://www.googleadservices.com https://www.google.com https://*.googletagmanager.com; style-src 'self'; img-src 'self' data: https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://www.google.com https://*.google-analytics.com https://*.googletagmanager.com https://*.g.doubleclick.net https://*.google.com; connect-src 'self' https://accounts.albatrossvpn.online https://www.googletagmanager.com https://www.googleadservices.com https://googleads.g.doubleclick.net https://pagead2.googlesyndication.com https://www.google.com https://ad.doubleclick.net https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com https://*.g.doubleclick.net https://*.google.com; frame-src https://www.googletagmanager.com https://td.doubleclick.net; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
 const MANIFEST = [
   "https://raw.githubusercontent.com/Albatrossvpn/Albatross/main/update.json",
   "https://cdn.jsdelivr.net/gh/Albatrossvpn/Albatross@main/update.json",
@@ -88,13 +94,15 @@ async function index(bucket) {
   const files = stored.filter((o) => ver(o.key) === current).sort((a, b) => a.key.localeCompare(b.key));
   const mb = (n) => (n / 1048576).toFixed(1) + " MB";
   const rows = files.map((o) => `<li><a href="/download/${encodeURIComponent(o.key)}">${esc(o.key)}</a> <small>${mb(o.size)}</small></li>`).join("\n");
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Albatross downloads</title>
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8">
+${TAG}
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Albatross downloads</title>
 <link rel="stylesheet" href="/site.css"><link rel="icon" href="/icon.svg"></head>
 <body><main class="wrap downloads"><h1>Downloads${current ? " · " + esc(current) : ""}</h1>
 <p class="muted">The current version, served from Albatross's own storage. Its SHA-256 is on the <a href="/#download">download page</a>; the app checks it before installing an update.</p>
 <ul class="plain">${rows || "<li>No files yet.</li>"}</ul>
 <p><a href="/">&larr; Back</a></p></main></body></html>`;
-  return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff" } });
+  return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300", "X-Content-Type-Options": "nosniff", "Content-Security-Policy": CSP } });
 }
 
 /** The version the stored release manifest names, or "" when it cannot be read. */

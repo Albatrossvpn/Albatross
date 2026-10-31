@@ -53,11 +53,29 @@ test("the website's CSP lets the tag run, and no more than that", () => {
   assert.deepEqual(directive("frame-ancestors"), ["'none'"]);
 });
 
-test("the account service's pages carry no Google tag", () => {
+test("the account pages carry the same tag, the administration page none, and their CSP lets it run", () => {
+  const tag = read(site, "index.html").match(/<!-- Google tag \(gtag\.js\) -->[\s\S]*?<\/script>\s*<script>[\s\S]*?<\/script>/)[0];
   for (const p of readdirSync(accounts).filter((f) => f.endsWith(".html"))) {
-    assert.ok(!/googletagmanager|gtag\(/.test(read(accounts, p)), p);
+    const html = read(accounts, p);
+    if (p === "admin.html") {
+      assert.ok(!/googletagmanager|gtag\(/.test(html), "the administration page loads no tag");
+      continue;
+    }
+    assert.equal(count(html, tag), 1, `${p}: the website's tag, once`);
+    const before = html.slice(0, html.indexOf(tag));
+    assert.ok(before.includes("<meta charset") && !/<title|<link |<script/.test(before), `${p}: first in the head`);
   }
-  assert.ok(!/googletagmanager|google\.com/.test(read(accounts, "_headers")), "the account CSP stays closed");
+  const csp = read(accounts, "_headers").match(/Content-Security-Policy: (.+)/)[1];
+  const inline = tag.match(/<script>(\s*window\.dataLayer[\s\S]*?)<\/script>/)[1];
+  assert.ok(csp.includes(`'sha256-${createHash("sha256").update(inline).digest("base64")}'`), "the account CSP has the tag's hash");
+  assert.ok(csp.includes("https://challenges.cloudflare.com"), "the sign-up check still loads");
+  assert.ok(!/'unsafe-inline'|'unsafe-eval'| https: |\*;| \* /.test(csp), "the account CSP stays narrow");
+});
+
+test("the downloads page the site Worker builds has the tag and the static pages' CSP", async () => {
+  const { TAG, CSP } = await import("../../site/src/index.js");
+  assert.ok(read(site, "index.html").includes(TAG), "the same tag as the pages");
+  assert.equal(CSP, read(site, "_headers").match(/Content-Security-Policy: (.+)/)[1], "the same CSP as the pages");
 });
 
 test("the privacy statements say what the website does", () => {
