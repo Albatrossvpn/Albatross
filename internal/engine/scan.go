@@ -84,6 +84,9 @@ func (e *Engine) refreshLoop() {
 	states := e.loadStates()
 	e.loadListKeys()
 	e.loadSlice()
+	// The account's slice is what a release connects with: ask for it at
+	// once, beside the first fetches, not after a whole pass of them.
+	go e.refreshSlice()
 	e.warmStart(states)
 	e.loadEdge()
 	states = nil

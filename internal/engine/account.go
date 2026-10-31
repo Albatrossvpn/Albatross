@@ -315,7 +315,18 @@ func (e *Engine) tunnelFirst(ctx context.Context, wait time.Duration, call func(
 // viaServer runs call through working servers, one after another, until
 // one of them reaches the account service. On a first start the servers
 // are still being found, so it waits for them.
+// viaSlot lets one call at a time go through a server: each one starts a
+// core on the same local port, so two at once (signing in, the account's
+// servers, the lists' keys) failed with "address already in use".
+var viaSlot = make(chan struct{}, 1)
+
 func (e *Engine) viaServer(ctx context.Context, call func(context.Context) error) error {
+	select {
+	case viaSlot <- struct{}{}:
+		defer func() { <-viaSlot }()
+	case <-ctx.Done():
+		return account.ErrUnreachable
+	}
 	err := account.ErrUnreachable
 	if e.bin.SingBox == "" {
 		// No core to go through a server with.

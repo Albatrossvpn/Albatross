@@ -7,7 +7,7 @@ import {
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
 import { armor, httpsRedirect, securityTxt } from "./headers.js";
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
-import { appLinks, appPool, build as buildSub, countriesOf, dayPick, edgeFor, headers as subHeaders, listUpdated, readSubToken, SLICE_COUNTRY, SLICE_MAX, sliceFor, storedListKeys, subPool, subToken } from "./sub.js";
+import { appLinks, appPool, resistantFor, build as buildSub, countriesOf, dayPick, edgeFor, headers as subHeaders, listUpdated, readSubToken, SLICE_COUNTRY, SLICE_MAX, sliceFor, storedListKeys, subPool, subToken } from "./sub.js";
 import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
 import { refreshRates } from "./fx.js";
 import { MAX_GB, MIN_GB, MONTHS, SALES_DEFAULTS, SALES_RANGE, catalog as salesCatalog, config as salesConfig, parseSteps } from "./sales.js";
@@ -593,8 +593,14 @@ async function listKeys(request, env) {
   const { user } = await authUser(request, env);
   const a = await viewOf(env, user, deviceOf(request), now());
   if (!a.allowed) return json({ keys: [], reason: a.reason });
-  const { premium } = await recentListKeys(env);
-  return json({ keys: a.features.includes("own") ? premium : [], reason: "" });
+  const { keys, premium } = await recentListKeys(env);
+  const own = a.features.includes("own") ? premium : [];
+  // Copies older than 1.3.0 read only the collector's sealed lists (they
+  // know no slice), so while they may still connect they get those keys;
+  // 1.3.0 and later get their slice instead (GET servers).
+  const version = request.headers.get("X-Albatross-Version") || OLD_CLIENT;
+  const old = versionLess(version, "1.3.0");
+  return json({ keys: (old ? [...keys, ...own] : own).sort((x, y) => y.id - x.id), reason: "" });
 }
 
 // How often an account may ask for its slice in an hour: the app asks a
@@ -615,7 +621,11 @@ async function servers(request, env) {
   if (await blocked(env, key, SERVERS_PER_HOUR, 3600)) throw tooMany();
   await count(env, key, 3600);
   const entries = await appPool(env, dayPick(t));
-  return json({ servers: appLinks(await sliceFor(env, user.id, entries, t)), reason: "" });
+  const base = await sliceFor(env, user.id, entries, t);
+  // Plus a share of the servers reached through the CDN, which are what
+  // still gets out when the network lets only approved sites through.
+  const resist = await resistantFor(env, user.id, t, base);
+  return json({ servers: appLinks([...base, ...resist]), reason: "" });
 }
 
 /**
