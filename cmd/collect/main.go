@@ -325,6 +325,9 @@ type meta struct {
 	// Schemes counts every link scheme seen in the sources, usable or
 	// not, so protocols the apps cannot run yet show up here.
 	Schemes map[string]int `json:"schemes"`
+	// Unsupported counts, by scheme, the links that parse but no core can
+	// run yet: what we find in volume here is worth adding a core for.
+	Unsupported map[string]int `json:"unsupported"`
 	// Protocols counts the usable servers by protocol.
 	Protocols map[string]int `json:"protocols"`
 	// Channels counts the usable servers each Telegram channel posted;
@@ -414,6 +417,7 @@ func main() {
 	byKey := map[uint64]*entry{}
 	reached := 0
 	schemes, channels, yield := map[string]int{}, map[string]int{}, map[string]int{}
+	unsupported := map[string]int{}
 	seenLinks := map[uint64]bool{}
 	// The usable servers of each source, for the lanes (lanes.go).
 	perSrc := make([][]*entry, len(srcs))
@@ -458,7 +462,13 @@ func main() {
 				if k := h.Sum64(); !seenLinks[k] {
 					seenLinks[k] = true
 					scheme, _, _ := strings.Cut(l, "://")
-					schemes[strings.ToLower(scheme)]++
+					scheme = strings.ToLower(scheme)
+					schemes[scheme]++
+					// A link whose scheme we know but no core runs (e.g. a
+					// protocol we have no helper for) is counted apart.
+					if _, err := node.ParseLink(l); err != nil {
+						unsupported[scheme]++
+					}
 				}
 			}
 			reached++
@@ -494,6 +504,11 @@ func main() {
 	}
 	wg.Wait()
 	log.Printf("%d of %d sources reached, %d servers", reached, len(srcs), len(byKey))
+	if top := topCounts(unsupported, 8); top != "" {
+		// What we find but no core runs yet, most first: a protocol high
+		// here is worth adding a core for (meta.json keeps the full list).
+		log.Printf("found but not usable, by scheme: %s", top)
+	}
 
 	// Lanes: a source nobody has measured yet is on probation, one whose
 	// servers pass is proven; both put a random sample of their servers
@@ -579,7 +594,7 @@ func main() {
 		log.Fatal(err)
 	}
 	m := meta{Updated: time.Now().UTC(), Sources: len(srcs), Reached: reached, Found: len(byKey), Dead: dead, Tested: len(tested), Passed: len(passed), Files: map[string]int{},
-		Schemes: schemes, Protocols: protocols, Channels: channels, Yield: yield,
+		Schemes: schemes, Unsupported: unsupported, Protocols: protocols, Channels: channels, Yield: yield,
 		Lanes: plan.counts}
 	// What the real tests showed about each source is kept in a file of its
 	// own, for the next run (lanes.go): meta.json is read by the account
@@ -757,4 +772,36 @@ func flagOf(code string) string {
 		return ""
 	}
 	return string([]rune{0x1F1E6 + rune(code[0]-'A'), 0x1F1E6 + rune(code[1]-'A')})
+}
+
+// topCounts formats the n largest entries of a count map, most first, as
+// "key count, key count, …"; "" when the map is empty.
+func topCounts(m map[string]int, n int) string {
+	type kv struct {
+		k string
+		v int
+	}
+	var all []kv
+	for k, v := range m {
+		if v > 0 {
+			all = append(all, kv{k, v})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].v != all[j].v {
+			return all[i].v > all[j].v
+		}
+		return all[i].k < all[j].k
+	})
+	var b strings.Builder
+	for i, e := range all {
+		if i == n {
+			break
+		}
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		fmt.Fprintf(&b, "%s %d", e.k, e.v)
+	}
+	return b.String()
 }

@@ -418,3 +418,13 @@ func names(m map[*entry]time.Duration) []string {
 	sort.Strings(out)
 	return out
 }
+
+func TestTopCounts(t *testing.T) {
+	got := topCounts(map[string]int{"ssh": 100, "snell": 50, "warp": 0, "wstunnel": 200}, 2)
+	if got != "wstunnel 200, ssh 100" {
+		t.Fatalf("topCounts: %q", got)
+	}
+	if topCounts(map[string]int{}, 5) != "" {
+		t.Fatal("empty should be blank")
+	}
+}
