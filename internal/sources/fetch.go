@@ -47,6 +47,10 @@ type Fetcher struct {
 	// Warp makes the links of the device's own WARP account (KindWarp);
 	// nil where there is no device.
 	Warp func(ctx context.Context) (string, error)
+	// Account gives the links of the signed-in account's slice of the
+	// servers (KindAccount), kept by the app itself: nothing is cached
+	// here, so signing out leaves no copy behind. nil where there is none.
+	Account func(ctx context.Context) (string, error)
 
 	bytes atomic.Int64
 }
@@ -106,6 +110,12 @@ func (f *Fetcher) Fetch(ctx context.Context, s Source) Result {
 		}
 		f.store(s, cacheMeta{URL: "warp:" + s.URL, FetchedAt: time.Now()}, text)
 		res.Text = text
+		return res
+	case s.Kind == KindAccount:
+		res := Result{Source: s, Via: "account"}
+		if f.Account != nil {
+			res.Text, res.Err = f.Account(ctx)
+		}
 		return res
 	}
 	return f.fetchOne(ctx, s)

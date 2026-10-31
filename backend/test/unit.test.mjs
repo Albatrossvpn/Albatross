@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { keyedID, openKeyed, pool } from "../src/sub.js";
+import { SLICE_BASE, SLICE_COUNTRY, SLICE_MAX, appLinks, carrierOf, dayPick, keyedID, nameOf, openKeyed, parseList, pool, slice, sliceFor } from "../src/sub.js";
 import {
   DAY, FEATURES, TIERS, accountOf, checkPassword, checkUsername, featuresOf, hashPassword, maxDevices, planFeatures, randomPassword, rollPeriod, safeEqual, sign,
   tierOf, verify, verifyPassword,
@@ -338,4 +338,135 @@ test("the sing-box apps get a sing-box config, with what sing-box cannot run lef
   assert.equal(wantsSingBox(req("SFI/1.12.0 (Build 1; sing-box 1.12.0; language en_US)"), url()), true);
   assert.equal(wantsSingBox(req("HiddifyNext/2.5.7 (ios) like ClashMeta v2ray sing-box"), url()), false, "Hiddify reads the links itself");
   assert.equal(wantsSingBox(req("V2Box/10.1.9"), url()), false);
+});
+
+// ---------- Each account's slice ----------
+
+// A pool like the hot list: countries of very different sizes, each with
+// Reality, WebSocket (CDN), gRPC, Hysteria2 and plain servers, best first.
+function bigPool(sizes = { DE: 120, NL: 80, US: 60, FI: 30, TR: 12, AM: 4, JP: 2 }, withIran = true) {
+  const kinds = [
+    (h) => `vless://u@${h}:443?security=reality&type=tcp&sni=a.com&pbk=k`,
+    (h) => `vless://u@${h}:443?security=tls&type=ws&host=cdn.example`,
+    (h) => `trojan://p@${h}:443?security=tls&type=grpc`,
+    (h) => `hysteria2://p@${h}:443?sni=x`,
+    (h) => `ss://YWVzOmJhc2U@${h}:8388`,
+  ];
+  const flagOf = (c) => String.fromCodePoint(...Array.from(c, (ch) => 0x1f1e6 + ch.charCodeAt(0) - 65));
+  const lines = [];
+  for (let i = 0; ; i++) {
+    let any = false;
+    for (const [c, n] of Object.entries(sizes)) {
+      if (i >= n) continue;
+      any = true;
+      lines.push(kinds[(i + c.charCodeAt(0)) % kinds.length](`${c.toLowerCase()}${i}.example`) + "#" + encodeURIComponent(`@chan ${flagOf(c)} ${i}`));
+    }
+    if (!any) break;
+  }
+  if (withIran) lines.push("vless://u@ir1.example:443?security=reality#Iran 1");
+  return parseList(lines.join("\n"));
+}
+
+test("a slice is the same all day for an account, and another for another account", () => {
+  const p = bigPool();
+  const a = slice(p, "seed-a"), again = slice(p, "seed-a"), b = slice(p, "seed-b");
+  assert.deepEqual(a.map((e) => e.link), again.map((e) => e.link), "the same seed, the same slice");
+  assert.notDeepEqual(a.map((e) => e.link), b.map((e) => e.link), "another account, another slice");
+  const shared = a.filter((e) => b.some((x) => x.link === e.link)).length;
+  assert.ok(shared < a.length, "two accounts do not get the same servers");
+  // In the pool's order (best first), with nothing from inside the country.
+  const at = a.map((e) => p.indexOf(e));
+  assert.deepEqual(at, [...at].sort((x, y) => x - y));
+  assert.equal(a.some((e) => e.country === "IR"), false);
+});
+
+test("a slice is small next to the pool, and grows with the countries up to a cap", () => {
+  const p = bigPool();
+  const a = slice(p, "s");
+  assert.equal(a.length, SLICE_BASE, "few countries: the base size");
+  assert.ok(a.length < p.length / 4);
+  // Many countries: more, never past the cap.
+  const sizes = {};
+  for (let i = 0; i < 30; i++) sizes[String.fromCharCode(65 + (i % 26)) + String.fromCharCode(75 + Math.floor(i / 26))] = 20;
+  const many = slice(bigPool(sizes), "s");
+  assert.equal(many.length, Math.min(SLICE_MAX, 30 * 3));
+  const huge = {};
+  for (let i = 0; i < 60; i++) huge[String.fromCharCode(65 + (i % 26)) + String.fromCharCode(80 + Math.floor(i / 26))] = 10;
+  assert.ok(slice(bigPool(huge), "s").length <= SLICE_MAX);
+  // A small pool is given whole.
+  const tiny = bigPool({ DE: 5, NL: 3 });
+  assert.equal(slice(tiny, "s").length, 8);
+  // One country's subscription: fewer.
+  assert.equal(slice(p.filter((e) => e.country === "DE"), "s", SLICE_COUNTRY).length, SLICE_COUNTRY);
+});
+
+test("a slice covers every country of the pool, more servers for the bigger ones", () => {
+  const p = bigPool();
+  for (const seed of ["a", "b", "c", "d"]) {
+    const a = slice(p, seed);
+    const by = (c) => a.filter((e) => e.country === c).length;
+    for (const c of ["DE", "NL", "US", "FI", "TR", "AM", "JP"]) assert.ok(by(c) >= Math.min(3, p.filter((e) => e.country === c).length), `${c} in slice ${seed}`);
+    assert.equal(by("JP"), 2, "a country with two servers gives both");
+    assert.ok(by("DE") > by("FI") && by("FI") >= by("AM"), "the big countries get more");
+  }
+  // More countries than the slice holds: still one each.
+  const sizes = {};
+  for (let i = 0; i < 150; i++) sizes[String.fromCharCode(65 + (i % 26)) + String.fromCharCode(65 + Math.floor(i / 26))] = 1;
+  const wide = bigPool(sizes, false);
+  const groups = new Set(wide.map((e) => e.country));
+  assert.equal(new Set(slice(wide, "s").map((e) => e.country)).size, groups.size);
+});
+
+test("a slice takes each country's best servers and mixes the ways through", () => {
+  const p = bigPool();
+  const a = slice(p, "x");
+  const de = p.filter((e) => e.country === "DE");
+  const mine = a.filter((e) => e.country === "DE");
+  // From the country's best few only.
+  for (const e of mine) assert.ok(de.indexOf(e) < mine.length * 3, "a server from far down the list");
+  const kinds = new Set(mine.map((e) => carrierOf(e.link)));
+  for (const k of ["reality", "cdn", "grpc", "quic", "ss"]) assert.ok(kinds.has(k), `no ${k} server among Germany's`);
+  // Even a country with three servers of different kinds keeps them all.
+  const fi = a.filter((e) => e.country === "FI");
+  assert.ok(new Set(fi.map((e) => carrierOf(e.link))).size >= 3);
+  assert.equal(carrierOf("vmess://" + btoa(JSON.stringify({ add: "h", net: "ws" }))), "cdn");
+  assert.equal(carrierOf("tuic://u@h:443"), "quic");
+  assert.equal(carrierOf("vless://u@h:443?type=tcp&security=reality"), "reality");
+});
+
+test("an account's slice is seeded by the service's secret, the account and the day", async () => {
+  const p = bigPool();
+  const env = { TOKEN_SECRET: "t".repeat(40) };
+  const day = 1761480000 - (1761480000 % DAY);
+  const ids = (x) => x.map((e) => e.link).join();
+  const morning = await sliceFor(env, 7, p, day + 60), evening = await sliceFor(env, 7, p, day + DAY - 60);
+  assert.equal(ids(morning), ids(evening), "the same all day");
+  assert.notEqual(ids(await sliceFor(env, 7, p, day + DAY + 60)), ids(morning), "another the next day");
+  assert.notEqual(ids(await sliceFor(env, 8, p, day + 60)), ids(morning), "another for another account");
+  assert.notEqual(ids(await sliceFor({ TOKEN_SECRET: "u".repeat(40) }, 7, p, day + 60)), ids(morning), "not to be worked out without the secret");
+  // The pool's top-up from the fresh list is the same all day too.
+  const fresh = Array.from({ length: 300 }, (_, i) => `vless://u@f${i}.example:443?security=reality#Germany`).join("\n");
+  const pick = (t) => pool("vless://u@h.example:443#Germany", fresh, 40, dayPick(t)).map((e) => e.link).join();
+  assert.equal(pick(day + 1), pick(day + 5000));
+});
+
+test("the app's links of a slice carry only their country, never where they were found", () => {
+  const p = bigPool({ DE: 3 }, false);
+  const vm = parseList("vmess://" + btoa(JSON.stringify({ add: "h", ps: "@chan France" })) + "\nssr://abcdef");
+  const links = appLinks([...p, ...vm]);
+  assert.equal(links.some((l) => /chan/.test(l)), false);
+  assert.equal(nameOf(links[0]), "\u{1F1E9}\u{1F1EA} Germany 1");
+  assert.equal(nameOf(links[3]), "\u{1F1EB}\u{1F1F7} France 1");
+  assert.equal(links[4], "ssr://abcdef", "a link without a name stays as it is");
+});
+
+test("the oldest version that may connect: the newer of the manifest's and the deploy's", async () => {
+  const { newest } = await import("../src/lib.js");
+  assert.equal(newest("1.2.0", "1.3.0"), "1.3.0");
+  assert.equal(newest("1.4.0", "1.3.0"), "1.4.0");
+  assert.equal(newest("", "1.3.0"), "1.3.0");
+  assert.equal(newest("1.2.0", ""), "1.2.0");
+  assert.equal(newest("1.2.0", undefined), "1.2.0");
+  assert.equal(newest("1.2.0", "nonsense"), "1.2.0", "a floor that is not a version is ignored");
+  assert.equal(newest("", ""), "");
 });

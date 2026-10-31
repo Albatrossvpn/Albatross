@@ -287,3 +287,11 @@ export function versionLess(a, b) {
   }
   return false;
 }
+
+/** The newer of a version and a floor that must look like one (else ignored); "" for none. */
+export function newest(a, b) {
+  a = String(a || "").trim();
+  b = /^v?\d+(\.\d+){0,2}$/.test(String(b || "").trim()) ? String(b).trim() : "";
+  if (!a || !b) return a || b;
+  return versionLess(a, b) ? b : a;
+}

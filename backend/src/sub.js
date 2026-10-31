@@ -3,7 +3,7 @@
 // by country, every server named after the service, refreshed by the app
 // itself. The address carries a token of its own (a year, void when the
 // password changes), so the apps need no sign-in.
-import { DAY, accountOf, edgeLinks, sign, verify } from "./lib.js";
+import { DAY, accountOf, edgeLinks, sign, tag, verify } from "./lib.js";
 import { LIST_KEYS } from "./files.js";
 import { COUNTRIES, flag, hint } from "./countries.js";
 import { cleanLink } from "./links.js";
@@ -94,11 +94,11 @@ const TOPUP_FROM = 400;
  * inside the country and ones the Apple apps cannot use are left out;
  * keep writes each of the rest anew, or leaves it out with null.
  */
-export function pool(hot, fresh, min = SUB_MIN, pick = Math.random, keep = (e) => e) {
+export function pool(hot, fresh, min = SUB_MIN, pick = Math.random, keep = (e) => e, accept = forApple) {
   const seen = new Set();
   const out = [];
   for (const e of parseList(hot)) {
-    if (e.country !== "IR" && forApple(e) && !seen.has(e.link)) {
+    if (e.country !== "IR" && accept(e) && !seen.has(e.link)) {
       seen.add(e.link);
       const k = keep(e);
       if (k) out.push(k);
@@ -108,7 +108,7 @@ export function pool(hot, fresh, min = SUB_MIN, pick = Math.random, keep = (e) =
   const cands = [];
   for (const e of parseList(fresh)) {
     if (cands.length >= TOPUP_FROM) break;
-    if (e.country !== "IR" && forApple(e) && !seen.has(e.link)) {
+    if (e.country !== "IR" && accept(e) && !seen.has(e.link)) {
       seen.add(e.link);
       const k = keep(e);
       if (k) cands.push(k);
@@ -280,12 +280,188 @@ export function cleanEntry(e) {
   return link ? { ...e, link } : null;
 }
 
-/** The servers a subscription offers right now (pool), each in the standard form. */
-export async function subPool(env) {
+/**
+ * The servers a subscription offers right now (pool), each in the standard
+ * form. pick draws the top-up from the fresh list: a seeded one (dayPick)
+ * keeps the pool, and so each account's slice, the same all day.
+ */
+export async function subPool(env, pick = Math.random) {
   const hot = await listFile(env, "hot.txt");
-  const entries = pool(hot, "", SUB_MIN, Math.random, cleanEntry);
+  const entries = pool(hot, "", SUB_MIN, pick, cleanEntry);
   if (entries.length >= SUB_MIN) return entries;
-  return pool(hot, await listFile(env, "fresh.txt"), SUB_MIN, Math.random, cleanEntry);
+  return pool(hot, await listFile(env, "fresh.txt"), SUB_MIN, pick, cleanEntry);
+}
+
+/**
+ * The servers the apps are offered a slice of: the same pool as a
+ * subscription's, in every protocol the app reads, the links as they came.
+ */
+export async function appPool(env, pick = Math.random) {
+  const hot = await listFile(env, "hot.txt");
+  const all = () => true;
+  const entries = pool(hot, "", SUB_MIN, pick, (e) => e, all);
+  if (entries.length >= SUB_MIN) return entries;
+  return pool(hot, await listFile(env, "fresh.txt"), SUB_MIN, pick, (e) => e, all);
+}
+
+// ---------- Each account's slice ----------
+//
+// No account gets the whole pool: each gets a slice of it, the same all
+// day and another the next, different from other accounts' (sliceSeed). A
+// paying user with a script, or a copy of the app with its checks cut out,
+// learns a few dozen servers a day, not the collection. The slice keeps
+// what made the pool worth having: every country in it, the best-tested
+// servers of each first, and a spread of the ways through the filter.
+
+export const SLICE_BASE = 60; // the size of a slice with few countries
+export const SLICE_MAX = 120; // ... and with many
+export const SLICE_PER_COUNTRY = 3; // what each country gets at least, when it has them
+// A country's own subscription: fewer, so that asking for one country after
+// another does not add up to the pool.
+export const SLICE_COUNTRY = 20;
+const SLICE_WINDOW = 3; // a country's slice is drawn from its best SLICE_WINDOW × as many
+
+/** A number for a string (FNV-1a, 32 bits). */
+function fnv(s) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+/** A pick (as Math.random) that gives the same numbers for the same seed. */
+export function seededPick(seed) {
+  let a = fnv(String(seed)) || 1;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** The same pick for everyone all day (UTC): the pool's top-up does not change between requests. */
+export const dayPick = (t) => seededPick("pool|" + Math.floor(t / DAY));
+
+/**
+ * How a server gets through: Reality, a CDN-frontable transport (WebSocket,
+ * HTTPUpgrade, XHTTP, gRPC), QUIC (Hysteria2, TUIC), or its scheme.
+ */
+export function carrierOf(link) {
+  const scheme = link.slice(0, link.indexOf("://")).toLowerCase();
+  if (UDP_SCHEMES.has(scheme)) return "quic";
+  let q = "";
+  if (scheme === "vmess") {
+    try {
+      const j = JSON.parse(unb64(link.slice(8).split("#")[0]));
+      q = `type=${j.net || ""}&security=${j.tls || ""}`;
+    } catch {}
+  } else {
+    const i = link.indexOf("?");
+    q = i < 0 ? "" : link.slice(i + 1).split("#")[0];
+  }
+  q = q.toLowerCase();
+  if (/(^|&)security=reality(&|$)/.test(q)) return "reality";
+  if (/(^|&)(type|net)=(ws|httpupgrade|xhttp|splithttp)(&|$)/.test(q)) return "cdn";
+  if (/(^|&)(type|net)=grpc(&|$)/.test(q)) return "grpc";
+  return scheme;
+}
+
+/** The seed of an account's slice for the day (UTC) of t: not to be guessed without the service's secret. */
+export const sliceSeed = (env, userId, t) => tag(env.TOKEN_SECRET, `servers|${userId}|${Math.floor(t / DAY)}`);
+
+/**
+ * An account's slice of a pool (entries in the pool's order, best first):
+ * every country in it, each with SLICE_PER_COUNTRY servers at least (as
+ * many as it has, when fewer) and more for the countries with many, in all
+ * SLICE_BASE, up to SLICE_MAX when there are many countries. A country's
+ * servers come from its best few, drawn by the seed and spread over the
+ * ways through (carrierOf). In the pool's order. cap bounds the total
+ * (SLICE_COUNTRY for one country's), though never below one server for
+ * each country.
+ */
+export function slice(entries, seed, cap = SLICE_MAX) {
+  const groups = new Map();
+  for (const [i, e] of entries.entries()) {
+    if (e.country === "IR") continue;
+    const c = e.country || "";
+    if (!groups.has(c)) groups.set(c, []);
+    groups.get(c).push({ e, i });
+  }
+  const size = [...groups.values()].reduce((n, g) => n + g.length, 0);
+  const countries = [...groups.keys()].sort();
+  let total = Math.min(size, Math.max(SLICE_BASE, Math.min(SLICE_MAX, countries.length * SLICE_PER_COUNTRY)));
+  // More countries than the slice holds: one each, so every one is still there.
+  total = Math.max(total, Math.min(size, countries.length));
+  total = Math.min(total, Math.max(cap, Math.min(size, countries.length)));
+  const per = Math.max(1, Math.min(SLICE_PER_COUNTRY, Math.floor(total / Math.max(1, countries.length))));
+  const quota = new Map(countries.map((c) => [c, Math.min(per, groups.get(c).length)]));
+  let left = total - [...quota.values()].reduce((a, b) => a + b, 0);
+  // The rest by size (the largest remainder share first, D'Hondt).
+  while (left > 0) {
+    let best = "", score = -1;
+    for (const c of countries) {
+      const q = quota.get(c), n = groups.get(c).length;
+      if (q >= n) continue;
+      const s = n / (q + 1);
+      if (s > score) [best, score] = [c, s];
+    }
+    if (score < 0) break;
+    quota.set(best, quota.get(best) + 1);
+    left--;
+  }
+  const out = [];
+  for (const c of countries) {
+    const q = quota.get(c);
+    if (!q) continue;
+    const g = groups.get(c);
+    const window = g.slice(0, Math.min(g.length, q * SLICE_WINDOW));
+    // Each server's place, moved back by up to the window's length.
+    const ranked = window
+      .map((x, k) => ({ ...x, at: k + (fnv(seed + "|" + x.e.link) / 4294967296) * window.length }))
+      .sort((a, b) => a.at - b.at);
+    // In turns over the ways through, the best of each first.
+    const byCarrier = new Map();
+    for (const x of ranked) {
+      const k = carrierOf(x.e.link);
+      if (!byCarrier.has(k)) byCarrier.set(k, []);
+      byCarrier.get(k).push(x);
+    }
+    const lanes = [...byCarrier.values()];
+    for (let round = 0, taken = 0; taken < q; round++) {
+      for (const lane of lanes) {
+        if (taken < q && round < lane.length) {
+          out.push(lane[round]);
+          taken++;
+        }
+      }
+    }
+  }
+  return out.sort((a, b) => a.i - b.i).map((x) => x.e);
+}
+
+/** An account's slice of a pool for the day of t (slice, sliceSeed). */
+export async function sliceFor(env, userId, entries, t, cap = SLICE_MAX) {
+  return slice(entries, await sliceSeed(env, userId, t), cap);
+}
+
+/**
+ * The links of an account's slice for the app: each named after its
+ * country, so neither the servers' own names nor where they were found
+ * reach the app (a link without a name keeps none).
+ */
+export function appLinks(entries) {
+  const n = new Map();
+  return entries.map((e) => {
+    if (!e.link.startsWith("vmess://") && !e.link.includes("#")) return e.link;
+    const c = e.country || "";
+    n.set(c, (n.get(c) || 0) + 1);
+    const where = c ? `${flag(c)} ${COUNTRIES[c] || c}` : "Server";
+    return rename(e.link, `${where} ${n.get(c)}`);
+  });
 }
 
 // How many clean Cloudflare addresses a subscription carries the edge on.

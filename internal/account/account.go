@@ -571,6 +571,32 @@ func (c *Client) ListKeys(ctx context.Context) ([]ListKey, error) {
 	return out.Keys, nil
 }
 
+// Servers returns the signed-in account's slice of the best-tested servers
+// (links), which the service picks for each account and day: no account
+// gets the whole list. An account at a limit gets none. A session the
+// service no longer accepts is forgotten, as in Sync.
+func (c *Client) Servers(ctx context.Context) ([]string, error) {
+	c.mu.Lock()
+	token := c.st.Token
+	c.mu.Unlock()
+	if token == "" {
+		return nil, ErrSignedOut
+	}
+	var out struct {
+		Servers []string `json:"servers"`
+	}
+	err := c.call(ctx, http.MethodGet, "servers", token, nil, &out)
+	var he *Error
+	if errors.As(err, &he) && he.Status == http.StatusUnauthorized {
+		c.logoutIf(token)
+		return nil, ErrSignedOut
+	}
+	if err != nil {
+		return nil, err
+	}
+	return out.Servers, nil
+}
+
 // SessionPath is where an engine keeps the session inside its data dir.
 func SessionPath(dir string) string { return filepath.Join(dir, "account.json") }
 

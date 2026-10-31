@@ -2,12 +2,12 @@
 // change their account on the website, the administrator manages everyone.
 import {
   DAY, DEFAULT_TIER, DEVICE_ACTIVE, FEATURES, SUB_ACTIVE, TIERS, accountOf, checkPassword, checkUsername, edgeLinks, hashPassword, maxDevices, planFeatures,
-  versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, tierForQuota, tierOf, verify, verifyPassword,
+  newest, versionLess, randomPassword, rollPeriod, safeEqual, sign, tag, tierForQuota, tierOf, verify, verifyPassword,
 } from "./lib.js";
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
 import { armor, httpsRedirect, securityTxt } from "./headers.js";
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
-import { build as buildSub, countriesOf, edgeFor, headers as subHeaders, listUpdated, readSubToken, storedListKeys, subPool, subToken } from "./sub.js";
+import { appLinks, appPool, build as buildSub, countriesOf, dayPick, edgeFor, headers as subHeaders, listUpdated, readSubToken, SLICE_COUNTRY, SLICE_MAX, sliceFor, storedListKeys, subPool, subToken } from "./sub.js";
 import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
 import { refreshRates } from "./fx.js";
 import { MAX_GB, MIN_GB, MONTHS, SALES_DEFAULTS, SALES_RANGE, catalog as salesCatalog, config as salesConfig, parseSteps } from "./sales.js";
@@ -108,6 +108,7 @@ async function route(request, env, url, ctx) {
     case "GET me": return me(request, env);
     case "GET edge": return edge(request, env);
     case "GET listkeys": return listKeys(request, env);
+    case "GET servers": return servers(request, env);
     case "GET devices": return devicesList(request, env);
     case "GET dns/google.mobileconfig": return dnsProfile("google");
     case "GET dns/cloudflare.mobileconfig": return dnsProfile("cloudflare");
@@ -580,20 +581,41 @@ async function edge(request, env) {
 const LIST_KEYS_GIVEN = 12;
 
 /**
- * The keys that open the collector's sealed lists (cmd/collect -keys-out),
- * for a signed-in user who may connect: the newest first. The lists of
- * the project's own servers are sealed with keys of their own (premium),
- * given only on a plan that has the own servers. A copy of the app with
- * the sign-in cut out gets none, and reads no list.
+ * The keys that open the sealed lists of the project's own servers
+ * (premium, cmd/collect -keys-out), for a signed-in user who may connect on
+ * a plan that has them: the newest first. The keys of the collector's
+ * lists of what it collected are given to no app: each account gets a
+ * slice of those servers instead (GET servers), so no account, and no
+ * copy of the app with its checks cut out, can read the whole collection.
  */
 async function listKeys(request, env) {
   await requireCurrentClient(request, env);
   const { user } = await authUser(request, env);
   const a = await viewOf(env, user, deviceOf(request), now());
   if (!a.allowed) return json({ keys: [], reason: a.reason });
-  const { keys, premium } = await recentListKeys(env);
-  // One list of keys, which the apps match to a list by its id.
-  return json({ keys: a.features.includes("own") ? [...keys, ...premium].sort((x, y) => y.id - x.id) : keys, reason: "" });
+  const { premium } = await recentListKeys(env);
+  return json({ keys: a.features.includes("own") ? premium : [], reason: "" });
+}
+
+// How often an account may ask for its slice in an hour: the app asks a
+// few times a day; a script asking more learns nothing more anyway.
+const SERVERS_PER_HOUR = 30;
+
+/**
+ * The signed-in account's slice of the best-tested servers (sub.js slice):
+ * the same all day, another the next, each named after its country.
+ */
+async function servers(request, env) {
+  await requireCurrentClient(request, env);
+  const { user } = await authUser(request, env);
+  const t = now();
+  const a = await viewOf(env, user, deviceOf(request), t);
+  if (!a.allowed) return json({ servers: [], reason: a.reason });
+  const key = "servers:" + user.id;
+  if (await blocked(env, key, SERVERS_PER_HOUR, 3600)) throw tooMany();
+  await count(env, key, 3600);
+  const entries = await appPool(env, dayPick(t));
+  return json({ servers: appLinks(await sliceFor(env, user.id, entries, t)), reason: "" });
 }
 
 /**
@@ -624,11 +646,11 @@ async function subInfo(request, env, url) {
   const { user } = await authUser(request, env);
   const t = now();
   const a = await viewOf(env, user, null, t);
-  const entries = await subPool(env);
+  const entries = await subPool(env, dayPick(t));
   return json({
     url: `${url.origin}/sub/${await subToken(env, user, t)}`,
     countries: countriesOf(entries),
-    servers: entries.length,
+    servers: (await sliceFor(env, user.id, entries, t)).length,
     edge: (await edgeFor(env, a)).length,
     brand: env.SITE_NAME || "Albatross",
   });
@@ -655,8 +677,12 @@ async function subscription(request, url, env) {
   if (needs && !a.features.includes(needs)) {
     return new Response(`${FEATURES[needs].name} comes with the ${TIERS[a.plans[needs]].name} plan and above. The subscription for all servers works on every plan.`, { status: 403 });
   }
-  const [entries, updated, edge] = await Promise.all([subPool(env), listUpdated(env), edgeFor(env, a)]);
-  const sub = buildSub(entries, choice, env.SITE_NAME || "Albatross", edge, updated);
+  const [entries, updated, edge] = await Promise.all([subPool(env, dayPick(t)), listUpdated(env), edgeFor(env, a)]);
+  // The account's slice (sub.js slice), of the chosen country's servers
+  // when there is a choice (fewer: SLICE_COUNTRY): the whole pool goes to no one.
+  const chosen = choice === "edge" ? [] : choice ? entries.filter((e) => e.country === choice) : entries;
+  const cap = choice && choice !== "edge" ? SLICE_COUNTRY : SLICE_MAX;
+  const sub = buildSub(await sliceFor(env, user.id, chosen, t, cap), choice, env.SITE_NAME || "Albatross", edge, updated);
   const h = subHeaders(sub.title, a);
   if (wantsSingBox(request, url)) {
     // The sing-box apps load a whole config, not a list of links.
@@ -771,17 +797,22 @@ async function adminPullFile(request, env) {
 const OLD_CLIENT = "0.4.0";
 let minClientCache = null; // { at, version }
 
-/** The oldest version that may still connect: min_version of the published update manifest. */
+/**
+ * The oldest version that may still connect: min_version of the published
+ * update manifest, or MIN_CLIENT (a variable set when the service is
+ * deployed, deploy-backend.yml) when that is newer.
+ */
 async function minClient(env) {
-  if (minClientCache && now() - minClientCache.at < 60) return minClientCache.version;
+  if (minClientCache && now() - minClientCache.at < 60) return newest(minClientCache.version, env.MIN_CLIENT);
   let version = "";
   try {
     const obj = env.FILES && (await env.FILES.get("list/main/update.json"));
     if (obj) version = String((await obj.json()).min_version || "");
   } catch {}
   minClientCache = { at: now(), version };
-  return version;
+  return newest(version, env.MIN_CLIENT);
 }
+
 
 /**
  * Refuses copies of the app older than the update manifest's min_version,

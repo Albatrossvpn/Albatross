@@ -184,7 +184,7 @@ test("the administrator renews, limits time, disables and re-enables", async () 
   assert.equal((await call("PATCH", `admin/users/${id}`, { token: admin, body: { quota_bytes: -5 } })).status, 400);
 });
 
-test("the lists' keys go to signed-in users who may connect, newest first", async () => {
+test("the own servers' lists' keys go to signed-in users who may connect on a plan with them; the collection's to no app", async () => {
   assert.equal((await call("GET", "listkeys")).status, 401);
   const admin = (await call("POST", "admin/login", { body: { username: ADMIN.username, password: ADMIN.password } })).body.token;
   await call("POST", "admin/users", { token: admin, body: { username: "keys-1", password: "keys-pass-1", quota_bytes: 0, max_seconds: 0, valid_days: 30 } });
@@ -192,8 +192,9 @@ test("the lists' keys go to signed-in users who may connect, newest first", asyn
   const r = await call("GET", "listkeys", { token });
   assert.equal(r.status, 200);
   assert.equal(r.headers.get("cache-control"), "no-store");
-  // No limit is VIP, whose plan has the own servers: their keys come too.
-  assert.deepEqual(r.body.keys.map((k) => k.id), [2001, 2000, 1001, 1000], "newest first, the premium keys among them");
+  // No limit is VIP, whose plan has the own servers: their keys come, newest
+  // first; the keys of the collector's lists of what it collected do not.
+  assert.deepEqual(r.body.keys.map((k) => k.id), [2000, 1000], "the premium keys alone");
   // The administrator gets them too (deploy/tester), the premium ones apart:
   // the tester seals hot.txt with the newest of `keys`. A user's session is
   // not the administrator's.
@@ -221,8 +222,8 @@ test("each plan has its features: the own servers' keys, the edge and a country'
   me = (await call("GET", "me", { token: gold })).body.account;
   assert.deepEqual(me.features, ["locations", "adblock", "bypass_apps", "protocols", "tun", "gps", "edge", "own"]);
   // The lists' keys: the own servers' only on a plan that has them.
-  assert.deepEqual((await call("GET", "listkeys", { token: bronze })).body.keys.map((k) => k.id), [2001, 1001]);
-  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys.map((k) => k.id), [2001, 2000, 1001, 1000]);
+  assert.deepEqual((await call("GET", "listkeys", { token: bronze })).body.keys, []);
+  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys.map((k) => k.id), [2000, 1000]);
   // The edge: Gold has it (none is deployed here), Bronze is told why not.
   assert.deepEqual((await call("GET", "edge", { token: bronze })).body, { links: [], reason: "plan" });
   assert.equal((await call("GET", "edge", { token: gold })).body.reason, "");
@@ -243,7 +244,7 @@ test("each plan has its features: the own servers' keys, the edge and a country'
   assert.equal(saved.status, 200);
   assert.equal(JSON.parse(saved.body.plan_features).own, "vip");
   assert.deepEqual((await call("GET", "me", { token: bronze })).body.account.features, ["locations"]);
-  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys.map((k) => k.id), [2001, 1001], "the own servers moved to VIP");
+  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys, [], "the own servers moved to VIP");
   assert.equal((await fetch(bs + "?c=de")).status, 200);
   assert.equal((await call("GET", "public")).body.plans.own, "vip");
   assert.equal((await call("PUT", "admin/settings", { token: admin, body: { plan_features: {} } })).status, 200);
@@ -494,6 +495,15 @@ test("subscriptions for other devices: one address per account, servers by count
   assert.match(info.body.url, /^https?:\/\/[^/]+\/sub\/[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
   assert.deepEqual(info.body.countries.map((x) => [x.code, x.count]), [["DE", 1], ["US", 1]]);
   assert.equal(info.body.servers, 3);
+  // The app's slice of the same servers, each named after its country only.
+  assert.equal((await call("GET", "servers")).status, 401, "signed-in users only");
+  const sl = await call("GET", "servers", { token });
+  assert.equal(sl.status, 200);
+  assert.equal(sl.headers.get("cache-control"), "no-store");
+  assert.equal(sl.body.reason, "");
+  assert.equal(sl.body.servers.length, 4, "a pool this small is given whole, the app reading what the Apple apps do not");
+  assert.equal(sl.body.servers.some((l) => /fast|no-country|Germany-1/.test(decodeURIComponent(l))), false, "the servers' own names never show");
+  assert.deepEqual((await call("GET", "servers", { token })).body.servers, sl.body.servers, "the same all day");
   // The local server answers under the deployed name; the address is reached here.
   info.body.url = BASE + new URL(info.body.url).pathname;
 

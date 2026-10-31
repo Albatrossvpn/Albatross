@@ -28,7 +28,17 @@ const (
 	KindLEAP         Kind = "leap"     // a LEAP provider (Riseup): OpenVPN with an anonymous certificate
 	KindFeed         Kind = "feed"     // an RSS or Atom feed (a channel's videos): the lists its newest entries link to
 	KindWarp         Kind = "warp"     // the device's own WARP account: servers made on the device (Fetcher.Warp)
+	KindAccount      Kind = "account"  // the signed-in account's slice of the best servers (Fetcher.Account)
 )
+
+// Account is the source of the signed-in account's slice of the servers the
+// collector found and tested best: the account service picks a few dozen
+// for each account and day (account.Client.Servers), since no app is given
+// the collector's whole lists. The app keeps them on disk; refreshed with
+// the hot list's pace, they are tested first.
+func Account() Source {
+	return Source{ID: ID(KindAccount, "servers"), Kind: KindAccount, URL: "servers", Tier: TierPriority, Enabled: true, Hot: true}
+}
 
 // Warp is the source of the servers made from the device's own free WARP
 // account: AmneziaWG and WireGuard to WARP's addresses, which give the
@@ -102,6 +112,8 @@ func (s Source) Label() string {
 		return "VPN Gate"
 	case KindWarp:
 		return "Cloudflare WARP (this device)"
+	case KindAccount:
+		return "Albatross"
 	case KindLEAP:
 		n := LEAPName(s.URL)
 		return strings.ToUpper(n[:1]) + n[1:] + " VPN"
@@ -214,23 +226,10 @@ func Central(install uint32) []Source {
 			out[len(out)-1].Sealed, out[len(out)-1].Keyed = true, true
 		}
 	}
-	// hot.txt is the few hundred servers that passed the collector's real
-	// test most recently: small, re-tested every 20 minutes, tried first.
-	// The lists go out sealed with a key that changes every collection
-	// and that only signed-in users get from the account service, so a
-	// copy of the app with the sign-in cut out reads nothing.
-	add("hot.txt"+KeyedSuffix, TierPriority)
-	out[len(out)-1].Hot, out[len(out)-1].Keyed = true, true
-	// new.txt is what fresh.txt gained lately; phones fetch it often and
-	// the whole fresh.txt rarely.
-	add("new.txt"+KeyedSuffix, TierPriority)
-	out[len(out)-1].Delta, out[len(out)-1].Keyed = true, true
-	add("fresh.txt"+KeyedSuffix, TierPriority)
-	out[len(out)-1].Keyed = true
-	for i := 1; i <= CentralShards; i++ {
-		add(fmt.Sprintf("all-%d.txt", i)+KeyedSuffix, TierDeep)
-		out[len(out)-1].Keyed = true
-	}
+	// The collector's lists of what it collected (hot.txt, new.txt,
+	// fresh.txt, all-N.txt) are not read: they go out sealed with keys the
+	// account service gives no app, so that no account learns them whole.
+	// Each account gets a slice of the best of them instead (Account).
 	return out
 }
 

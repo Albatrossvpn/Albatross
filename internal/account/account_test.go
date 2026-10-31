@@ -358,6 +358,13 @@ func TestEdge(t *testing.T) {
 				return
 			}
 			fmt.Fprint(w, `{"keys":[{"id":1761480000,"key":"00ff"}]}`)
+		case "/api/v1/servers":
+			if r.Header.Get("Authorization") != "Bearer t1" {
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprint(w, `{"error":"Sign in again."}`)
+				return
+			}
+			fmt.Fprint(w, `{"servers":["vless://x@s.example:443?security=reality#DE 1"],"reason":""}`)
 		case "/api/v1/edge":
 			gotAuth = r.Header.Get("Authorization")
 			if gotAuth != "Bearer t1" {
@@ -376,6 +383,9 @@ func TestEdge(t *testing.T) {
 	if _, err := c.Edge(context.Background()); !errors.Is(err, ErrSignedOut) {
 		t.Fatalf("signed out: got %v", err)
 	}
+	if _, err := c.Servers(context.Background()); !errors.Is(err, ErrSignedOut) {
+		t.Fatalf("servers signed out: got %v", err)
+	}
 	if _, err := c.Login(context.Background(), "u", "p"); err != nil {
 		t.Fatal(err)
 	}
@@ -386,6 +396,10 @@ func TestEdge(t *testing.T) {
 	keys, err := c.ListKeys(context.Background())
 	if err != nil || len(keys) != 1 || keys[0].ID != 1761480000 || keys[0].Key != "00ff" {
 		t.Fatalf("list keys %v err %v", keys, err)
+	}
+	servers, err := c.Servers(context.Background())
+	if err != nil || len(servers) != 1 || !strings.HasPrefix(servers[0], "vless://x@s.example") {
+		t.Fatalf("servers %v err %v", servers, err)
 	}
 	// A session the service no longer accepts is forgotten.
 	c.mu.Lock()

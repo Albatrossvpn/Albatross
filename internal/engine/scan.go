@@ -83,6 +83,7 @@ func (e *Engine) refreshLoop() {
 	defer e.wg.Done()
 	states := e.loadStates()
 	e.loadListKeys()
+	e.loadSlice()
 	e.warmStart(states)
 	e.loadEdge()
 	states = nil
@@ -119,6 +120,7 @@ func (e *Engine) refreshLoop() {
 			e.refreshWarp(warp, tor)
 		}
 		e.refreshEdge()
+		e.refreshSlice()
 		select {
 		case <-e.ctx.Done():
 			return
@@ -382,6 +384,11 @@ func (e *Engine) refreshSources(central bool) {
 }
 
 func (e *Engine) cachedText(s sources.Source) (string, bool) {
+	if s.Kind == sources.KindAccount {
+		// Kept by the engine itself (slice.go), never in the fetcher's cache.
+		text, _ := e.sliceText(e.ctx)
+		return text, text != ""
+	}
 	return e.fetcher.Cached(s)
 }
 
