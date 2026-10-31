@@ -487,3 +487,23 @@ test("each account also gets its own share of the servers reached through the CD
   assert.deepEqual((await resistantFor(env, 7, t, have)).map((e) => e.link), a.map((e) => e.link), "the same all day");
   assert.notDeepEqual((await resistantFor(env, 8, t, have)).map((e) => e.link), a.map((e) => e.link), "another for another account");
 });
+
+test("a higher plan gets more servers, and no plan the pool whole", async () => {
+  const { sliceSize, SLICE_TIERS, SLICE_SHARE } = await import("../src/sub.js");
+  const p = bigPool();
+  const env = { TOKEN_SECRET: "t".repeat(40) };
+  const day = 1761480000 - (1761480000 % DAY);
+  const n = {};
+  for (const tier of ["bronze", "silver", "gold", "vip"]) {
+    const s = sliceSize(tier, p.length);
+    n[tier] = (await sliceFor(env, 7, p, day + 60, s.max, s.base)).length;
+    assert.ok(n[tier] <= Math.ceil(p.length * SLICE_SHARE), `${tier}: never the pool whole`);
+  }
+  assert.ok(n.bronze < n.silver && n.silver < n.gold && n.gold <= n.vip, JSON.stringify(n));
+  assert.ok(SLICE_TIERS.bronze.resist < SLICE_TIERS.vip.resist, "more of those reached through the CDN too");
+  assert.deepEqual(sliceSize("unknown", p.length), sliceSize("bronze", p.length), "an unknown plan is the lowest");
+  // Every country is still there on every plan.
+  const s = sliceSize("bronze", p.length);
+  const countries = new Set((await sliceFor(env, 7, p, day + 60, s.max, s.base)).map((e) => e.country));
+  assert.equal(countries.size, new Set(p.filter((e) => e.country !== "IR").map((e) => e.country)).size);
+});

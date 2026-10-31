@@ -69,6 +69,11 @@ func (e *Engine) refreshListKeys() {
 	if e.acct == nil || !e.acct.View().SignedIn {
 		return
 	}
+	// The service gives an app only the own servers' keys, on a plan with
+	// them (the account's slice stands in for the collector's lists).
+	if !e.Can(FeatureOwn) {
+		return
+	}
 	listKeysMu.Lock()
 	soon := time.Since(listKeysFetched) < listKeysRetry
 	if !soon {
