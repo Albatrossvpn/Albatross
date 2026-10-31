@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Albatrossvpn/vp/internal/node"
+	"github.com/Albatrossvpn/vp/internal/obf"
 )
 
 const (
@@ -407,7 +408,7 @@ func DomesticBases() []string {
 			}
 		}
 	}
-	add(strings.Split(DomesticMirror, ","))
+	add(strings.Split(obf.Reveal(DomesticMirror), ","))
 	if ExtraMirrors != nil {
 		add(ExtraMirrors())
 	}

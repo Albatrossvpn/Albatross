@@ -48,8 +48,19 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8 shrinks and obfuscates the app's Java (proguard-rules.pro
+            // keeps the gomobile bridge and the VPN service). The web UI is
+            // served by the Go engine over a local HTTP port, not from app
+            // resources, so resource shrinking is left off.
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+        }
+        // The emulator smoke test builds debug; obfuscating it too means the
+        // test exercises the very R8 rules the release ships with.
+        debug {
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 
