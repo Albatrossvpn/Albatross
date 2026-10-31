@@ -33,7 +33,24 @@ type region struct {
 var regions = []region{
 	{Code: "CN", Name: "China", Suffixes: []string{".cn", ".xn--fiqs8s", ".xn--fiqz9s"}},
 	{Code: "IR", Name: "Iran", Suffixes: []string{".ir", ".xn--mgba3a4f16a"}, Subnet: "2.176.0.0/24", // TCI
-		Extra:  []string{"aparatcdn.com", "abrarvan.com", "snappmarket.com", "ofogh-kourosh.com", "excoino.com", "chabok.io", "behnevis.com"},
+		// Well-known Iranian services that live on .com/.io/.ai/.net rather
+		// than .ir, so a plain-TLD match misses them. They refuse or break
+		// on a foreign address (shops, exchanges, messengers, payments,
+		// clouds), so they must open directly; the system proxy's bypass
+		// list (Windows) reads this list too, where the rule set cannot.
+		Extra: []string{"aparatcdn.com", "abrarvan.com", "snappmarket.com", "ofogh-kourosh.com", "excoino.com", "chabok.io", "behnevis.com",
+			// shops and marketplaces
+			"okala.com", "digikala.com", "digikalajet.com", "basalam.com", "torob.com", "sheypoor.com", "emalls.ir",
+			// media, books, learning
+			"aparat.com", "filimo.com", "taaghche.com", "fidibo.com",
+			// messengers
+			"bale.ai", "igap.net", "gap.im",
+			// payments, wallets, exchanges
+			"zarinpal.com", "mydigipay.com", "sibche.com", "behpardakht.com", "ramzinex.com", "tetherland.com", "exir.io",
+			// services
+			"alopeyk.com", "behtarino.com",
+			// Iranian clouds and hosts whose addresses do not geolocate to Iran
+			"hamravesh.com", "fandogh.cloud", "parspack.com", "iranserver.com", "hostiran.net"},
 		Shared: []string{"co.com", "ct.ws", "ddnsguru.com", "dyndns.org", "epizy.com", "info.com", "selfip.com", "sells-it.net", "uni.me"}},
 }
 
@@ -112,5 +129,17 @@ func DomesticApps(code string) []string {
 		"com.ansar", "com.resalat", "com.mellat", "com.bmi.", "com.hamrahbank", "com.snapp", "com.digikala", "com.zarinpal",
 		"com.mydigipay", "com.sibche", "com.tap30", "com.alibaba.ir", "com.divar", "com.sheypoor", "com.myket", "com.farsitel",
 		"cab.snapp.", "taxi.tap30.", "com.zoodfood.", "com.snappfood", "com.snapptrip", "com.balad", "com.neshan", "com.torob",
-		"com.basalam", "com.cafebazaar", "com.filimo", "com.namava", "com.aparat", "com.rubika", "com.eitaa", "mobi.mmk."}
+		"com.basalam", "com.cafebazaar", "com.filimo", "com.namava", "com.aparat", "com.rubika", "com.eitaa", "mobi.mmk.",
+		// Shops, exchanges and messengers that refuse a foreign address.
+		// Each prefix names one publisher; one that matches no installed app
+		// costs nothing, and none is broad enough to catch a foreign app.
+		"com.okala", "ir.okala", // Okala
+		"market.nobitex", "com.nobitex", "ir.wallex", "com.wallex", "com.bitpin", "ir.bitpin", // exchanges
+		"com.ramzinex", "ir.ramzinex", "com.tetherland", "ir.tetherland", "io.exir", "com.exir",
+		"mobi.mmdt.", // Soroush Plus (mobi.mmdt.ott)
+		"net.iGap", "net.igap", "com.gapafzar", // iGap, Gap
+		"com.taaghche", "ir.taaghche", "com.fidibo", "ir.fidibo", // books
+		"com.alopeyk", "ir.alopeyk", "com.achareh", "ir.achareh", "com.behtarino", // services
+		"com.irancell", "com.mtnirancell", // MyIrancell
+	}
 }
