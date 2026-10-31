@@ -125,6 +125,7 @@ async function route(request, env, url, ctx) {
     case "POST admin/files": return adminPullFile(request, env);
     case "POST stats": return crowdReport(request, env);
     case "POST admin/crowd/publish": return adminPublishCrowd(request, env);
+    case "GET admin/diag": return adminDiag(request, env, url);
     case "GET stats": return crowdSummary(request, env, url);
     case "POST telegram": return telegramWebhook(request, env, supportKit(env), ctx);
     case "GET support/info": return supportInfo(env);
@@ -1053,17 +1054,23 @@ async function adminSaveSettings(request, env) {
 // address is stored: the rate limit keeps only a keyed hash of it, for a day.
 
 const CROWD_KINDS = { proto: 16, style: 32, hello: 16, port: 8 };
+// Diagnostics (migration 0012): at most this many named counters of each
+// kind in a report, kept this many days.
+const CROWD_NAMES = 64;
+const CROWD_DIAG_DAYS = 30;
 // Per-server reports: at most this many servers per report, kept this
 // many days, and summed over the last few for the collector.
 const CROWD_SERVERS = 300;
 const CROWD_SERVER_DAYS = 7;
 const CROWD_SERVER_WINDOW = 3;
 
-/** Sums users' reports about servers over the last days into crowd.json for the collector (cmd/collect -crowd). */
-export function crowdServersSummary(rows, today) {
+/** Sums users' reports about servers over the last days into crowd.json for the collector (cmd/collect -crowd), with the protocols users chose and had no server for (demand), so it keeps more of what people ask for. */
+export function crowdServersSummary(rows, today, demand = {}) {
   const servers = {};
   for (const r of rows) servers[r.key] = [r.ok, r.n];
-  return { updated: new Date(today * DAY * 1000).toISOString(), days: CROWD_SERVER_WINDOW, servers };
+  const out = { updated: new Date(today * DAY * 1000).toISOString(), days: CROWD_SERVER_WINDOW, servers };
+  if (Object.keys(demand).length) out.demand = demand;
+  return out;
 }
 
 async function publishCrowdServers(env) {
@@ -1072,7 +1079,17 @@ async function publishCrowdServers(env) {
   const { results } = await env.DB.prepare(
     "SELECT key, SUM(ok) AS ok, SUM(n) AS n FROM crowd_servers WHERE day >= ?1 GROUP BY key HAVING SUM(n) >= 2",
   ).bind(today - CROWD_SERVER_WINDOW).all();
-  const summary = crowdServersSummary(results, today);
+  // What people asked for and could not get, over the same days.
+  const demand = {};
+  try {
+    const { results: asked } = await env.DB.prepare(
+      "SELECT code, SUM(n) AS n FROM diag WHERE kind = 'demand' AND day >= ?1 GROUP BY code",
+    ).bind(today - CROWD_SERVER_WINDOW).all();
+    for (const r of asked) demand[r.code] = r.n;
+  } catch {
+    // The table arrives with migration 0012; until it is applied there is no demand.
+  }
+  const summary = crowdServersSummary(results, today, demand);
   await putList(env.FILES, "servers/crowd.json", new TextEncoder().encode(JSON.stringify(summary)).buffer);
   return summary;
 }
@@ -1083,6 +1100,23 @@ async function adminPublishCrowd(request, env) {
   const summary = await publishCrowdServers(env);
   if (!summary) throw new HttpError(503, "No file storage is bound.");
   return json({ servers: Object.keys(summary.servers).length });
+}
+
+/** The administrator reads the diagnostics: per version and platform, each named count over the last days (?days=7, at most 30), and the networks where connecting fails most, so what breaks where is plain before the next version. */
+async function adminDiag(request, env, url) {
+  await authAdmin(request, env);
+  const days = Math.min(30, Math.max(1, Number(url.searchParams.get("days")) || 7));
+  const since = Math.floor(now() / DAY) - days;
+  const { results: counts } = await env.DB.prepare(
+    `SELECT version, platform, kind, code, SUM(n) AS n, COUNT(DISTINCT asn) AS asns FROM diag
+     WHERE day >= ?1 GROUP BY version, platform, kind, code ORDER BY version DESC, platform, kind, n DESC`,
+  ).bind(since).all();
+  const { results: failing } = await env.DB.prepare(
+    `SELECT asn, code, SUM(n) AS n FROM diag
+     WHERE kind = 'diag' AND day >= ?1 AND (code LIKE 'connect_fail%' OR code LIKE 'connect_no_server%')
+     GROUP BY asn, code ORDER BY n DESC LIMIT 100`,
+  ).bind(since).all();
+  return json({ days, counts, failing_networks: failing });
 }
 const CROWD_DAYS = 14;
 // Reports from one address in a day. The app reports only through the VPN,
@@ -1147,6 +1181,27 @@ async function crowdReport(request, env) {
     env.DB.prepare("DELETE FROM crowd WHERE day < ?1").bind(day - CROWD_DAYS),
     env.DB.prepare("DELETE FROM crowd_reports WHERE day < ?1").bind(day - CROWD_DAYS),
   );
+  // Diagnostics (0012_diag.sql): the app's version and platform, named
+  // counts of what happened (diag) and of the protocols chosen that had no
+  // server (demand). Names and counts only; one report counts for at most
+  // 1000 of a name. A report without a version carries none.
+  const version = typeof b.version === "string" && /^[0-9][0-9A-Za-z.+-]{0,23}$/.test(b.version) ? b.version : "";
+  const platform = ["android", "windows", "darwin", "linux"].includes(b.platform) ? b.platform : "other";
+  if (version) {
+    for (const kind of ["demand", "diag"]) {
+      const m = b[kind];
+      if (m == null) continue;
+      if (typeof m !== "object" || Array.isArray(m) || Object.keys(m).length > CROWD_NAMES) throw new HttpError(400, "Bad request.");
+      for (const [code, n] of Object.entries(m)) {
+        if (!/^[a-z0-9_.-]{1,40}$/.test(code) || !Number.isInteger(n) || n < 1) throw new HttpError(400, "Bad request.");
+        stmts.push(env.DB.prepare(
+          `INSERT INTO diag (day, version, platform, asn, kind, code, n) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+           ON CONFLICT (day, version, platform, asn, kind, code) DO UPDATE SET n = n + ?7`,
+        ).bind(day, version, platform, asn, kind, code, Math.min(n, 1000)));
+      }
+    }
+    stmts.push(env.DB.prepare("DELETE FROM diag WHERE day < ?1").bind(day - CROWD_DIAG_DAYS));
+  }
   await env.DB.batch(stmts);
   return json({ ok: true });
 }

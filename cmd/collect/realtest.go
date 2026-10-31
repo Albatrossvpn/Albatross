@@ -267,7 +267,7 @@ func hotList(ordered []*entry, passed map[*entry]time.Duration, max int, crowd c
 	// Every protocol that has passing servers is in the hot list, with at
 	// least its reserve of them, so a user who picks any protocol, or a
 	// network that spares only one, finds servers.
-	return keepReserves(out, cands, max, func(p string) int { return reserveOf(p, max) })
+	return keepReserves(out, cands, max, func(p string) int { return crowd.reserveOf(p, max) })
 }
 
 // protoReserve is how many servers of each protocol a 300-server hot list

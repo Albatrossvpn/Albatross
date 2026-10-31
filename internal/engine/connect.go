@@ -236,10 +236,14 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 		exclude[k] = true
 	}
 	triedRecent := false
+	// asked is when this search began, for the diagnostics' time to
+	// connect; demanded says the crowd was told once that nothing was here.
+	asked, demanded := time.Now(), false
 	for attempt := 0; ; attempt++ {
 		e.mu.Lock()
 		stale := e.connGen != gen
 		want := e.wantConnect && e.target == country && !stale
+		chosen := e.settings.Protocol
 		e.mu.Unlock()
 		if stale {
 			// A newer connect took over; its VPN or proxy must stay up.
@@ -268,6 +272,20 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 				// pause. Servers that keep failing drop out on their own.
 				exclude = map[string]bool{}
 			}
+			if !demanded {
+				// Nothing to connect to: tell the crowd once per search (a
+				// chosen protocol by name, so the collector looks harder for
+				// it) and fetch the latest lists at once, since the
+				// collector may already know servers this device lacks.
+				demanded = true
+				if chosen != "" {
+					e.noteDemand(chosen)
+					e.noteDiag("connect_no_server_chosen")
+				} else {
+					e.noteDiag("connect_no_server")
+				}
+				e.refreshHotNow()
+			}
 			e.mu.Lock()
 			shut := e.reg.Regime.severity() >= regimeAllowlist.severity()
 			e.mu.Unlock()
@@ -289,6 +307,7 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 		e.setStatus(StatusConnecting, fmt.Sprintf("Connecting to %s…", name))
 		err := e.start(gen, country, picks, pinned != nil)
 		if err == nil {
+			e.noteDiag("connect_ok_" + ttcBucket(time.Since(asked)))
 			return nil
 		}
 		e.mu.Lock()
@@ -298,6 +317,11 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 			return errStale
 		}
 		e.logf("warn", "Connection attempt failed: %v", err)
+		if errors.Is(err, errServers) {
+			e.noteDiag("connect_fail_servers")
+		} else {
+			e.noteDiag("connect_fail_local")
+		}
 		if !errors.Is(err, errServers) && pinned == nil {
 			// The local setup failed (the tunnel could not be made, a core
 			// quit at once): the servers are not to blame, and trying the
@@ -324,6 +348,21 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 			exclude = map[string]bool{}
 		}
 	}
+}
+
+// ttcBucket names how long a connection took to come up, for the crowd's
+// diagnostics: under three seconds is what it should feel like, over
+// thirty is what drives people to another app.
+func ttcBucket(d time.Duration) string {
+	switch {
+	case d < 3*time.Second:
+		return "lt3s"
+	case d < 10*time.Second:
+		return "3_10s"
+	case d < 30*time.Second:
+		return "10_30s"
+	}
+	return "gt30s"
 }
 
 // searchMessage is what the app says while it looks for a server. With a

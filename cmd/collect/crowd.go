@@ -22,6 +22,10 @@ import (
 type crowdStats struct {
 	rates  map[uint64][2]float64
 	strict bool
+	// demand is, per protocol, how often users chose it and found no
+	// server (the service's sum of the apps' reports): the hot list keeps
+	// more of what people ask for.
+	demand map[string]float64
 }
 
 // crowdFile is the file form: servers maps a server key (hex) to [passed,
@@ -32,6 +36,9 @@ type crowdFile struct {
 	Tester  string                `json:"tester,omitempty"`
 	Days    int                   `json:"days,omitempty"`
 	Servers map[string][2]float64 `json:"servers"`
+	// Demand is per protocol name how often users chose it and had no
+	// server, summed by the service over the same days.
+	Demand map[string]float64 `json:"demand,omitempty"`
 }
 
 // testerFresh is how long a tester's report counts as current.
@@ -43,7 +50,7 @@ const strictMin = 100
 
 // loadCrowd reads the files; a missing or unreadable one adds nothing.
 func loadCrowd(paths string) crowdStats {
-	out := crowdStats{rates: map[uint64][2]float64{}}
+	out := crowdStats{rates: map[uint64][2]float64{}, demand: map[string]float64{}}
 	for _, path := range strings.Split(paths, ",") {
 		path = strings.TrimSpace(path)
 		if path == "" {
@@ -58,6 +65,9 @@ func loadCrowd(paths string) crowdStats {
 		if err := json.Unmarshal(b, &f); err != nil {
 			log.Printf("crowd: %s: %v", path, err)
 			continue
+		}
+		for proto, n := range f.Demand {
+			out.demand[proto] += n
 		}
 		confirmed := 0
 		for k, v := range f.Servers {
@@ -80,6 +90,18 @@ func loadCrowd(paths string) crowdStats {
 		log.Printf("crowd: %s: %d servers (tester %q, %d confirmed, fresh %v)", path, len(f.Servers), f.Tester, confirmed, fresh)
 	}
 	return out
+}
+
+// demandPerSlot is how many users asking for a protocol that had no server
+// add one more server of it to the hot list's reserve, up to doubling it.
+const demandPerSlot = 5
+
+// reserveOf is how many servers of proto the hot list keeps at least: the
+// usual share (reserveOf), and more when users chose the protocol and had
+// no server, so what people ask for is what gets kept.
+func (c crowdStats) reserveOf(proto string, max int) int {
+	base := reserveOf(proto, max)
+	return base + min(base, int(c.demand[proto]/demandPerSlot))
 }
 
 // tier ranks a server by the tests from inside: 0 works there, 1 unknown

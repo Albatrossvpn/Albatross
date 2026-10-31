@@ -248,6 +248,23 @@ func TestRareProtocolsAreTestedAndKept(t *testing.T) {
 
 // Every protocol with passing servers has at least protoReserve in the
 // hot list, even when the best half is all one protocol.
+// Users who chose a protocol and found no server raise its reserve in the
+// hot list, up to doubling it; nothing asked for leaves it as it was.
+func TestDemandRaisesReserve(t *testing.T) {
+	base := reserveOf("tuic", 300)
+	if got := (crowdStats{}).reserveOf("tuic", 300); got != base {
+		t.Fatalf("no demand: %d, want %d", got, base)
+	}
+	c := crowdStats{demand: map[string]float64{"tuic": 10 * demandPerSlot}}
+	if got := c.reserveOf("tuic", 300); got != base+10 {
+		t.Fatalf("ten slots of demand: %d, want %d", got, base+10)
+	}
+	c.demand["tuic"] = 1000 * demandPerSlot
+	if got := c.reserveOf("tuic", 300); got != 2*base {
+		t.Fatalf("huge demand: %d, want the double, %d", got, 2*base)
+	}
+}
+
 func TestHotListHasEveryProtocol(t *testing.T) {
 	var ordered []*entry
 	passed := map[*entry]time.Duration{}

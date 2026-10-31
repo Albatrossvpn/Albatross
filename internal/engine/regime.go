@@ -347,6 +347,9 @@ func (e *Engine) loadRegime() {
 }
 
 func (e *Engine) saveRegime(s regimeState) {
+	// For the diagnostics: which network conditions installs meet, and
+	// how often. A name, never the probes' details.
+	e.noteDiag("regime_" + string(s.Regime))
 	b, err := json.Marshal(s)
 	if err != nil {
 		return

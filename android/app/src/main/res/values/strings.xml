@@ -14,4 +14,9 @@
     <string name="update_install">Install</string>
     <string name="start_failed">The app could not start</string>
     <string name="vpn_denied">Albatross cannot connect without VPN permission.</string>
+    <!-- Shown once before Android's own VPN prompt, which reads like a
+         warning ("…monitor network traffic"): what it is, in plain words. -->
+    <string name="vpn_explain_title">One permission to connect</string>
+    <string name="vpn_explain_body">Android will now ask you to allow Albatross to set up a VPN connection. Every VPN app gets this same system prompt; it is how Android lets an app carry your traffic. Your traffic is encrypted, and what you open is not logged.</string>
+    <string name="vpn_explain_ok">Continue</string>
 </resources>

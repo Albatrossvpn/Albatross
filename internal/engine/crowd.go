@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,14 @@ type crowdCounts struct {
 	// names no address), so the collector learns which of its servers work
 	// from users' networks, not only from its own test abroad.
 	Servers map[string]*crowdRate `json:"servers,omitempty"`
+	// Demand counts, per protocol the user chose, the times no server of it
+	// could be had here, so the collector looks harder for what people ask
+	// for. Diag counts named events (how connections went and why they did
+	// not, how long they took, what the network looked like); the service
+	// groups them by version, platform and operator, so the next version
+	// fixes what breaks where. Names and counts only.
+	Demand map[string]uint32 `json:"demand,omitempty"`
+	Diag   map[string]uint32 `json:"diag,omitempty"`
 }
 
 // crowdServers bounds how many servers one report names.
@@ -105,8 +114,26 @@ func (c *crowdCounts) report(asn uint32) map[string]any {
 			has = true
 		}
 	}
+	// Copies: the counts keep changing while the report is on its way, and
+	// a map read while written would crash the app.
+	if len(c.Demand) > 0 {
+		out["demand"] = copyCounts(c.Demand)
+		has = true
+	}
+	if len(c.Diag) > 0 {
+		out["diag"] = copyCounts(c.Diag)
+		has = true
+	}
 	if !has {
 		return nil
+	}
+	return out
+}
+
+func copyCounts(m map[string]uint32) map[string]uint32 {
+	out := make(map[string]uint32, len(m))
+	for k, v := range m {
+		out[k] = v
 	}
 	return out
 }
@@ -202,6 +229,9 @@ func (e *Engine) crowdReport(ctx context.Context) {
 			continue
 		}
 		if b := t.Pend.report(t.ASN); b != nil {
+			// The version and platform, for the diagnostics: the service
+			// groups what breaks by them, never by install.
+			b["version"], b["platform"] = e.opt.Version, crowdPlatform(e.opt.Mobile)
 			todo = append(todo, pending{k, b})
 		}
 	}
@@ -252,6 +282,74 @@ func (c *crowdCounts) minus(body map[string]any) {
 	sub(c.Style[:], body["style"])
 	sub(c.Hello[:], body["hello"])
 	sub(c.Port[:], body["port"])
+	subMap := func(dst map[string]uint32, v any) {
+		sent, _ := v.(map[string]uint32)
+		for k, n := range sent {
+			if x, ok := dst[k]; ok {
+				if x <= n {
+					delete(dst, k)
+				} else {
+					dst[k] = x - n
+				}
+			}
+		}
+	}
+	subMap(c.Demand, body["demand"])
+	subMap(c.Diag, body["diag"])
+}
+
+// crowdPlatform names the platform for the diagnostics: the phone build,
+// or the desktop's system.
+func crowdPlatform(mobile bool) string {
+	if mobile {
+		return "android"
+	}
+	return runtime.GOOS
+}
+
+// crowdNames bounds the named counters one report carries.
+const crowdNames = 64
+
+// noteDemand counts, for the crowd report, that the user chose a protocol
+// and no server of it could be had here: the service passes the counts on
+// to the collector, which then looks harder for that protocol.
+func (e *Engine) noteDemand(protocol string) {
+	if protocol == "" {
+		return
+	}
+	e.noteCount(func(c *crowdCounts) {
+		if c.Demand == nil {
+			c.Demand = map[string]uint32{}
+		}
+		if len(c.Demand) < crowdNames || c.Demand[protocol] > 0 {
+			c.Demand[protocol]++
+		}
+	})
+}
+
+// noteDiag counts one named event for the crowd report's diagnostics: how
+// a connection went and why it did not (no server, the local setup, the
+// servers), how long it took, what the network looked like, what a speed
+// test did. Names and counts only; sent, like the rest, only with the
+// user's permission (Settings.ShareStats) and only through the VPN.
+func (e *Engine) noteDiag(name string) {
+	e.noteCount(func(c *crowdCounts) {
+		if c.Diag == nil {
+			c.Diag = map[string]uint32{}
+		}
+		if len(c.Diag) < crowdNames || c.Diag[name] > 0 {
+			c.Diag[name]++
+		}
+	})
+}
+
+// noteCount applies f to this network's pending report. It takes the
+// network table's lock alone, so it may be called from anywhere that does
+// not hold it.
+func (e *Engine) noteCount(f func(*crowdCounts)) {
+	e.net.mu.Lock()
+	defer e.net.mu.Unlock()
+	f(&e.net.table().Pend)
 }
 
 // crowdCall tries the service's addresses in turn.

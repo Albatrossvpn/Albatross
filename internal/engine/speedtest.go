@@ -126,6 +126,7 @@ func (e *Engine) runSpeedTest(ctx context.Context, cancel context.CancelFunc, id
 			s.Phase, s.Error = "error", "The test could not finish. Try again in a moment."
 		})
 		e.logf("warn", "Speed test: %v", err)
+		e.noteDiag("speedtest_fail")
 	}
 	proxy := c.memberProxy(m)
 	keep := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxy)}, Timeout: 10 * time.Second}
