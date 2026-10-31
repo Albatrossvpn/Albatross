@@ -653,6 +653,35 @@ func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, o
 			out = append(out, s)
 		}
 	}
+	// A connection should be a mix, not a monoculture. In automatic mode,
+	// alongside the fast servers keep one throttle-resistant anchor — a
+	// Cloudflare-fronted server or a WARP/Psiphon method — so when this
+	// network throttles the plain servers the race and the failover have a
+	// steady exit to move to, instead of hopping between equally throttled
+	// ones. Only when the group holds none already and the pool has one, and
+	// by giving up the slowest member, never the fastest server. A chosen
+	// protocol fills the group with that protocol alone, so leave it be.
+	if e.settings.Protocol == "" && n >= 3 && len(out) >= 2 {
+		anchored := false
+		for _, s := range out {
+			if s.throttleResistant() {
+				anchored = true
+				break
+			}
+		}
+		if !anchored {
+			for _, s := range list {
+				if taken[s] || !s.throttleResistant() {
+					continue
+				}
+				if len(out) >= n {
+					out = out[:len(out)-1]
+				}
+				out = append(out, s)
+				break
+			}
+		}
+	}
 	return out
 }
 
