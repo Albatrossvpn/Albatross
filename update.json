@@ -2,26 +2,26 @@
   "download_url": "https://albatrossvpn.online/#download",
   "files": {
     "android-arm64-v8a": {
-      "sha256": "08855b13453849d0a104dbcfef26f24c160657f6bd7f8347841715375cd25b94",
+      "sha256": "d85ed5334e4d42a3062d6a5ffd3e1cf3e0bc3523abd8c6f0ac96fed478ea3b03",
       "urls": [
-        "https://albatrossvpn.online/download/Albatross-1.2.1-android.apk",
-        "https://accounts.albatrossvpn.online/dl/v1.2.1/Albatross-1.2.1-android.apk",
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.2.1/Albatross-1.2.1-android.apk"
+        "https://albatrossvpn.online/download/Albatross-1.2.2-android.apk",
+        "https://accounts.albatrossvpn.online/dl/v1.2.2/Albatross-1.2.2-android.apk",
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.2.2/Albatross-1.2.2-android.apk"
       ]
     },
     "windows": {
-      "sha256": "6f2d382a6bf52555db27e78dbffb110b1f97890ebbe6c85b109157033f778818",
+      "sha256": "e4b06813837e5b8d46a852751e32ad17ebf74b66dd01fc193128f8bff0f5ff4e",
       "urls": [
-        "https://albatrossvpn.online/download/Albatross-Setup-1.2.1.exe",
-        "https://accounts.albatrossvpn.online/dl/v1.2.1/Albatross-Setup-1.2.1.exe",
-        "https://github.com/Albatrossvpn/Albatross/releases/download/v1.2.1/Albatross-Setup-1.2.1.exe"
+        "https://albatrossvpn.online/download/Albatross-Setup-1.2.2.exe",
+        "https://accounts.albatrossvpn.online/dl/v1.2.2/Albatross-Setup-1.2.2.exe",
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.2.2/Albatross-Setup-1.2.2.exe"
       ]
     }
   },
-  "latest_version": "1.2.1",
-  "message": "Server problems are fixed. Albatross 1.2.1 picks servers by a real speed test, not just ping, and drops servers that are slow or carry no data. You can now also buy and recharge data from the app. Please update.",
+  "latest_version": "1.2.2",
+  "message": "Albatross 1.2.2: a tidier Settings screen, a clearer speed test, buying an account from the sign-in screen, and a stricter speed bar, so slow servers are left out sooner.",
   "min_version": "1.2.1",
   "require": "1.2.1",
-  "sig": "QItVMi93Z8JviCNPCgVzcsXcqsTLA+GxqsWTIXxa5bMmrhQbQuPcmgLVDNf0cdsfELpEdA4FtsAazsBqG5GxBA==",
-  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiMDg4NTViMTM0NTM4NDlkMGExMDRkYmNmZWYyNmYyNGMxNjA2NTdmNmJkN2Y4MzQ3ODQxNzE1Mzc1Y2QyNWI5NCIsInVybHMiOlsiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy0xLjIuMS1hbmRyb2lkLmFwayIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4yLjEvQWxiYXRyb3NzLTEuMi4xLWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9BbGJhdHJvc3MvcmVsZWFzZXMvZG93bmxvYWQvdjEuMi4xL0FsYmF0cm9zcy0xLjIuMS1hbmRyb2lkLmFwayJdfSwid2luZG93cyI6eyJzaGEyNTYiOiI2ZjJkMzgyYTZiZjUyNTU1ZGIyN2U3OGRiZmZiMTEwYjFmOTc4OTBlYmJlNmM4NWIxMDkxNTcwMzNmNzc4ODE4IiwidXJscyI6WyJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvZG93bmxvYWQvQWxiYXRyb3NzLVNldHVwLTEuMi4xLmV4ZSIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4yLjEvQWxiYXRyb3NzLVNldHVwLTEuMi4xLmV4ZSIsImh0dHBzOi8vZ2l0aHViLmNvbS9BbGJhdHJvc3N2cG4vQWxiYXRyb3NzL3JlbGVhc2VzL2Rvd25sb2FkL3YxLjIuMS9BbGJhdHJvc3MtU2V0dXAtMS4yLjEuZXhlIl19fSwibGF0ZXN0X3ZlcnNpb24iOiIxLjIuMSIsIm1lc3NhZ2UiOiJTZXJ2ZXIgcHJvYmxlbXMgYXJlIGZpeGVkLiBBbGJhdHJvc3MgMS4yLjEgcGlja3Mgc2VydmVycyBieSBhIHJlYWwgc3BlZWQgdGVzdCwgbm90IGp1c3QgcGluZywgYW5kIGRyb3BzIHNlcnZlcnMgdGhhdCBhcmUgc2xvdyBvciBjYXJyeSBubyBkYXRhLiBZb3UgY2FuIG5vdyBhbHNvIGJ1eSBhbmQgcmVjaGFyZ2UgZGF0YSBmcm9tIHRoZSBhcHAuIFBsZWFzZSB1cGRhdGUuIiwibWluX3ZlcnNpb24iOiIxLjIuMSIsInJlcXVpcmUiOiIxLjIuMSJ9"
+  "sig": "l9Z3KLWyuIeA3ShupcXbigcnxAG96ebepudDEfcP8Xc/mZzP6wy7H3x4ozovbLc/1XzFW2dONsDeUE6i9RpVAA==",
+  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiZDg1ZWQ1MzM0ZTRkNDJhMzA2MmQ2YTVmZmQzZTFjZjNlMGJjMzUyM2FiZDhjNmYwYWM5NmZlZDQ3OGVhM2IwMyIsInVybHMiOlsiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy0xLjIuMi1hbmRyb2lkLmFwayIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4yLjIvQWxiYXRyb3NzLTEuMi4yLWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9hbGJhLWRhdGEvcmVsZWFzZXMvZG93bmxvYWQvdjEuMi4yL0FsYmF0cm9zcy0xLjIuMi1hbmRyb2lkLmFwayJdfSwid2luZG93cyI6eyJzaGEyNTYiOiJlNGIwNjgxMzgzN2U1YjhkNDZhODUyNzUxZTMyYWQxN2ViZjc0YjY2ZGQwMWZjMTkzMTI4ZjhiZmYwZjVmZjRlIiwidXJscyI6WyJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvZG93bmxvYWQvQWxiYXRyb3NzLVNldHVwLTEuMi4yLmV4ZSIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4yLjIvQWxiYXRyb3NzLVNldHVwLTEuMi4yLmV4ZSIsImh0dHBzOi8vZ2l0aHViLmNvbS9BbGJhdHJvc3N2cG4vYWxiYS1kYXRhL3JlbGVhc2VzL2Rvd25sb2FkL3YxLjIuMi9BbGJhdHJvc3MtU2V0dXAtMS4yLjIuZXhlIl19fSwibGF0ZXN0X3ZlcnNpb24iOiIxLjIuMiIsIm1lc3NhZ2UiOiJBbGJhdHJvc3MgMS4yLjI6IGEgdGlkaWVyIFNldHRpbmdzIHNjcmVlbiwgYSBjbGVhcmVyIHNwZWVkIHRlc3QsIGJ1eWluZyBhbiBhY2NvdW50IGZyb20gdGhlIHNpZ24taW4gc2NyZWVuLCBhbmQgYSBzdHJpY3RlciBzcGVlZCBiYXIsIHNvIHNsb3cgc2VydmVycyBhcmUgbGVmdCBvdXQgc29vbmVyLiIsIm1pbl92ZXJzaW9uIjoiMS4yLjEiLCJyZXF1aXJlIjoiMS4yLjEifQ=="
 }
