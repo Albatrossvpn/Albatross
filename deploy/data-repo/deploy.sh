@@ -12,7 +12,8 @@
 #
 # Environment: CLOUDFLARE_API_TOKEN (Workers, D1, Routes), CLOUDFLARE_ACCOUNT_ID,
 # and optionally SITE_DOMAIN, SITE_NAME, COMPANY_NAME, COMPANY_ADDRESS,
-# CONTACT_EMAIL, SUPPORT_URL (secrets there, variables here).
+# CONTACT_EMAIL, SUPPORT_URL (secrets there, variables here), and MIN_CLIENT
+# (the oldest app version that may still connect, besides update.json's).
 set -uo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 tmp="${RUNNER_TEMP:-$(mktemp -d)}"
@@ -31,6 +32,10 @@ args=(--keep-vars)
 [ -n "${SITE_NAME:-}" ] && args+=(--var "SITE_NAME:$SITE_NAME")
 args+=(--var "COMPANY_NAME:${COMPANY_NAME:-}" --var "COMPANY_ADDRESS:${COMPANY_ADDRESS:-}"
   --var "CONTACT_EMAIL:${CONTACT_EMAIL:-support@albatrossvpn.online}" --var "SUPPORT_URL:${SUPPORT_URL:-}")
+if [ -n "${MIN_CLIENT:-}" ]; then
+  [[ "$MIN_CLIENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::MIN_CLIENT must be three numbers like 1.3.0"; exit 1; }
+fi
+args+=(--var "MIN_CLIENT:${MIN_CLIENT:-}")
 edge="$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' ../edge/wrangler.toml | head -1)"
 args+=(--var "EDGE_HOST:$edge")
 npx wrangler deploy "${args[@]}" >>"$log" 2>&1 || fail "the account service could not be deployed"

@@ -234,6 +234,8 @@ func (e *Engine) Login(username, password string) error {
 	// Start there are none, and reading them will fetch the keys.
 	if e.ctx != nil {
 		go e.refreshListKeys()
+		// The account's slice of the servers (slice.go): asked for at once.
+		go e.refreshSlice()
 	}
 	// The service's own server (the edge) is for signed-in users.
 	methodsMu.Lock()
@@ -375,6 +377,7 @@ func (e *Engine) Logout() {
 	e.Disconnect()
 	e.acct.Logout()
 	forgetListKeys()
+	e.forgetSlice()
 	e.accountChanged()
 }
 

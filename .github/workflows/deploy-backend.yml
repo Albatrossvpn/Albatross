@@ -5,6 +5,11 @@ name: Deploy accounts and website
 # after setting the secrets and variables listed in backend/README.md.
 on:
   workflow_dispatch:
+    inputs:
+      min_client:
+        description: "Oldest app version that may still sign in and connect (e.g. 1.3.0); empty: only the update manifest's min_version counts"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -59,11 +64,16 @@ jobs:
           # the CONTACT_EMAIL variable overrides it.
           CONTACT_EMAIL: ${{ vars.CONTACT_EMAIL || 'support@albatrossvpn.online' }}
           SUPPORT_URL: ${{ vars.SUPPORT_URL }}
+          MIN_CLIENT: ${{ inputs.min_client }}
         run: |
+          if [ -n "$MIN_CLIENT" ] && ! [[ "$MIN_CLIENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::min_client must be three numbers like 1.3.0"; exit 1
+          fi
           args=()
           [ -n "$DOMAIN" ] && args+=(--domain "$DOMAIN")
           [ -n "$SITE_NAME" ] && args+=(--var "SITE_NAME:$SITE_NAME")
           args+=(--var "COMPANY_NAME:$COMPANY_NAME" --var "COMPANY_ADDRESS:$COMPANY_ADDRESS" --var "CONTACT_EMAIL:$CONTACT_EMAIL" --var "SUPPORT_URL:$SUPPORT_URL")
+          args+=(--var "MIN_CLIENT:$MIN_CLIENT")
           # The edge's name, from its own settings, so the service can hand out its links.
           edge="$(sed -n 's/.*pattern *= *"\([^"]*\)", *custom_domain *= *true.*/\1/p' ../edge/wrangler.toml | head -1)"
           args+=(--var "EDGE_HOST:$edge")

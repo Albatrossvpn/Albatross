@@ -130,7 +130,8 @@ type Engine struct {
 	srcStatsByID map[string]SourceStat
 	srcIndex     map[string]int
 	good         map[uint64]*Server
-	net          netLearn // which kinds of server pass on this network
+	acctSlice    acctSlice // the account's slice of the servers (slice.go)
+	net          netLearn  // which kinds of server pass on this network
 	conn         *connection
 	proxyMu      sync.Mutex // serializes setProxy and clearProxy
 	proxyOn      bool       // guarded by proxyMu
@@ -261,6 +262,7 @@ func New(opt Options) (*Engine, error) {
 	e.irRanges, _ = readIPRuleSet(filepath.Join(e.dir, "rules", "geoip-ir.srs"))
 	e.fetcher.Mode = e.fetchMode
 	e.fetcher.Warp = e.warpLinks
+	e.fetcher.Account = e.sliceText
 	sources.ExtraMirrors = e.domesticMirrors
 	e.loadServers()
 	e.net.load(e.dir)
@@ -619,7 +621,7 @@ func (e *Engine) buildSources() {
 	var list []sources.Source
 	builtin := e.opt.Sources
 	if builtin == nil {
-		builtin = append(append(sources.Central(e.install), sources.Builtin()...), sources.Warp())
+		builtin = append(append(append(sources.Central(e.install), sources.Account()), sources.Builtin()...), sources.Warp())
 	}
 	for _, s := range builtin {
 		if s.Tier == sources.TierDeep && !s.Central && !e.settings.DeepSources {

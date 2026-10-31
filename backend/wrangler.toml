@@ -61,6 +61,10 @@ TURNSTILE_SITEKEY = ""
 # The edge's name (edge/wrangler.toml), set by the deploy workflow; the
 # service hands its links to signed-in users. Empty means no edge.
 EDGE_HOST = ""
+# The oldest app version that may still sign in and connect, besides the
+# update manifest's min_version (the newer of the two counts); set when
+# deploying (deploy-backend.yml, min_client), empty for none.
+MIN_CLIENT = ""
 
 # Secrets (set with `npx wrangler secret put NAME`, never in this file):
 #   TOKEN_SECRET     long random string that signs sessions
