@@ -117,16 +117,32 @@ func (e *Engine) refreshSlice() {
 	}
 }
 
-// rereadSlice makes the source sources.Account due, so the next refresh
-// reads the new slice into the pool.
+// rereadSlice reads a new slice into the pool at once and sets the
+// scanner on it. Left to the next refresh it waited for every other list
+// of that pass, which on a network that lets few sites out time out one by
+// one: minutes with nothing to connect to.
 func (e *Engine) rereadSlice() {
+	text, _ := e.sliceText(e.ctx)
+	idx := -1
+	var src sources.Source
 	e.mu.Lock()
 	for i, s := range e.srcs {
 		if s.Kind == sources.KindAccount && i < len(e.srcStats) {
-			e.srcStats[i].Fetched = time.Time{}
+			idx, src = i, s
+			if text != "" {
+				e.srcStats[i].Fetched, e.srcStats[i].LastError = time.Now(), ""
+			} else {
+				e.srcStats[i].Fetched = time.Time{}
+			}
 		}
 	}
 	e.mu.Unlock()
+	if idx >= 0 && text != "" && src.Enabled {
+		if e.ingest(idx, src, text, nil) > 0 {
+			e.poke()
+		}
+		return
+	}
 	e.triggerRefill()
 }
 
