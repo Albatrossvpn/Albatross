@@ -136,7 +136,7 @@ func DomesticApps(code string) []string {
 		"com.okala", "ir.okala", // Okala
 		"market.nobitex", "com.nobitex", "ir.wallex", "com.wallex", "com.bitpin", "ir.bitpin", // exchanges
 		"com.ramzinex", "ir.ramzinex", "com.tetherland", "ir.tetherland", "io.exir", "com.exir",
-		"mobi.mmdt.", // Soroush Plus (mobi.mmdt.ott)
+		"mobi.mmdt.",                           // Soroush Plus (mobi.mmdt.ott)
 		"net.iGap", "net.igap", "com.gapafzar", // iGap, Gap
 		"com.taaghche", "ir.taaghche", "com.fidibo", "ir.fidibo", // books
 		"com.alopeyk", "ir.alopeyk", "com.achareh", "ir.achareh", "com.behtarino", // services

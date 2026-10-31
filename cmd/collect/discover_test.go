@@ -172,7 +172,7 @@ func TestHostType(t *testing.T) {
 		"https://raw.githubusercontent.com/o/r/HEAD/sub.txt": "github-raw",
 		"https://gist.githubusercontent.com/o/abc/raw/s":     "gist",
 		"https://cdn.jsdelivr.net/gh/o/r@main/sub.txt":       "jsdelivr",
-		"https://telegra.ph/Free-V2ray-10-31":               "telegraph",
+		"https://telegra.ph/Free-V2ray-10-31":                "telegraph",
 		"https://teletype.in/@chan/sub":                      "telegraph",
 		"https://pastebin.com/raw/AbC123xy":                  "paste",
 		"https://a.workers.dev/sub":                          "workers.dev",

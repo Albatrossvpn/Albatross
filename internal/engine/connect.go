@@ -37,11 +37,11 @@ const minReady = 3
 const connectWide = 40
 
 type connection struct {
-	warp        bool   // the config holds the WARP exit (watchWarpExit)
-	country     string // what the user asked for ("" = fastest anywhere)
-	home        string // country the group was built in; backups stay here
-	pinned      bool   // the user picked this one server
-	bypass      string // region whose sites go direct ("" = none)
+	warp        bool     // the config holds the WARP exit (watchWarpExit)
+	country     string   // what the user asked for ("" = fastest anywhere)
+	home        string   // country the group was built in; backups stay here
+	pinned      bool     // the user picked this one server
+	bypass      string   // region whose sites go direct ("" = none)
 	directSites []string // sites the user named to open directly (Settings.DirectSites)
 	mode        string
 	proxyAddr   string
