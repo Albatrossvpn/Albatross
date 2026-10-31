@@ -1335,8 +1335,8 @@ function renderSheet() {
   sheetKey = key;
   var html = "";
   if (sheetKind === "protocol") {
-    html = state.protocols.map(function (p) {
-      return optionItem(p.value, p.label, p.value === state.settings.protocol, protocolNote(p));
+    html = protocolLegend() + state.protocols.map(function (p) {
+      return protocolItem(p, p.value === state.settings.protocol);
     }).join("");
   } else if (sheetKind === "privacy") {
     html = privacyNotes.map(function (n) { return '<div class="note"><b>' + esc(n[0]) + "</b>" + esc(n[1]) + "</div>"; }).join("");
@@ -1358,9 +1358,52 @@ var privacyNotes = [
   ["Your account", "Your account records only your username, how much data you have used and how long you have been connected. The app does not send the sites you visit."]
 ];
 
-// What the protocol sheet says under a protocol: how many servers it has.
+// The protocol list's icons: a live dot (does it work on this network
+// now), how quickly a protocol connects and how much it carries (three
+// segments each), whether it resists throttling, whether it needs UDP. The
+// legend above the list says what each means.
+var ICON_BOLT = '<svg viewBox="0 0 24 24"><path d="M13 3 5 14h6l-1 7 8-11h-6z"/></svg>';
+var ICON_BARS = '<svg class="bars" viewBox="0 0 24 24"><rect x="4" y="13" width="4" height="7" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="16" y="3" width="4" height="17" rx="1"/></svg>';
+var ICON_SHIELD = '<svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></svg>';
+function protocolLegend() {
+  return '<div class="legend">' +
+    '<span><i class="live g"></i>works on your network now</span>' +
+    '<span><i class="live a"></i>has servers, none worked here yet</span>' +
+    "<span>" + ICON_BOLT + "connects quickly</span>" +
+    "<span>" + ICON_BARS + "carries a lot</span>" +
+    "<span>" + ICON_SHIELD + "resists throttling</span>" +
+    '<span><b class="ptag">UDP</b>needs UDP, which mobile networks often throttle</span>' +
+    "</div>";
+}
+function liveDot(p) {
+  var cls = p.working ? "g" : p.servers ? "a" : "n";
+  var title = p.working ? "Works on your network now" : p.servers ? "Has servers; none has worked here yet" : "No servers right now";
+  return '<i class="live ' + cls + '" title="' + title + '"></i>';
+}
+function meter(icon, n, title) {
+  var segs = "";
+  for (var i = 1; i <= 3; i++) segs += "<b" + (i <= n ? ' class="on"' : "") + "></b>";
+  return '<span class="pico" title="' + title + '">' + icon + '<span class="segs">' + segs + "</span></span>";
+}
+function protocolItem(p, selected) {
+  var icons = "";
+  if (p.value !== "") {
+    icons = '<span class="picons">' + liveDot(p) +
+      (p.connect ? meter(ICON_BOLT, p.connect, "How quickly it connects") : "") +
+      (p.speed ? meter(ICON_BARS, p.speed, "How much it carries") : "") +
+      (p.shield ? '<span class="pico" title="Resists throttling">' + ICON_SHIELD + "</span>" : "") +
+      (p.udp ? '<b class="ptag" title="Needs UDP">UDP</b>' : "") +
+      (p.resort ? '<b class="ptag dim">last resort</b>' : "") + "</span>";
+  }
+  return '<button class="item' + (selected ? " selected" : "") + (p.missing ? " dim" : "") + '" data-value="' + esc(p.value) + '">\n' +
+    '    <span class="main"><span class="title">' + esc(p.label) + "</span>" + icons + '<span class="sub">' + esc(protocolNote(p)) + "</span></span>\n" +
+    "    " + (selected ? '<svg class="check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>' : "") + "</button>";
+}
+
+// What the protocol sheet says under a protocol: how many servers it has;
+// under Automatic, what it is using right now.
 function protocolNote(p) {
-  if (p.value === "") return "Picks the best one for you";
+  if (p.value === "") return p.now ? "Using " + p.now + " now" : "Picks the best one for you";
   if (p.missing) return "Not included on this device";
   if (p.value === "warp" || p.value === "tor") return "Built in";
   if (!p.servers) return p.failed ? "None worked yet (" + num(p.failed) + " tried)" : "No servers yet";

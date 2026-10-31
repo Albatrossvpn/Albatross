@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/Albatrossvpn/vp/internal/engine"
+import (
+	"sort"
+
+	"github.com/Albatrossvpn/vp/internal/engine"
+)
 
 // What the page is told. It shows how many servers can be reached, where
 // they are and how fast; where servers come from, their names and how they
@@ -130,6 +134,9 @@ type protocol struct {
 	// cannot run the protocol at all.
 	Failed  int  `json:"failed,omitempty"`
 	Missing bool `json:"missing,omitempty"`
+	// Now, on Automatic alone, names what it is connected through right
+	// now, so the choice it made is never a mystery.
+	Now string `json:"now,omitempty"`
 }
 
 func publicSettingsOf(s engine.Settings) publicSettings {
@@ -154,8 +161,29 @@ func publicState(s engine.Snapshot) state {
 	}
 	for _, p := range engine.ProtocolChoices() {
 		c := s.ProtocolServers[p.Value]
-		out.Protocols = append(out.Protocols, protocol{p, c[0], c[1], s.ProtocolFailed[p.Value], missing[p.Value]})
+		if p.Resort && p.Value != "tor" && c[0] == 0 {
+			// The carriers (DNS tunnel, ping) are offered only while servers
+			// that use them exist; a dead choice only confuses.
+			continue
+		}
+		pr := protocol{ProtocolChoice: p, Servers: c[0], Working: c[1], Failed: s.ProtocolFailed[p.Value], Missing: missing[p.Value]}
+		if p.Value == "" && s.Settings.Protocol == "" && s.Conn != nil {
+			pr.Now = connLabel(s.Conn)
+		}
+		out.Protocols = append(out.Protocols, pr)
 	}
+	// Automatic first; then what works on this network, then what has
+	// servers at all; the usual order among equals.
+	sort.SliceStable(out.Protocols, func(i, j int) bool {
+		a, b := out.Protocols[i], out.Protocols[j]
+		if (a.Value == "") != (b.Value == "") {
+			return a.Value == ""
+		}
+		if a.Working != b.Working {
+			return a.Working > b.Working
+		}
+		return a.Servers > b.Servers
+	})
 	for _, c := range s.Countries {
 		out.Servers += c.Servers
 	}
