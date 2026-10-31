@@ -50,6 +50,13 @@ var webQueries = []string{
 	`site:github.io vless vmess sub`, `site:github.com v2ray subscription`, `site:gist.github.com vmess vless`,
 	`"pages.dev" vless vmess sub`, `"workers.dev" vless subscription`, `"vercel.app" v2ray sub`,
 	`site:gitlab.com v2ray subscription`, `site:gitee.com v2ray 订阅`, `site:rentry.co vless vmess`,
+	// Import links point straight at a live subscription endpoint; mentions
+	// pulls the address out of them (importRe). People paste them on the web
+	// so a tap adds the whole list to an app.
+	`"happ://add/" v2ray`, `"hiddify://import/" subscription`, `"clash://install-config" url`,
+	// More high-signal phrasings and the newest protocols, in each language.
+	`free vless reality vision xtls subscription`, `site:github.io free vless reality sub`,
+	`免费 机场 订阅 链接 每日更新`, `بهترین کانفیگ رایگان v2ray روزانه تلگرام`, `бесплатная подписка vless reality`,
 }
 
 // webPerRun is how many queries each engine gets per run.

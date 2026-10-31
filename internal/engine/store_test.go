@@ -31,6 +31,8 @@ func TestProtocolChoicesAreScannedFor(t *testing.T) {
 		switch c.Value {
 		case "", "warp", "tor": // automatic, and the methods that are not servers
 			continue
+		case "dns", "icmp": // the carriers: counted from the good servers, not the pool
+			continue
 		}
 		if protoCodes[c.Value] == 0 {
 			t.Errorf("%s (%s) has no protocol code", c.Value, c.Label)

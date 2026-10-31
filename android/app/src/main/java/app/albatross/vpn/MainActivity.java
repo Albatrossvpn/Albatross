@@ -130,9 +130,22 @@ public final class MainActivity extends Activity {
     /** Asks the user to allow the VPN if they have not yet; starts it if the engine wants it. */
     void askForVpn() {
         Intent i = VpnService.prepare(this);
-        if (i != null) {
+        if (i == null) return;
+        // Android's own prompt ("…wants to set up a VPN connection that allows
+        // it to monitor network traffic") reads like a warning the first time.
+        // Say first what it is: the same prompt every VPN app gets. Once.
+        android.content.SharedPreferences prefs = getSharedPreferences("app", MODE_PRIVATE);
+        if (prefs.getBoolean("vpn_explained", false)) {
             startActivityForResult(i, REQ_VPN);
+            return;
         }
+        prefs.edit().putBoolean("vpn_explained", true).apply();
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.vpn_explain_title)
+                .setMessage(R.string.vpn_explain_body)
+                .setCancelable(false)
+                .setPositiveButton(R.string.vpn_explain_ok, (d, w) -> startActivityForResult(i, REQ_VPN))
+                .show();
     }
 
     @Override

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -163,6 +165,93 @@ func TestCodeHostsSkipEmptyProjects(t *testing.T) {
 	}
 }
 
+// hostType groups a kept source by the kind of host it sits on, and a bare
+// channel name (no scheme) as a Telegram channel.
+func TestHostType(t *testing.T) {
+	cases := map[string]string{
+		"https://raw.githubusercontent.com/o/r/HEAD/sub.txt": "github-raw",
+		"https://gist.githubusercontent.com/o/abc/raw/s":     "gist",
+		"https://cdn.jsdelivr.net/gh/o/r@main/sub.txt":       "jsdelivr",
+		"https://telegra.ph/Free-V2ray-10-31":                "telegraph",
+		"https://teletype.in/@chan/sub":                      "telegraph",
+		"https://pastebin.com/raw/AbC123xy":                  "paste",
+		"https://a.workers.dev/sub":                          "workers.dev",
+		"https://b.pages.dev/c.json":                         "pages.dev",
+		"https://user.github.io/list":                        "github.io",
+		"https://x.vercel.app/sub":                           "vercel.app",
+		"https://gitlab.com/a/b/-/raw/main/sub.txt":          "gitlab",
+		"https://codeberg.org/a/b/raw/branch/main/s.txt":     "codeberg",
+		"https://nodes.example.io/sub.txt":                   "other-host",
+		"freenodes":                                          "telegram-channel",
+	}
+	for key, want := range cases {
+		if got := hostType(key); got != want {
+			t.Errorf("hostType(%q) = %q, want %q", key, got, want)
+		}
+	}
+}
+
+// hostYield groups the kept sources' server counts by host kind.
+func TestHostYield(t *testing.T) {
+	d := newDiscoverer("", nil)
+	d.kept = map[string]int{
+		"https://raw.githubusercontent.com/a/b/HEAD/s.txt": 40,
+		"https://raw.githubusercontent.com/c/d/HEAD/s.txt": 10,
+		"https://telegra.ph/Free-10-31":                    30,
+		"freenodes":                                        7,
+	}
+	h := d.hostYield()
+	if h["github-raw"] == nil || h["github-raw"].Kept != 2 || h["github-raw"].Servers != 50 {
+		t.Fatalf("github-raw: %+v", h["github-raw"])
+	}
+	if h["telegraph"].Servers != 30 || h["telegram-channel"].Servers != 7 {
+		t.Fatalf("telegraph/channel: %+v %+v", h["telegraph"], h["telegram-channel"])
+	}
+}
+
+// keep credits the surface that found a kept source and remembers how many
+// servers it carried, so the yield tally reflects what each input is worth.
+func TestYieldRecording(t *testing.T) {
+	url := "https://lists.example.io/sub.txt"
+	var body strings.Builder
+	for i := 1; i <= 6; i++ {
+		fmt.Fprintf(&body, "vless://b831381d-6324-4d53-ad4f-8cda48b3081%d@1.2.3.%d:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%%2F#n%d\n", i, i, i)
+	}
+	f := &sources.Fetcher{Direct: &http.Client{Transport: fakeTransport{url: body.String()}}, CacheDir: t.TempDir()}
+	d := newDiscoverer("", f)
+	d.origin[url] = "github-code"
+	d.keep(context.Background(), []string{url}, nil)
+	s := d.yield["github-code"]
+	if s == nil || s.Candidates != 1 || s.Kept != 1 || s.Servers < 5 {
+		t.Fatalf("yield: %+v", s)
+	}
+	if d.kept[url] < 5 {
+		t.Fatalf("kept server count not recorded: %d", d.kept[url])
+	}
+}
+
+// githubIssues mines issue and pull-request titles and bodies for the
+// subscription addresses and channels mentioned in them; a query the hour's
+// slice does not cover is simply not searched, and one that errors (404
+// here) is passed over without losing the others.
+func TestGithubIssues(t *testing.T) {
+	d := newDiscoverer("tok", nil)
+	q := issueQueries[0]
+	u := "https://api.github.com/search/issues?per_page=100&sort=updated&order=desc&q=" + url.QueryEscape(q)
+	body := `{"items":[
+		{"title":"please add my source","body":"here it is https://raw.githubusercontent.com/o/r/main/sub.txt and join t.me/FreeNodes for more"},
+		{"title":"nothing useful","body":"just a question about the app"}
+	]}`
+	d.client = &http.Client{Transport: fakeTransport{u: body}}
+	subs, tgs := d.githubIssues(context.Background(), 0)
+	if len(subs) != 1 || subs[0] != "https://raw.githubusercontent.com/o/r/main/sub.txt" {
+		t.Fatalf("subs %v", subs)
+	}
+	if len(tgs) != 1 || tgs[0] != "freenodes" {
+		t.Fatalf("tgs %v", tgs)
+	}
+}
+
 // What the run did not get to is carried as it was, except a source the
 // shipped lists now hold, and one that can no longer be a candidate, which
 // counts a miss.
@@ -227,6 +316,17 @@ func TestGistsForksAndPastes(t *testing.T) {
 	subs, _ := mentions("get it at https://pastebin.com/raw/AbC123xy or https://rentry.co/freev2/raw, and https://gitee.com/a/b/raw/master/sub.txt")
 	if len(subs) < 3 {
 		t.Fatalf("paste sites: %v", subs)
+	}
+	// Telegraph and Teletype pages, where channels park their configs, are
+	// followed too; EachText reads the servers out of their HTML.
+	pages, _ := mentions("today's nodes: https://telegra.ph/Free-V2ray-10-31 and https://teletype.in/@chan/sub, but not https://telegra.ph/ (no title)")
+	if len(pages) != 2 || pages[0] != "https://telegra.ph/Free-V2ray-10-31" || pages[1] != "https://teletype.in/@chan/sub" {
+		t.Fatalf("telegraph pages: %v", pages)
+	}
+	// Subscription files mentioned on the wider set of hosts are caught too.
+	tld, _ := mentions("mirrors https://free.example.io/sub.txt and https://nodes.example.me/v2ray.yaml and https://a.pages.dev/c.json")
+	if len(tld) != 3 {
+		t.Fatalf("tld breadth: %v", tld)
 	}
 }
 

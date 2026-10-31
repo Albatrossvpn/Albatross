@@ -78,7 +78,9 @@ test("the website's Worker answers carry the security headers too", async () => 
   const html = await index.text();
   assert.doesNotMatch(html, / style="/);
   assert.match(html, /Albatross-1\.1\.0-android\.apk/);
-  assert.match(index.headers.get("Content-Security-Policy"), /^default-src 'self'; style-src 'self'/);
+  // It carries the website's Google tag, so it has the static pages' policy, which lets that tag run.
+  assert.equal(index.headers.get("Content-Security-Policy"), read(SITE, "_headers").match(/Content-Security-Policy: (.+)/)[1]);
+  assert.match(html, /googletagmanager\.com\/gtag\/js/);
 });
 
 test("the static headers of both sites are strict", () => {

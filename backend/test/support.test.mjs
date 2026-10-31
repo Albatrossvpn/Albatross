@@ -227,8 +227,10 @@ test("each page with the chat loads its style and script, and may reach the acco
     assert.ok(html.includes('<script src="/support.js" data-api="https://accounts.albatrossvpn.online" defer></script>'), f);
   }
   assert.match(page("../../site/public/_headers"), /connect-src 'self' https:\/\/accounts\.albatrossvpn\.online[ ;]/);
-  // The account pages call their own service only; the admin panel has no chat.
-  assert.ok(page("../public/_headers").includes("connect-src 'self';"));
+  // The account pages call their own service, and Google's ad tag; nothing else. The admin panel has no chat.
+  const connect = page("../public/_headers").match(/connect-src ([^;]+);/)[1].split(" ");
+  assert.equal(connect[0], "'self'");
+  for (const src of connect.slice(1)) assert.match(src, /^https:\/\/(\*\.|www\.|ad\.|googleads\.|pagead2\.)?(google|googletagmanager|googleadservices|google-analytics|analytics\.google|doubleclick|g\.doubleclick|googlesyndication)\.(com|net)$/, src);
   assert.ok(!page("../public/admin.html").includes("support.js"));
 });
 

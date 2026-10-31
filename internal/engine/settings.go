@@ -21,6 +21,11 @@ type Settings struct {
 	// phones (DomesticApps): banks and other services that refuse a foreign
 	// address or stop when a VPN is on keep working while connected.
 	BypassApps bool `json:"bypass_apps"`
+	// DirectSites are sites the user named to open outside the tunnel
+	// (domains; each covers its subdomains): for the app or site that
+	// refuses a VPN and is in no list, fixed in two taps rather than by
+	// giving up on the app.
+	DirectSites []string `json:"direct_sites"`
 	// Protocol limits connections to one protocol ("" = automatic); see
 	// ProtocolChoices.
 	Protocol string `json:"protocol"`
@@ -94,21 +99,51 @@ const settingsVersion = 1
 type ProtocolChoice struct {
 	Value string `json:"value"` // Settings.Protocol; "" is automatic
 	Label string `json:"label"`
+	// How the protocol behaves, for the icons beside it in the list (the
+	// legend above the list explains them): Connect is how quickly it
+	// connects and Speed how much it carries, each 1 (low) to 3 (high);
+	// Shield says it is built to resist throttling (it rides a CDN or
+	// disguises itself); UDP that it needs UDP, which mobile networks in
+	// Iran often throttle; Resort that it is a slow last resort. Automatic
+	// carries none: the list says what it is doing instead.
+	Connect int  `json:"connect,omitempty"`
+	Speed   int  `json:"speed,omitempty"`
+	Shield  bool `json:"shield,omitempty"`
+	UDP     bool `json:"udp,omitempty"`
+	Resort  bool `json:"resort,omitempty"`
 }
 
 // ProtocolChoices are the protocols offered, automatic first. A value is
-// a Server.Proto, or "warp" and "tor" for the two kinds of warpplus
-// method (see Server.matches). Transports and TLS variants (Reality,
+// a Server.Proto; "warp" and "tor" the two kinds of warpplus method; "dns"
+// and "icmp" the carriers, a server reached through a DNS tunnel or inside
+// ping (see Server.matches). Transports and TLS variants (Reality,
 // WebSocket, gRPC, XHTTP, ShadowTLS, Salamander) are not protocols of
-// their own: a VLESS server stays VLESS whichever carries it.
+// their own: a VLESS server stays VLESS whichever carries it. The ratings
+// are a protocol's usual character, not a promise: how fast it connects
+// and how much it carries, whether it is built to resist throttling, and
+// whether it needs UDP.
 func ProtocolChoices() []ProtocolChoice {
+	p := func(value, label string, connect, speed int, shield, udp bool) ProtocolChoice {
+		return ProtocolChoice{Value: value, Label: label, Connect: connect, Speed: speed, Shield: shield, UDP: udp}
+	}
+	last := func(value, label string) ProtocolChoice {
+		return ProtocolChoice{Value: value, Label: label, Connect: 1, Speed: 1, Shield: true, Resort: true}
+	}
 	return []ProtocolChoice{
-		{"", "Automatic"}, {"vless", "VLESS"}, {"vmess", "VMess"}, {"trojan", "Trojan"},
-		{"shadowsocks", "Shadowsocks"}, {"hysteria2", "Hysteria 2"}, {"hysteria", "Hysteria"}, {"tuic", "TUIC"},
-		{"anytls", "AnyTLS"}, {"wireguard", "WireGuard"}, {"amneziawg", "AmneziaWG"}, {"openvpn", "OpenVPN"}, {"ssh", "SSH"},
-		{"naive", "NaiveProxy"}, {"juicity", "Juicity"}, {"mieru", "Mieru"}, {"brook", "Brook"}, {"wstunnel", "WStunnel"},
-		{"ssr", "ShadowsocksR"}, {"snell", "Snell"},
-		{"socks", "SOCKS5"}, {"http", "HTTP proxy"}, {"warp", "Cloudflare WARP"}, {"tor", "Tor"},
+		{Value: "", Label: "Automatic"},
+		p("vless", "VLESS", 3, 3, false, false), p("vmess", "VMess", 3, 3, false, false), p("trojan", "Trojan", 3, 3, false, false),
+		p("shadowsocks", "Shadowsocks", 3, 3, false, false), p("hysteria2", "Hysteria 2", 3, 3, false, true), p("hysteria", "Hysteria", 3, 3, false, true),
+		p("tuic", "TUIC", 3, 3, false, true), p("anytls", "AnyTLS", 3, 3, false, false), p("wireguard", "WireGuard", 3, 3, false, true),
+		p("amneziawg", "AmneziaWG", 3, 3, true, true), p("openvpn", "OpenVPN", 1, 2, false, false), p("ssh", "SSH", 2, 2, false, false),
+		p("naive", "NaiveProxy", 3, 3, true, false), p("juicity", "Juicity", 3, 3, false, true), p("mieru", "Mieru", 2, 2, true, false),
+		p("brook", "Brook", 3, 2, false, false), p("wstunnel", "WStunnel", 2, 2, false, false), p("ssr", "ShadowsocksR", 3, 2, false, false),
+		p("snell", "Snell", 3, 3, false, false), p("socks", "SOCKS5", 3, 2, false, false), p("http", "HTTP proxy", 3, 2, false, false),
+		p("warp", "Cloudflare WARP", 2, 3, true, false),
+		last("tor", "Tor"),
+		// The carriers are the ways through when every foreign address is
+		// cut; the list offers them only while servers that use them are
+		// known (ui/state.go), so they never stand there as dead choices.
+		last("dns", "DNS tunnel"), last("icmp", "Ping tunnel"),
 	}
 }
 
@@ -209,4 +244,55 @@ func (s *Settings) normalize() {
 		}
 	}
 	s.DomesticMirrors = mirrors
+	var sites []string
+	seen := map[string]bool{}
+	for _, d := range s.DirectSites {
+		if d = cleanSite(d); d != "" && !seen[d] && len(sites) < directSitesMax {
+			seen[d] = true
+			sites = append(sites, d)
+		}
+	}
+	s.DirectSites = sites
+}
+
+// directSitesMax bounds the sites a user names to open directly.
+const directSitesMax = 100
+
+// cleanSite turns what a user typed into a bare domain: no scheme, path,
+// port, or leading "*." or "www."; "" when it is not a domain at all.
+func cleanSite(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.IndexByte(s, ':'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.Trim(strings.TrimPrefix(strings.TrimPrefix(s, "*."), "www."), ".")
+	if !validSite(s) {
+		return ""
+	}
+	return s
+}
+
+// validSite reports whether s is a domain: labels of letters, digits and
+// hyphens, at least one dot.
+func validSite(s string) bool {
+	if len(s) < 4 || len(s) > 253 || !strings.Contains(s, ".") {
+		return false
+	}
+	for _, l := range strings.Split(s, ".") {
+		if l == "" || l[0] == '-' || l[len(l)-1] == '-' {
+			return false
+		}
+		for _, c := range l {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }

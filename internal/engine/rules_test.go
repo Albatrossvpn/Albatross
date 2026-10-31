@@ -169,11 +169,11 @@ func TestProxyBypass(t *testing.T) {
 		}
 		return false
 	}
-	if l := proxyBypass("IR", false); !has(l, "*.ir") || !has(l, "aparatcdn.com") || !has(l, "*.aparatcdn.com") || !has(l, "192.168.*") {
+	if l := proxyBypass("IR", false, nil); !has(l, "*.ir") || !has(l, "aparatcdn.com") || !has(l, "*.aparatcdn.com") || !has(l, "192.168.*") {
 		t.Fatalf("ads allowed: %v", l)
 	}
-	lan := proxyBypass("", false)
-	if l := proxyBypass("IR", true); len(l) != len(lan) || has(l, "*.ir") || !has(l, "<local>") {
+	lan := proxyBypass("", false, nil)
+	if l := proxyBypass("IR", true, nil); len(l) != len(lan) || has(l, "*.ir") || !has(l, "<local>") {
 		t.Fatalf("ads blocked: %v", l)
 	}
 }

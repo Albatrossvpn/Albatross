@@ -12,6 +12,7 @@ import (
 	"github.com/Albatrossvpn/vp/internal/antiblock"
 	"github.com/Albatrossvpn/vp/internal/node"
 	"github.com/Albatrossvpn/vp/internal/pool"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // Server is a server that has worked at least once.
@@ -95,6 +96,10 @@ func (s *Server) matches(protocol string) bool {
 		return s.Proto == "warpplus" && s.Source != "tor"
 	case "tor":
 		return s.Proto == "warpplus" && s.Source == "tor"
+	case "dns", "icmp":
+		// The carriers: a server reached through a DNS tunnel or inside
+		// ping, whatever protocol it carries.
+		return s.carrier() == protocol
 	}
 	return s.Proto == protocol
 }
@@ -109,6 +114,29 @@ func (s *Server) method() string {
 		return n.WPMode
 	}
 	return ""
+}
+
+// throttleResistant reports whether a server rides a big CDN or an escape
+// network that Iran's filtering cannot throttle by recognising the protocol
+// on the wire: a Cloudflare-fronted server (WebSocket, gRPC, XHTTP or
+// HTTPUpgrade on a CDN port, with a domain) and the WARP, gool, Psiphon and
+// MASQUE methods, which tunnel through Cloudflare or their own networks.
+// These make the steady anchor a mixed group keeps alongside its fast
+// servers, so a failover has somewhere solid to land when the plain servers
+// are being throttled. Tor is left out: it is the slow last resort.
+func (s *Server) throttleResistant() bool {
+	if s.Proto == "warpplus" {
+		return s.Source != "tor"
+	}
+	if s.Source == sources.Warp().Label() {
+		// The device's own WARP: AmneziaWG or WireGuard straight to
+		// Cloudflare, so it rides the CDN like the methods do.
+		return true
+	}
+	if n := s.Node(); n != nil {
+		return antiblock.CDNFrontable(n)
+	}
+	return false
 }
 
 // carrier names a way through that is not a protocol of its own: "dns" for a

@@ -650,6 +650,7 @@ func (e *Engine) switched(ctx context.Context, c *connection, from, to *member) 
 		return
 	}
 	e.logf("info", "A server dropped; switched at once to a ready server in the same location.")
+	e.noteDiag("failover_dropped")
 	go e.refreshExit(ctx, c)
 }
 
@@ -1256,9 +1257,11 @@ func (e *Engine) speedRound(ctx context.Context, c *connection, stalled bool) {
 	c.closeOn(ctx, active.tag)
 	if cur == 0 {
 		e.logf("info", "Nothing came through the server in use, although it answered its checks; switched to one at %s.", rate(bestSpeed))
+		e.noteDiag("failover_dead")
 		return
 	}
 	e.logf("info", "A server was slow (%s); switched to one at %s.", rate(cur), rate(bestSpeed))
+	e.noteDiag("failover_slow")
 }
 
 // gateWait is the longest one download of gateSpeed takes.

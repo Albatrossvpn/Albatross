@@ -37,11 +37,12 @@ const minReady = 3
 const connectWide = 40
 
 type connection struct {
-	warp        bool   // the config holds the WARP exit (watchWarpExit)
-	country     string // what the user asked for ("" = fastest anywhere)
-	home        string // country the group was built in; backups stay here
-	pinned      bool   // the user picked this one server
-	bypass      string // region whose sites go direct ("" = none)
+	warp        bool     // the config holds the WARP exit (watchWarpExit)
+	country     string   // what the user asked for ("" = fastest anywhere)
+	home        string   // country the group was built in; backups stay here
+	pinned      bool     // the user picked this one server
+	bypass      string   // region whose sites go direct ("" = none)
+	directSites []string // sites the user named to open directly (Settings.DirectSites)
 	mode        string
 	proxyAddr   string
 	proxyUser   string // with proxyPass, the local proxy's login ("" = none, see privateProxy)
@@ -236,10 +237,14 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 		exclude[k] = true
 	}
 	triedRecent := false
+	// asked is when this search began, for the diagnostics' time to
+	// connect; demanded says the crowd was told once that nothing was here.
+	asked, demanded := time.Now(), false
 	for attempt := 0; ; attempt++ {
 		e.mu.Lock()
 		stale := e.connGen != gen
 		want := e.wantConnect && e.target == country && !stale
+		chosen := e.settings.Protocol
 		e.mu.Unlock()
 		if stale {
 			// A newer connect took over; its VPN or proxy must stay up.
@@ -268,6 +273,20 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 				// pause. Servers that keep failing drop out on their own.
 				exclude = map[string]bool{}
 			}
+			if !demanded {
+				// Nothing to connect to: tell the crowd once per search (a
+				// chosen protocol by name, so the collector looks harder for
+				// it) and fetch the latest lists at once, since the
+				// collector may already know servers this device lacks.
+				demanded = true
+				if chosen != "" {
+					e.noteDemand(chosen)
+					e.noteDiag("connect_no_server_chosen")
+				} else {
+					e.noteDiag("connect_no_server")
+				}
+				e.refreshHotNow()
+			}
 			e.mu.Lock()
 			shut := e.reg.Regime.severity() >= regimeAllowlist.severity()
 			e.mu.Unlock()
@@ -289,6 +308,7 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 		e.setStatus(StatusConnecting, fmt.Sprintf("Connecting to %s…", name))
 		err := e.start(gen, country, picks, pinned != nil)
 		if err == nil {
+			e.noteDiag("connect_ok_" + ttcBucket(time.Since(asked)))
 			return nil
 		}
 		e.mu.Lock()
@@ -298,6 +318,11 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 			return errStale
 		}
 		e.logf("warn", "Connection attempt failed: %v", err)
+		if errors.Is(err, errServers) {
+			e.noteDiag("connect_fail_servers")
+		} else {
+			e.noteDiag("connect_fail_local")
+		}
 		if !errors.Is(err, errServers) && pinned == nil {
 			// The local setup failed (the tunnel could not be made, a core
 			// quit at once): the servers are not to blame, and trying the
@@ -324,6 +349,21 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 			exclude = map[string]bool{}
 		}
 	}
+}
+
+// ttcBucket names how long a connection took to come up, for the crowd's
+// diagnostics: under three seconds is what it should feel like, over
+// thirty is what drives people to another app.
+func ttcBucket(d time.Duration) string {
+	switch {
+	case d < 3*time.Second:
+		return "lt3s"
+	case d < 10*time.Second:
+		return "3_10s"
+	case d < 30*time.Second:
+		return "10_30s"
+	}
+	return "gt30s"
 }
 
 // searchMessage is what the app says while it looks for a server. With a
@@ -553,6 +593,15 @@ func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Se
 // server is a good deal faster, and a slow or failing own one still loses.
 const ownFirstLead = 400
 
+// steelLead is how much faster, in rank, automatic mode treats a
+// throttle-resistant server (Cloudflare-fronted, WARP, Psiphon). Measured
+// from probes inside Iran, those answered 4 of 4 while plain servers
+// answered 1 of 10; the speed test from abroad cannot see that, and ranked
+// by speed alone a plain server that then dies in the user's hands won. A
+// plain server still wins when it is much faster; a close call goes to
+// the one that keeps working. A chosen protocol is ranked by speed alone.
+const steelLead = 300
+
 // bestServers picks the lowest-delay usable servers in a country.
 func (e *Engine) bestServers(country string, n int, exclude map[string]bool) []*Server {
 	return e.rankedServers(country, n, exclude, (*Server).usable)
@@ -601,10 +650,21 @@ func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, o
 		}
 		list = append(list, s)
 	}
+	// Worked out once per server, not once per comparison in the sort.
+	auto := e.settings.Protocol == ""
+	resist := map[*Server]bool{}
+	if auto {
+		for _, s := range list {
+			resist[s] = s.throttleResistant()
+		}
+	}
 	rank := func(s *Server) float64 {
 		v := s.rankIn(now, reg, p)
 		if ownFirst && s.Own {
 			v -= ownFirstLead
+		}
+		if resist[s] {
+			v -= steelLead
 		}
 		return v
 	}
@@ -651,6 +711,35 @@ func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, o
 			nets[nd.NetID()]++
 			kinds[kind]++
 			out = append(out, s)
+		}
+	}
+	// A connection should be a mix, not a monoculture. In automatic mode,
+	// alongside the fast servers keep one throttle-resistant anchor — a
+	// Cloudflare-fronted server or a WARP/Psiphon method — so when this
+	// network throttles the plain servers the race and the failover have a
+	// steady exit to move to, instead of hopping between equally throttled
+	// ones. Only when the group holds none already and the pool has one, and
+	// by giving up the slowest member, never the fastest server. A chosen
+	// protocol fills the group with that protocol alone, so leave it be.
+	if e.settings.Protocol == "" && n >= 3 && len(out) >= 2 {
+		anchored := false
+		for _, s := range out {
+			if s.throttleResistant() {
+				anchored = true
+				break
+			}
+		}
+		if !anchored {
+			for _, s := range list {
+				if taken[s] || !s.throttleResistant() {
+					continue
+				}
+				if len(out) >= n {
+					out = out[:len(out)-1]
+				}
+				out = append(out, s)
+				break
+			}
 		}
 	}
 	return out
@@ -752,6 +841,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		home:        home,
 		pinned:      pinned,
 		bypass:      set.Bypass,
+		directSites: set.DirectSites,
 		mode:        set.Mode,
 		proxyAddr:   "127.0.0.1:" + strconv.Itoa(proxyPort),
 		clashAddr:   "127.0.0.1:" + strconv.Itoa(ports[0]),
@@ -764,7 +854,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		c.proxyUser, c.proxyPass = randomToken(), randomToken()
 	}
 	opts := connOptions{
-		listen: listen, port: proxyPort, user: c.proxyUser, pass: c.proxyPass, tun: set.Mode == "tun", bypass: set.Bypass, secureOnly: set.SecureOnly,
+		listen: listen, port: proxyPort, user: c.proxyUser, pass: c.proxyPass, tun: set.Mode == "tun", bypass: set.Bypass, directSites: set.DirectSites, secureOnly: set.SecureOnly,
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
 		clashSecret: c.clashSecret, probeAddr: c.probeAddr, exe: e.opt.ExeName, localDNS: e.dns(), mobile: e.opt.Mobile,
 	}
@@ -823,6 +913,11 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		}
 	}
 	e.mu.Unlock()
+	// Say what is happening while it happens: a dead spinner is what makes
+	// people give up, a count is what keeps them.
+	if n := len(c.members); n > 1 {
+		e.setStatus(StatusConnecting, fmt.Sprintf("Connecting to %s — trying %d servers at once…", countryName(country), n))
+	}
 	// Test the whole group at once and start on the first server to answer;
 	// the rest keep being tested and become the known-good backups.
 	proxy := c.proxyURL()
@@ -895,7 +990,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	}
 	c.exitIP, c.exitCC, c.delay, c.healthy = r.ExitIP, r.Country, int(r.Delay/time.Millisecond), true
 	if set.Mode == "proxy" {
-		switch err := e.setProxy(gen, c.proxyTarget(), proxyBypass(set.Bypass, set.BlockAds)); {
+		switch err := e.setProxy(gen, c.proxyTarget(), proxyBypass(set.Bypass, set.BlockAds, set.DirectSites)); {
 		case errors.Is(err, errStale):
 			run.Stop()
 			return err
@@ -1000,16 +1095,23 @@ func (e *Engine) Resume() bool {
 // open those without the proxy at all, so blocking ads leaves only the local
 // network there: the region's ad networks must reach the core to be blocked,
 // and the core still opens the region's sites directly.
-func proxyBypass(code string, blockAds bool) []string {
+func proxyBypass(code string, blockAds bool, sites []string) []string {
 	bypass := []string{"localhost", "127.*", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*", "172.30.*", "172.31.*", "192.168.*", "169.254.*", "<local>"}
-	r, ok := findRegion(code)
-	if !ok || blockAds {
+	if blockAds {
+		// The sites go through the proxy, where the core sends them direct
+		// and still blocks their ads.
 		return bypass
 	}
-	for _, s := range r.Suffixes {
-		bypass = append(bypass, "*"+s)
+	if r, ok := findRegion(code); ok {
+		for _, s := range r.Suffixes {
+			bypass = append(bypass, "*"+s)
+		}
+		for _, d := range r.Extra {
+			bypass = append(bypass, d, "*."+d)
+		}
 	}
-	for _, d := range r.Extra {
+	// The sites the user named (Settings.DirectSites).
+	for _, d := range sites {
 		bypass = append(bypass, d, "*."+d)
 	}
 	return bypass
@@ -1113,6 +1215,7 @@ type connOptions struct {
 	user, pass  string // the local proxy's login, when it has one
 	tun         bool
 	bypass      string
+	directSites []string // sites the user named to open directly
 	secureOnly  bool
 	blockAds    bool
 	rulesDir    string
@@ -1221,6 +1324,12 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		dnsRules = append(dnsRules, r.unlessShared(map[string]any{
 			"domain_suffix": r.names(), "rule_set": []string{r.geoSiteTag(), r.learnedTag()},
 		}, map[string]any{"action": "route", "server": "local"}))
+	}
+	if len(o.directSites) > 0 {
+		// The sites the user named: outside the tunnel whatever the region,
+		// and looked up with the network's own resolver, as the region's are.
+		rules = append(rules, map[string]any{"domain_suffix": o.directSites, "outbound": "direct"})
+		dnsRules = append(dnsRules, map[string]any{"domain_suffix": o.directSites, "action": "route", "server": "local"})
 	}
 	if o.secureOnly {
 		plainPorts := []int{21, 23, 25, 80, 110, 143}

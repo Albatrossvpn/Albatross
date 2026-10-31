@@ -88,8 +88,36 @@ var discoverRepoQueries = []string{
 // another slice (rotate), so a day of runs reads them all.
 var codeSlices = []string{"size:<2000", "size:2000..10000", "size:10000..50000", "size:50000..250000", "size:>250000"}
 
+// issueQueries search GitHub's issues and pull requests, which code search
+// (files alone) never reads: people post their subscription addresses and
+// import links in a collector's "add my source" issues, in pull requests
+// that add a list, and in the threads under them. A slice each run (rotate),
+// so a day reads them all.
+var issueQueries = []string{
+	`"raw.githubusercontent.com" vless subscription`,
+	`"workers.dev" vmess sub`,
+	`"pages.dev" v2ray subscription`,
+	`"/sub?token=" v2ray`,
+	`hysteria2 subscription free`,
+	`"t.me/" vless vmess config`,
+	`add subscription source v2ray`,
+	`reality vless free subscription`,
+	`کانفیگ رایگان اشتراک v2ray`,
+	`免费 订阅 v2ray 节点`,
+}
+
+// issuesPerRun is how many of issueQueries a run searches.
+const issuesPerRun = 4
+
 // pasteRe finds lists kept on paste sites, which have no file names.
 var pasteRe = regexp.MustCompile(`https?://(?:pastebin\.com/raw/[A-Za-z0-9]{6,12}|paste\.ee/r/[A-Za-z0-9]{4,12}|rentry\.(?:co|org)/[A-Za-z0-9_-]{3,40}/raw|dpaste\.org/[A-Za-z0-9]{4,12}/raw|gitee\.com/[^\s"'<>()\[\]/]+/[^\s"'<>()\[\]/]+/raw/[^\s"'<>()\[\]]+)\b`)
+
+// pageRe finds pages that hold servers in their text rather than as a file:
+// Telegraph articles (telegra.ph and its graph.org alias) and Teletype
+// posts, where channels park their configs and pass the link on. The page
+// is fetched like any source and EachText reads the servers out of its
+// HTML, so no file name is needed.
+var pageRe = regexp.MustCompile(`https?://(?:telegra\.ph|graph\.org|teletype\.in)/[A-Za-z0-9@][A-Za-z0-9@/_-]{2,120}`)
 
 // gistWords pick, among the newest public gists, the ones that may hold
 // servers: by their description or their files' names.
@@ -111,7 +139,7 @@ var (
 	tgMentionRe = regexp.MustCompile(`(?i)(?:t\.me/(?:s/)?|@)([A-Za-z][A-Za-z0-9_]{4,31})\b`)
 	// Addresses of lists inside texts: GitHub raw or blob files and other
 	// https files of the usual types.
-	listURLRe = regexp.MustCompile(`https?://(?:raw\.githubusercontent\.com|github\.com|gist\.githubusercontent\.com|cdn\.jsdelivr\.net|[a-z0-9.-]+\.(?:workers\.dev|pages\.dev|github\.io|vercel\.app|netlify\.app|dpdns\.org|xyz|top|ir|ru|net|org|com))/[^\s"'<>()\[\]]+\.(?:txt|yaml|yml|json|conf|ovpn)\b[^\s"'<>()\[\]]*`)
+	listURLRe = regexp.MustCompile(`https?://(?:raw\.githubusercontent\.com|github\.com|gist\.githubusercontent\.com|cdn\.jsdelivr\.net|[a-z0-9.-]+\.(?:workers\.dev|pages\.dev|github\.io|vercel\.app|netlify\.app|dpdns\.org|xyz|top|ir|ru|net|org|com|io|me|app|dev|cc|co|info|site|online|pro|link|click|fun|space|host|live|store|website))/[^\s"'<>()\[\]]+\.(?:txt|yaml|yml|json|conf|ovpn)\b[^\s"'<>()\[\]]*`)
 	blobRe    = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/(?:blob|raw)/([^/]+)/(.+)$`)
 )
 
@@ -134,6 +162,14 @@ type discoverer struct {
 	subs     []string
 	channels []string
 	stats    map[string]int
+	// origin is which finder surface first turned up a candidate (its key:
+	// the canonical address, or the lower-cased channel name), yield the
+	// tally per surface, and kept the server count of each source kept, by
+	// which hostYield groups them by host. None of these hold an address
+	// among their output: labels and counts only, safe for a public log.
+	origin map[string]string
+	yield  map[string]*surfaceStat
+	kept   map[string]int
 	// prev are the sources the previous run published, and misses how many
 	// runs in a row each has failed to answer (carried in discover.json).
 	prev    map[string]bool
@@ -141,11 +177,75 @@ type discoverer struct {
 	checked map[string]bool
 }
 
+// surfaceStat is how a finder surface fared this run: how many of its
+// candidates were fetched (checked), how many held enough servers to keep,
+// and how many servers those carried in all. It turns "is the finder
+// strong?" into a number per input, so effort goes where the servers are.
+type surfaceStat struct {
+	Candidates int `json:"candidates"`
+	Kept       int `json:"kept"`
+	Servers    int `json:"servers"`
+}
+
 func newDiscoverer(token string, f *sources.Fetcher) *discoverer {
 	return &discoverer{
 		token: token, client: &http.Client{Timeout: 60 * time.Second}, f: f,
 		seenSub: map[string]bool{}, seenTG: map[string]bool{}, contents: map[uint64]string{}, stats: map[string]int{},
+		origin: map[string]string{}, yield: map[string]*surfaceStat{}, kept: map[string]int{},
 		prev: map[string]bool{}, misses: map[string]int{}, checked: map[string]bool{},
+	}
+}
+
+// stat returns the running tally for a surface, created on first use. The
+// caller holds d.mu.
+func (d *discoverer) stat(surface string) *surfaceStat {
+	s := d.yield[surface]
+	if s == nil {
+		s = &surfaceStat{}
+		d.yield[surface] = s
+	}
+	return s
+}
+
+// hostType groups a kept source by the kind of host it sits on (not its
+// address), so the counts show which hosts actually carry servers. A bare
+// name with no scheme is a Telegram channel.
+func hostType(key string) string {
+	if !strings.Contains(key, "://") {
+		return "telegram-channel"
+	}
+	u, err := url.Parse(key)
+	if err != nil || u.Host == "" {
+		return "other-host"
+	}
+	h := strings.ToLower(u.Host)
+	switch {
+	case h == "raw.githubusercontent.com" || h == "github.com":
+		return "github-raw"
+	case h == "gist.githubusercontent.com":
+		return "gist"
+	case h == "cdn.jsdelivr.net":
+		return "jsdelivr"
+	case h == "telegra.ph" || h == "graph.org" || h == "teletype.in":
+		return "telegraph"
+	case h == "pastebin.com" || h == "paste.ee" || strings.HasPrefix(h, "rentry.") || strings.HasPrefix(h, "dpaste.") || h == "gitee.com":
+		return "paste"
+	case strings.HasSuffix(h, ".workers.dev"):
+		return "workers.dev"
+	case strings.HasSuffix(h, ".pages.dev"):
+		return "pages.dev"
+	case strings.HasSuffix(h, ".github.io"):
+		return "github.io"
+	case strings.HasSuffix(h, ".vercel.app"):
+		return "vercel.app"
+	case strings.HasSuffix(h, ".netlify.app"):
+		return "netlify.app"
+	case strings.HasSuffix(h, "gitlab.com"):
+		return "gitlab"
+	case h == "codeberg.org":
+		return "codeberg"
+	default:
+		return "other-host"
 	}
 }
 
@@ -255,28 +355,31 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 
 	var candSubs []string
 	var candTG []string
-	addPages := func(pages []string) {
+	addPages := func(pages []string, surface string) {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		for _, u := range pages {
 			if c := canonicalPage(u); c != "" && !d.seenSub[c] {
 				d.seenSub[c] = true
+				d.origin[c] = surface
 				candSubs = append(candSubs, c)
 			}
 		}
 	}
-	add := func(subs, tgs []string) {
+	add := func(subs, tgs []string, surface string) {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		for _, u := range subs {
 			if c := canonical(u); c != "" && !d.seenSub[c] {
 				d.seenSub[c] = true
+				d.origin[c] = surface
 				candSubs = append(candSubs, c)
 			}
 		}
 		for _, c := range tgs {
 			if c = strings.ToLower(c); !d.seenTG[c] && !tgNotChannel[c] {
 				d.seenTG[c] = true
+				d.origin[c] = surface
 				candTG = append(candTG, c)
 			}
 		}
@@ -284,8 +387,8 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 
 	// 0. What the previous run found goes first: checked again, as it is.
 	prevSubs, prevTG := d.loadPrev(prevDir)
-	addPages(prevSubs)
-	add(nil, prevTG)
+	addPages(prevSubs, "previous")
+	add(nil, prevTG, "previous")
 	d.stats["from_previous"] = len(candSubs) + len(candTG)
 	log.Printf("discover: %d sources and %d channels from the previous run", len(prevSubs), len(prevTG))
 
@@ -293,21 +396,26 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 	texts := d.fetchAll(ctx, knownSubs, knownTG)
 	for _, t := range texts {
 		s, c := mentions(t)
-		add(s, c)
+		add(s, c, "known-mentions")
 	}
 	d.stats["from_known"] = len(candSubs) + len(candTG)
 	log.Printf("discover: %d addresses and %d channels mentioned in known sources", len(candSubs), len(candTG))
 
-	// 2. GitHub: code search per scheme, repository search by words.
+	// 2. GitHub: code search per scheme, repository search by words, and the
+	// gists, forks and issues. Each surface is added under its own name so
+	// the yield tally shows which of them is worth its searches.
 	if token != "" {
-		gh := d.githubCode(ctx, hour)
-		gh = append(gh, d.githubRepos(ctx)...)
-		gh = append(gh, d.githubGists(ctx)...)
-		gh = append(gh, d.githubForks(ctx, knownSubs, hour)...)
-		before := len(candSubs)
-		add(gh, nil)
-		d.stats["from_github"] = len(candSubs) - before
-		log.Printf("discover: %d new addresses from GitHub", len(candSubs)-before)
+		before := len(candSubs) + len(candTG)
+		add(d.githubCode(ctx, hour), nil, "github-code")
+		add(d.githubRepos(ctx), nil, "github-repos")
+		add(d.githubGists(ctx), nil, "github-gists")
+		add(d.githubForks(ctx, knownSubs, hour), nil, "github-forks")
+		// Issues and pull requests carry addresses and channels that code
+		// search, which reads files alone, never sees.
+		is, itg := d.githubIssues(ctx, hour)
+		add(is, itg, "github-issues")
+		d.stats["from_github"] = len(candSubs) + len(candTG) - before
+		log.Printf("discover: %d new candidates from GitHub", len(candSubs)+len(candTG)-before)
 	} else {
 		log.Print("discover: no GITHUB_TOKEN; GitHub search skipped")
 	}
@@ -316,10 +424,10 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 	// engines, Reddit and the other code hosts; every result page read.
 	pages, files := d.webSearch(ctx, hour)
 	before := len(candSubs) + len(candTG)
-	add(files, nil)
+	add(files, nil, "web-files")
 	ps, pc, withServers := d.readPages(ctx, pages)
-	add(ps, pc)
-	addPages(withServers)
+	add(ps, pc, "web-engines")
+	addPages(withServers, "web-engines")
 	d.stats["from_web"] = len(candSubs) + len(candTG) - before
 	log.Printf("discover: %d result pages and %d files from the web, %d new candidates", len(pages), len(files), len(candSubs)+len(candTG)-before)
 
@@ -341,7 +449,7 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 			s, c := mentions(t)
 			ns, nc = append(ns, s...), append(nc, c...)
 		}
-		add(ns, nc)
+		add(ns, nc, "expanded")
 	}
 
 	d.carryRest(prevSubs, prevTG, known)
@@ -361,10 +469,56 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 			delete(d.misses, k)
 		}
 	}
-	meta := map[string]any{"updated": time.Now().UTC(), "stats": d.stats, "misses": d.misses}
+	hosts := d.hostYield()
+	d.logYield(hosts)
+	meta := map[string]any{"updated": time.Now().UTC(), "stats": d.stats, "misses": d.misses, "yield": d.yield, "hosts": hosts}
 	b, _ := json.MarshalIndent(meta, "", "  ")
 	os.WriteFile(filepath.Join(dir, "discover.json"), append(b, '\n'), 0o644)
 	log.Printf("discover: kept %d subscriptions and %d channels", len(d.subs), len(d.channels))
+}
+
+// hostYield groups the kept sources by the kind of host they sit on and
+// counts the sources and the servers each kind carried.
+func (d *discoverer) hostYield() map[string]*surfaceStat {
+	out := map[string]*surfaceStat{}
+	for key, n := range d.kept {
+		ht := hostType(key)
+		s := out[ht]
+		if s == nil {
+			s = &surfaceStat{}
+			out[ht] = s
+		}
+		s.Kept++
+		s.Servers += n
+	}
+	return out
+}
+
+// logYield prints the per-surface and per-host tallies, each line a label
+// and counts only (never an address), so it is safe in a public log and
+// shows at a glance which inputs and which hosts carry the servers.
+func (d *discoverer) logYield(hosts map[string]*surfaceStat) {
+	sorted := func(m map[string]*surfaceStat) []string {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			if m[keys[i]].Servers != m[keys[j]].Servers {
+				return m[keys[i]].Servers > m[keys[j]].Servers
+			}
+			return keys[i] < keys[j]
+		})
+		return keys
+	}
+	for _, name := range sorted(d.yield) {
+		s := d.yield[name]
+		log.Printf("discover yield: %-16s %6d checked %6d kept %8d servers", name, s.Candidates, s.Kept, s.Servers)
+	}
+	for _, name := range sorted(hosts) {
+		s := hosts[name]
+		log.Printf("discover host:  %-16s %6d sources %8d servers", name, s.Kept, s.Servers)
+	}
 }
 
 // carryRest keeps the previous run's sources that this run did not get to
@@ -459,6 +613,11 @@ func (d *discoverer) keep(ctx context.Context, subs, tgs []string) []string {
 		}
 		d.mu.Lock()
 		d.checked[key] = true
+		surface := d.origin[key]
+		if surface == "" {
+			surface = "other"
+		}
+		d.stat(surface).Candidates++
 		d.mu.Unlock()
 		n, rare := 0, 0
 		if res.Err == nil && res.Text != "" {
@@ -494,6 +653,12 @@ func (d *discoverer) keep(ctx context.Context, subs, tgs []string) []string {
 		} else {
 			d.channels = append(d.channels, s.URL)
 		}
+		// Kept: credit the surface that found it and remember its server
+		// count, so the yield and the per-host counts can be worked out.
+		st := d.stat(surface)
+		st.Kept++
+		st.Servers += n
+		d.kept[key] = n
 		mu.Lock()
 		texts = append(texts, res.Text)
 		mu.Unlock()
@@ -542,6 +707,11 @@ func mentions(text string) (subs, channels []string) {
 		}
 	}
 	for _, m := range pasteRe.FindAllString(text, -1) {
+		if u := canonical(m); u != "" {
+			subs = append(subs, u)
+		}
+	}
+	for _, m := range pageRe.FindAllString(text, -1) {
 		if u := canonical(m); u != "" {
 			subs = append(subs, u)
 		}
@@ -732,6 +902,36 @@ func (d *discoverer) githubGists(ctx context.Context) []string {
 	}
 	log.Printf("discover: %d gist files", len(out))
 	return out
+}
+
+// githubIssues searches GitHub's issues and pull requests and returns the
+// subscription addresses and channels mentioned in their titles and bodies:
+// people post their lists and import links there (a collector's "add my
+// source" issue, a pull request that adds a list), where code search, which
+// reads files alone, never finds them. A slice of the queries each run.
+func (d *discoverer) githubIssues(ctx context.Context, hour int) (subs, tgs []string) {
+	for _, q := range rotate(issueQueries, hour, issuesPerRun) {
+		var res struct {
+			Items []struct {
+				Title string `json:"title"`
+				Body  string `json:"body"`
+			} `json:"items"`
+		}
+		u := "https://api.github.com/search/issues?per_page=100&sort=updated&order=desc&q=" + url.QueryEscape(q)
+		if err := d.github(ctx, u, &res); err != nil {
+			log.Printf("discover: issue search %s: %v", q, err)
+			continue
+		}
+		n := 0
+		for _, it := range res.Items {
+			s, c := mentions(it.Title + "\n" + it.Body)
+			subs = append(subs, s...)
+			tgs = append(tgs, c...)
+			n += len(s) + len(c)
+		}
+		log.Printf("discover: issue search %s: %d items, %d mentions", q, len(res.Items), n)
+	}
+	return subs, tgs
 }
 
 // githubForks reads the newest forks of the repositories that hold known

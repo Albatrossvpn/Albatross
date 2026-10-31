@@ -92,7 +92,7 @@ export function renewTarget(topic) {
 }
 
 /** The topics a link into the bot can open (t.me/<bot>?start=buy), and that a language choice carries on to. */
-export const TOPICS = ["connect", "install", "plans", "account", "downloads", "buy", "human"];
+export const TOPICS = ["connect", "install", "plans", "account", "downloads", "buy", "signup", "human"];
 
 const dateOf = (unix) => new Date(unix * 1000).toISOString().slice(0, 10);
 const gbOf = (bytes) => `${Math.round((bytes / 1024 ** 3) * 10) / 10} GB`;
@@ -324,7 +324,7 @@ function build(code) {
      * the months, and its price, worked out at once; then a new account or
      * one that exists. `limits` is { min, max, step } of the data a month.
      */
-    builder(p, limits, money = null) {
+    builder(p, limits, money = null, newOnly = false) {
       const down = p.gb - limits.stepDown, up = p.gb + limits.stepUp;
       const months = limits.months.map((m) => {
         const label = t("months_short", { n: m });
@@ -338,7 +338,8 @@ function build(code) {
             btn(`📦 ${p.gb} GB`, `b:${p.gb}:${p.months}`),
             btn(up <= limits.max ? `➕ ${limits.stepUp} GB` : "·", up <= limits.max ? `b:${up}:${p.months}` : `b:${p.gb}:${p.months}`)],
           months,
-          [buy(btn(t("btn_new_account"), `sn:${p.gb}:${p.months}`)), buy(btn(t("btn_add_account"), `sr:${p.gb}:${p.months}`))],
+          // From the website's "Sign up" (t.me/<bot>?start=signup): a new account only.
+          newOnly ? [buy(btn(t("btn_new_account"), `sn:${p.gb}:${p.months}`))] : [buy(btn(t("btn_new_account"), `sn:${p.gb}:${p.months}`)), buy(btn(t("btn_add_account"), `sr:${p.gb}:${p.months}`))],
           [BACK_TO_PACKAGES, btn(t("btn_terms"), "st")],
         ),
       };

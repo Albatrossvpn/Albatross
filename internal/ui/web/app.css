@@ -638,3 +638,42 @@ textarea:focus { border-color: #2f5fe0; box-shadow: 0 0 0 3px rgba(47, 95, 224, 
 .login-new li + li { margin-top: 4px; }
 .login-new .btn { margin-top: 0; }
 .login { overflow-y: auto; }
+
+/* ---------- Motion on phones ----------
+   A phone's WebView repaints every animated layer each frame: several
+   decorative loops at once, a blurred backdrop and an animated height make
+   the screen stutter. Each animated element gets a layer of its own, the
+   purely decorative loops rest on phones (the busy spinner and the flying
+   mascot stay, slower), and anyone who asked their system for less motion
+   gets none. */
+.aurora, .power .halo, .power .ring, .mascot, .plan-badge::after, .sheen { will-change: transform, opacity; -webkit-backface-visibility: hidden; backface-visibility: hidden; }
+body.mobile .aurora, body.mobile .power .halo, body.mobile .plan-badge::after, body.mobile .sheen, body.mobile .mascot.sleep, body.mobile .mascot.sleep .zz { -webkit-animation: none; animation: none; }
+body.mobile .mascot.fly .wl, body.mobile .mascot.fly .wr { -webkit-animation-duration: 1.2s; animation-duration: 1.2s; }
+body.mobile .mascot.glide .wl, body.mobile .mascot.glide .wr { -webkit-animation-duration: 2.4s; animation-duration: 2.4s; }
+body.mobile .stage { transition: none; }
+body.mobile .sheet-backdrop, body.mobile .modal-backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(15, 27, 61, 0.55); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { -webkit-animation-duration: .01ms !important; animation-duration: .01ms !important; -webkit-animation-iteration-count: 1 !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* ---------- The protocol list: a legend, then each protocol's character ---------- */
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 2px 4px 10px; font-size: 11.5px; color: #5b6684; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend svg, .picons svg { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.legend svg.bars, .picons svg.bars { fill: currentColor; stroke: none; }
+.picons { display: flex; align-items: center; gap: 9px; margin: 3px 0 2px; color: #2f5fe0; }
+.pico { display: inline-flex; align-items: center; gap: 3px; }
+.segs { display: inline-flex; gap: 2px; }
+.segs b { width: 4px; height: 9px; border-radius: 2px; background: rgba(47, 95, 224, 0.18); }
+.segs b.on { background: #2f5fe0; }
+.ptag { font-size: 9.5px; font-weight: 800; letter-spacing: .06em; padding: 1px 5px; border-radius: 6px; background: rgba(47, 95, 224, 0.1); color: #2f5fe0; font-style: normal; }
+.ptag.dim { background: rgba(91, 102, 132, 0.12); color: #5b6684; }
+.live { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: #c7ccd8; flex: none; }
+.live.g { background: #1fb366; box-shadow: 0 0 0 3px rgba(31, 179, 102, 0.18); }
+.live.a { background: #e0a526; }
+
+/* Desktop, proxy mode: a word under the status on what is carried. */
+.mode-hint { margin: 6px 20px 0; font-size: 12px; line-height: 1.4; color: #5b6684; text-align: center; }
+/* The sites the user names to open directly. */
+#direct-text { min-height: 150px; margin: 4px 0 10px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+.sheet .list .note code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: rgba(24, 42, 96, 0.08); padding: 1px 5px; border-radius: 5px; }

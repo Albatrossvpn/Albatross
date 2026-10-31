@@ -1,6 +1,26 @@
 # Names the published ad list must never block: big sites and the services
 # apps need. CI checks every one against the compiled list (adblock.yml).
 # --- Iranian sites and apps
+digikalajet.com
+emalls.ir
+taaghche.com
+fidibo.com
+igap.net
+gap.im
+zarinpal.com
+mydigipay.com
+sibche.com
+behpardakht.com
+ramzinex.com
+tetherland.com
+exir.io
+alopeyk.com
+behtarino.com
+hamravesh.com
+fandogh.cloud
+parspack.com
+iranserver.com
+hostiran.net
 digikala.com
 www.digikala.com
 api.digikala.com

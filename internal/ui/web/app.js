@@ -117,6 +117,12 @@ function render(s) {
   state = s;
   var body = document.body;
   var busy = isBusy(s), on = s.status === "connected" && !!s.conn;
+  if (on && storeAfterConnect) {
+    // Connected for the store's sake: open it now.
+    var storeNote = storeAfterConnect;
+    storeAfterConnect = "";
+    openStoreNow(storeNote);
+  }
   body.classList.toggle("mobile", !!s.mobile);
   body.classList.toggle("busy", busy);
   body.classList.toggle("on", on);
@@ -249,6 +255,7 @@ $("smart-alt").addEventListener("click", function () {
 var connectedAt = 0;
 function renderConnected(s, on) {
   each(["on-row", "dash", "chart-card", "mini-label"], function (id) { $(id).classList.toggle("hidden", !on); });
+  $("mode-hint").classList.toggle("hidden", !(on && !s.mobile && s.settings && s.settings.mode === "proxy"));
   if (!on) return;
   var c = s.conn;
   $("on-country").textContent = c.flag + " " + c.country_name;
@@ -410,7 +417,11 @@ function drawGlobe(aim, busy) {
   ctx.stroke();
   var near = [], far = [];
   var size = Math.max(1.2, R / 110);
-  for (var i = 0; i < DOTS.length; i++) {
+  // A phone draws every other dot, each a little larger: the shape of the
+  // land stays and the work halves.
+  var stride = document.body.classList.contains("mobile") ? 2 : 1;
+  if (stride > 1) size *= 1.3;
+  for (var i = 0; i < DOTS.length; i += stride) {
     var d = DOTS[i], dl = d.lr - l0, cd = Math.cos(dl);
     var z = sp * d.sl + cp * d.cl * cd;
     if (z <= 0) continue;
@@ -467,9 +478,12 @@ function drawMini() {
   var ctx = f.ctx, w = f.w, h = f.h;
   var from = place(homeCode()), to = place(state.conn.country) || from;
   if (!from) from = to;
-  var span = Math.max(36, Math.abs(to.lon - from.lon) * 1.7, Math.abs(to.lat - from.lat) * 2.6);
+  // Never closer than a continent: the land is a 2° grid of dots, and
+  // zoomed past that it falls apart into scattered specks nobody can
+  // place. At this span the coasts read, and the pin is named below.
+  var span = Math.max(100, Math.abs(to.lon - from.lon) * 1.7, Math.abs(to.lat - from.lat) * 2.6);
   var v = { lon: (from.lon + to.lon) / 2, lat: (from.lat + to.lat) / 2 + span * 0.05, scale: w / span };
-  flatDots(ctx, w, h, v, "rgba(130, 156, 222, 0.6)", 1.8);
+  flatDots(ctx, w, h, v, "rgba(130, 156, 222, 0.72)", 2.2);
   var a = toXY(v, w, h, from), b = toXY(v, w, h, to);
   var c = { x: (a.x + b.x) / 2, y: Math.min(a.y, b.y) - Math.max(30, Math.abs(a.x - b.x) * 0.35) };
   var t = Math.min(1, (Date.now() - connectedAt) / 1600);
@@ -516,6 +530,16 @@ function drawMini() {
   ctx.strokeStyle = "#0f1b3d";
   ctx.lineWidth = 2;
   ctx.stroke();
+  // Name the place right at the pin, so there is no doubt where this is.
+  var name = state.conn.country_name || state.conn.country || "";
+  if (name) {
+    ctx.font = "700 12px system-ui, sans-serif";
+    var tw = ctx.measureText(name).width, lx = Math.min(w - tw - 8, Math.max(6, b.x + 11)), ly = b.y - 11;
+    ctx.fillStyle = "rgba(9, 18, 42, 0.8)";
+    ctx.fillRect(lx - 5, ly - 12, tw + 10, 17);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(name, lx, ly);
+  }
 }
 
 // One frame loop, only while it shows: smooth while something moves fast,
@@ -524,7 +548,11 @@ var lastFrame = 0;
 var raf = window.requestAnimationFrame || function (fn) { return setTimeout(function () { fn(Date.now()); }, 33); };
 function frame(now) {
   raf(frame);
-  var every = document.body.classList.contains("busy") ? 30 : document.body.classList.contains("on") ? 45 : 100;
+  // A phone gets fewer frames: it repaints every animated layer each one,
+  // and the globe is thousands of dots. Motion is per second, so nothing
+  // moves slower, it only redraws less often.
+  var mobile = document.body.classList.contains("mobile");
+  var every = document.body.classList.contains("busy") ? (mobile ? 50 : 30) : document.body.classList.contains("on") ? (mobile ? 80 : 45) : (mobile ? 250 : 100);
   if (now - lastFrame < every) return;
   var dt = Math.min(0.25, (now - lastFrame) / 1000);
   lastFrame = now;
@@ -974,9 +1002,9 @@ var FEATURE_PITCH = {
   tun: ["Protect the whole device", "Every app and game goes through Albatross."],
   gps: ["GPS that matches your VPN", "Apps that read GPS see the same country as everything else."],
   edge: ["Albatross Edge", "Routes through Cloudflare that are hard to block."],
-  own: ["Our own servers", "The fastest servers, run by us, not shared with public lists."],
+  own: ["Our own servers", "The fastest servers, run by us for our members alone."],
   lan: ["Share with every device", "Phones, laptops and TVs on your Wi-Fi use your connection."],
-  priority: ["Our private servers come first", "Your connection prefers our own servers, which public lists do not crowd."],
+  priority: ["Our private servers come first", "Your connection prefers our own servers whenever they are near as fast."],
   support: ["A direct line to us", "Talk to our team whenever you need help."]
 };
 var TICK = '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>';
@@ -1072,10 +1100,22 @@ function storeLink() {
   var a = (state && state.account) || {};
   return a.renew_url || a.buy_url || "";
 }
-function openStore(note) {
+// The store is a Telegram bot, and Telegram does not open on a plain line
+// there. Not connected yet, the app connects first (anyone can, signed in or
+// not) and opens the store the moment it is; connected, it opens at once.
+var storeAfterConnect = "";
+function openStoreNow(note) {
   var url = storeLink();
   if (!url) return false;
   api("POST", "/api/open", { url: url }).then(function () { toast(note || "Opening the store in Telegram…"); }, function (e) { toast(e.message); });
+  return true;
+}
+function openStore(note) {
+  if (!storeLink()) return false;
+  if (state && state.status === "connected" && state.conn) return openStoreNow(note);
+  storeAfterConnect = note || "Opening the store in Telegram…";
+  toast("Connecting first, so the store can open…");
+  if (state && state.status === "idle") api("POST", "/api/connect", { country: state.target || "" }).then(function () { poll(); }).catch(function (e) { toast(e.message); });
   return true;
 }
 function devicesText(n) { return n === 0 ? "Unlimited devices" : n === 1 ? "1 device" : n + " devices"; }
@@ -1287,7 +1327,7 @@ var sheetKind = null;
 function openSheet(kind) {
   sheetKind = kind;
   sheetKey = "";
-  var titles = { protocol: "Protocol", bypass: "Bypass local sites", privacy: "Privacy" };
+  var titles = { protocol: "Protocol", bypass: "Bypass local sites", privacy: "Privacy", direct: "Open these sites directly" };
   $("sheet-title").textContent = titles[kind];
   $("sheet").classList.remove("hidden");
   $("sheet-backdrop").classList.remove("hidden");
@@ -1314,9 +1354,13 @@ function renderSheet() {
   sheetKey = key;
   var html = "";
   if (sheetKind === "protocol") {
-    html = state.protocols.map(function (p) {
-      return optionItem(p.value, p.label, p.value === state.settings.protocol, protocolNote(p));
+    html = protocolLegend() + state.protocols.map(function (p) {
+      return protocolItem(p, p.value === state.settings.protocol);
     }).join("");
+  } else if (sheetKind === "direct") {
+    html = '<div class="note"><b>Sites that refuse a VPN</b>They open outside the tunnel, as if the VPN were off. One per line, like <code>example.com</code>; each covers its subdomains.</div>' +
+      '<textarea id="direct-text" rows="8" placeholder="example.com">' + esc((state.settings.direct_sites || []).join("\n")) + "</textarea>" +
+      '<button class="btn wide" id="direct-save" type="button">Save</button>';
   } else if (sheetKind === "privacy") {
     html = privacyNotes.map(function (n) { return '<div class="note"><b>' + esc(n[0]) + "</b>" + esc(n[1]) + "</div>"; }).join("");
   } else if (sheetKind === "bypass") {
@@ -1337,9 +1381,52 @@ var privacyNotes = [
   ["Your account", "Your account records only your username, how much data you have used and how long you have been connected. The app does not send the sites you visit."]
 ];
 
-// What the protocol sheet says under a protocol: how many servers it has.
+// The protocol list's icons: a live dot (does it work on this network
+// now), how quickly a protocol connects and how much it carries (three
+// segments each), whether it resists throttling, whether it needs UDP. The
+// legend above the list says what each means.
+var ICON_BOLT = '<svg viewBox="0 0 24 24"><path d="M13 3 5 14h6l-1 7 8-11h-6z"/></svg>';
+var ICON_BARS = '<svg class="bars" viewBox="0 0 24 24"><rect x="4" y="13" width="4" height="7" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="16" y="3" width="4" height="17" rx="1"/></svg>';
+var ICON_SHIELD = '<svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/></svg>';
+function protocolLegend() {
+  return '<div class="legend">' +
+    '<span><i class="live g"></i>works on your network now</span>' +
+    '<span><i class="live a"></i>has servers, none worked here yet</span>' +
+    "<span>" + ICON_BOLT + "connects quickly</span>" +
+    "<span>" + ICON_BARS + "carries a lot</span>" +
+    "<span>" + ICON_SHIELD + "resists throttling</span>" +
+    '<span><b class="ptag">UDP</b>needs UDP, which mobile networks often throttle</span>' +
+    "</div>";
+}
+function liveDot(p) {
+  var cls = p.working ? "g" : p.servers ? "a" : "n";
+  var title = p.working ? "Works on your network now" : p.servers ? "Has servers; none has worked here yet" : "No servers right now";
+  return '<i class="live ' + cls + '" title="' + title + '"></i>';
+}
+function meter(icon, n, title) {
+  var segs = "";
+  for (var i = 1; i <= 3; i++) segs += "<b" + (i <= n ? ' class="on"' : "") + "></b>";
+  return '<span class="pico" title="' + title + '">' + icon + '<span class="segs">' + segs + "</span></span>";
+}
+function protocolItem(p, selected) {
+  var icons = "";
+  if (p.value !== "") {
+    icons = '<span class="picons">' + liveDot(p) +
+      (p.connect ? meter(ICON_BOLT, p.connect, "How quickly it connects") : "") +
+      (p.speed ? meter(ICON_BARS, p.speed, "How much it carries") : "") +
+      (p.shield ? '<span class="pico" title="Resists throttling">' + ICON_SHIELD + "</span>" : "") +
+      (p.udp ? '<b class="ptag" title="Needs UDP">UDP</b>' : "") +
+      (p.resort ? '<b class="ptag dim">last resort</b>' : "") + "</span>";
+  }
+  return '<button class="item' + (selected ? " selected" : "") + (p.missing ? " dim" : "") + '" data-value="' + esc(p.value) + '">\n' +
+    '    <span class="main"><span class="title">' + esc(p.label) + "</span>" + icons + '<span class="sub">' + esc(protocolNote(p)) + "</span></span>\n" +
+    "    " + (selected ? '<svg class="check" viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>' : "") + "</button>";
+}
+
+// What the protocol sheet says under a protocol: how many servers it has;
+// under Automatic, what it is using right now.
 function protocolNote(p) {
-  if (p.value === "") return "Picks the best one for you";
+  if (p.value === "") return p.now ? "Using " + p.now + " now" : "Picks the best one for you";
   if (p.missing) return "Not included on this device";
   if (p.value === "warp" || p.value === "tor") return "Built in";
   if (!p.servers) return p.failed ? "None worked yet (" + num(p.failed) + " tried)" : "No servers yet";
@@ -1350,6 +1437,19 @@ $("row-protocol").addEventListener("click", function () {
   if (hasFeature("protocols")) openSheet("protocol");
   else showPlanModal("protocols");
 });
+// Sites the user names to open outside the tunnel: an app or site that
+// refuses a VPN and is in no list, fixed here in two taps.
+$("row-direct").addEventListener("click", function () { openSheet("direct"); });
+$("sheet-list").addEventListener("click", function (ev) {
+  if (!ev.target || ev.target.id !== "direct-save") return;
+  var sites = $("direct-text").value.split(/[\s,;]+/).filter(function (s) { return s; });
+  closeSheet();
+  saveSettings({ direct_sites: sites });
+});
+function directValue(sites) {
+  var n = (sites || []).length;
+  return n ? n + (n === 1 ? " site" : " sites") : "None";
+}
 $("row-bypass").addEventListener("click", function () { openSheet("bypass"); });
 $("row-privacy").addEventListener("click", function () { openSheet("privacy"); });
 $("row-killswitch").addEventListener("click", function () { api("POST", "/api/vpn-settings").catch(function (e) { toast(e.message); }); });
@@ -1446,6 +1546,7 @@ function fillSettings(st) {
   $("protocol-value").textContent = proto ? proto.label : "Automatic";
   var region = first(state.regions, function (r) { return r.code === st.bypass; });
   $("bypass-value").textContent = region ? region.name : "Off";
+  $("direct-value").textContent = directValue(st.direct_sites);
 }
 
 function saveSettings(patch) {

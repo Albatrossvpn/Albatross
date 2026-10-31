@@ -1317,6 +1317,28 @@ func (e *Engine) statsLoop() {
 				e.protoFailed[name] = failed[code]
 			}
 		}
+		// The carriers are not protocols the pool numbers: count them among
+		// the known-good servers, so the list offers "DNS tunnel" and "Ping
+		// tunnel" only while there are servers that use them.
+		for _, s := range e.good {
+			key := s.carrier()
+			if key == "" && s.Proto == "warpplus" {
+				// The built-in methods are not pool protocols either; the
+				// list shows whether WARP and Tor work here the same way.
+				key = "warp"
+				if s.Source == "tor" {
+					key = "tor"
+				}
+			}
+			if key != "" {
+				v := e.protoStats[key]
+				v[0]++
+				if s.Fails == 0 {
+					v[1]++
+				}
+				e.protoStats[key] = v
+			}
+		}
 		cut := time.Now().Add(-time.Minute)
 		i := 0
 		for i < len(e.scan.recent) && e.scan.recent[i].Before(cut) {

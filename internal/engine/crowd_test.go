@@ -81,9 +81,13 @@ func TestCrowdLearning(t *testing.T) {
 	if string(got["asn"]) != "58224" || string(got["proto"]) != "[[3,1,1]]" || string(got["port"]) != "[[1,1,1]]" {
 		t.Fatalf("report: %s", mustJSON(got))
 	}
+	// The report carries counts per kind, the operator's number, and for
+	// the diagnostics the app's version and platform (low-entropy, shared
+	// by every install of a build) and named counts (demand, diag); never
+	// an address, an install number or a site.
 	for k := range got {
 		switch k {
-		case "asn", "proto", "style", "hello", "port":
+		case "asn", "proto", "style", "hello", "port", "servers", "version", "platform", "demand", "diag":
 		default:
 			t.Fatalf("report carries %q", k)
 		}

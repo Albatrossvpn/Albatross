@@ -389,9 +389,16 @@ go install golang.org/x/mobile/cmd/gomobile golang.org/x/mobile/cmd/gobind
 targets="android/arm64"
 if want armeabi-v7a; then targets="$targets,android/arm"; fi
 if want x86_64; then targets="$targets,android/amd64"; fi
+# The domestic mirror is hidden in the library (internal/obf): injected
+# encoded and decoded at runtime, so `strings` on libgojni.so does not show
+# it. gomobile has no -toolexec, so garble cannot obfuscate the engine
+# library the way it does the Windows build; the native code is machine
+# code with its symbols already stripped (-s -w -trimpath).
+mirror="${DOMESTIC_MIRROR:-}"
+[ -n "$mirror" ] && mirror="$(go run ./cmd/obf "$mirror")"
 PATH="$(go env GOPATH)/bin:$PATH" gomobile bind -target="$targets" -androidapi "$api" \
   -javapkg app.albatross -trimpath \
-  -ldflags "-s -w -extldflags=-Wl,-z,max-page-size=16384 -X github.com/Albatrossvpn/vp/mobile.Version=$VERSION -X github.com/Albatrossvpn/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/Albatrossvpn/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.WorkerMirror=${MIRROR_URL:-${ACCOUNT_URL:-}} -X github.com/Albatrossvpn/vp/internal/engine.UpdateKey=${UPDATE_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.DomesticMirror=${DOMESTIC_MIRROR:-}" \
+  -ldflags "-s -w -extldflags=-Wl,-z,max-page-size=16384 -X github.com/Albatrossvpn/vp/mobile.Version=$VERSION -X github.com/Albatrossvpn/vp/internal/engine.AccountURL=${ACCOUNT_URL:-} -X github.com/Albatrossvpn/vp/internal/sources.OwnKey=${OWN_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.WorkerMirror=${MIRROR_URL:-${ACCOUNT_URL:-}} -X github.com/Albatrossvpn/vp/internal/engine.UpdateKey=${UPDATE_KEY:-} -X github.com/Albatrossvpn/vp/internal/sources.DomesticMirror=${mirror}" \
   -o "$app/libs/albatross.aar" ./mobile
 
 tidy "the engine's library"
