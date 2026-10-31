@@ -974,9 +974,9 @@ var FEATURE_PITCH = {
   tun: ["Protect the whole device", "Every app and game goes through Albatross."],
   gps: ["GPS that matches your VPN", "Apps that read GPS see the same country as everything else."],
   edge: ["Albatross Edge", "Routes through Cloudflare that are hard to block."],
-  own: ["Our own servers", "The fastest servers, run by us, not shared with public lists."],
+  own: ["Our own servers", "The fastest servers, run by us for our members alone."],
   lan: ["Share with every device", "Phones, laptops and TVs on your Wi-Fi use your connection."],
-  priority: ["Our private servers come first", "Your connection prefers our own servers, which public lists do not crowd."],
+  priority: ["Our private servers come first", "Your connection prefers our own servers whenever they are near as fast."],
   support: ["A direct line to us", "Talk to our team whenever you need help."]
 };
 var TICK = '<svg viewBox="0 0 24 24"><path d="M5 13l4 4L19 7"/></svg>';
