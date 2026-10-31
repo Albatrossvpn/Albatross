@@ -286,6 +286,9 @@ func (e *Engine) connectLoop(gen int, country, home string, pinned []*Server, av
 					e.noteDiag("connect_no_server")
 				}
 				e.refreshHotNow()
+				// No slice yet (a failed or slow first fetch): ask again now
+				// rather than at the next retry.
+				e.sliceNow()
 			}
 			e.mu.Lock()
 			shut := e.reg.Regime.severity() >= regimeAllowlist.severity()

@@ -151,3 +151,17 @@ func (e *Engine) forgetSlice() {
 	}
 	e.mu.Unlock()
 }
+
+// sliceNow asks for the account's slice at once when there is none yet,
+// whatever the retry timer says.
+func (e *Engine) sliceNow() {
+	e.acctSlice.mu.Lock()
+	empty := len(e.acctSlice.links) == 0
+	if empty {
+		e.acctSlice.fetched = time.Time{}
+	}
+	e.acctSlice.mu.Unlock()
+	if empty {
+		go e.refreshSlice()
+	}
+}
