@@ -96,6 +96,10 @@ func (s *Server) matches(protocol string) bool {
 		return s.Proto == "warpplus" && s.Source != "tor"
 	case "tor":
 		return s.Proto == "warpplus" && s.Source == "tor"
+	case "dns", "icmp":
+		// The carriers: a server reached through a DNS tunnel or inside
+		// ping, whatever protocol it carries.
+		return s.carrier() == protocol
 	}
 	return s.Proto == protocol
 }

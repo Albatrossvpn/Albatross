@@ -94,21 +94,51 @@ const settingsVersion = 1
 type ProtocolChoice struct {
 	Value string `json:"value"` // Settings.Protocol; "" is automatic
 	Label string `json:"label"`
+	// How the protocol behaves, for the icons beside it in the list (the
+	// legend above the list explains them): Connect is how quickly it
+	// connects and Speed how much it carries, each 1 (low) to 3 (high);
+	// Shield says it is built to resist throttling (it rides a CDN or
+	// disguises itself); UDP that it needs UDP, which mobile networks in
+	// Iran often throttle; Resort that it is a slow last resort. Automatic
+	// carries none: the list says what it is doing instead.
+	Connect int  `json:"connect,omitempty"`
+	Speed   int  `json:"speed,omitempty"`
+	Shield  bool `json:"shield,omitempty"`
+	UDP     bool `json:"udp,omitempty"`
+	Resort  bool `json:"resort,omitempty"`
 }
 
 // ProtocolChoices are the protocols offered, automatic first. A value is
-// a Server.Proto, or "warp" and "tor" for the two kinds of warpplus
-// method (see Server.matches). Transports and TLS variants (Reality,
+// a Server.Proto; "warp" and "tor" the two kinds of warpplus method; "dns"
+// and "icmp" the carriers, a server reached through a DNS tunnel or inside
+// ping (see Server.matches). Transports and TLS variants (Reality,
 // WebSocket, gRPC, XHTTP, ShadowTLS, Salamander) are not protocols of
-// their own: a VLESS server stays VLESS whichever carries it.
+// their own: a VLESS server stays VLESS whichever carries it. The ratings
+// are a protocol's usual character, not a promise: how fast it connects
+// and how much it carries, whether it is built to resist throttling, and
+// whether it needs UDP.
 func ProtocolChoices() []ProtocolChoice {
+	p := func(value, label string, connect, speed int, shield, udp bool) ProtocolChoice {
+		return ProtocolChoice{Value: value, Label: label, Connect: connect, Speed: speed, Shield: shield, UDP: udp}
+	}
+	last := func(value, label string) ProtocolChoice {
+		return ProtocolChoice{Value: value, Label: label, Connect: 1, Speed: 1, Shield: true, Resort: true}
+	}
 	return []ProtocolChoice{
-		{"", "Automatic"}, {"vless", "VLESS"}, {"vmess", "VMess"}, {"trojan", "Trojan"},
-		{"shadowsocks", "Shadowsocks"}, {"hysteria2", "Hysteria 2"}, {"hysteria", "Hysteria"}, {"tuic", "TUIC"},
-		{"anytls", "AnyTLS"}, {"wireguard", "WireGuard"}, {"amneziawg", "AmneziaWG"}, {"openvpn", "OpenVPN"}, {"ssh", "SSH"},
-		{"naive", "NaiveProxy"}, {"juicity", "Juicity"}, {"mieru", "Mieru"}, {"brook", "Brook"}, {"wstunnel", "WStunnel"},
-		{"ssr", "ShadowsocksR"}, {"snell", "Snell"},
-		{"socks", "SOCKS5"}, {"http", "HTTP proxy"}, {"warp", "Cloudflare WARP"}, {"tor", "Tor"},
+		{Value: "", Label: "Automatic"},
+		p("vless", "VLESS", 3, 3, false, false), p("vmess", "VMess", 3, 3, false, false), p("trojan", "Trojan", 3, 3, false, false),
+		p("shadowsocks", "Shadowsocks", 3, 3, false, false), p("hysteria2", "Hysteria 2", 3, 3, false, true), p("hysteria", "Hysteria", 3, 3, false, true),
+		p("tuic", "TUIC", 3, 3, false, true), p("anytls", "AnyTLS", 3, 3, false, false), p("wireguard", "WireGuard", 3, 3, false, true),
+		p("amneziawg", "AmneziaWG", 3, 3, true, true), p("openvpn", "OpenVPN", 1, 2, false, false), p("ssh", "SSH", 2, 2, false, false),
+		p("naive", "NaiveProxy", 3, 3, true, false), p("juicity", "Juicity", 3, 3, false, true), p("mieru", "Mieru", 2, 2, true, false),
+		p("brook", "Brook", 3, 2, false, false), p("wstunnel", "WStunnel", 2, 2, false, false), p("ssr", "ShadowsocksR", 3, 2, false, false),
+		p("snell", "Snell", 3, 3, false, false), p("socks", "SOCKS5", 3, 2, false, false), p("http", "HTTP proxy", 3, 2, false, false),
+		p("warp", "Cloudflare WARP", 2, 3, true, false),
+		last("tor", "Tor"),
+		// The carriers are the ways through when every foreign address is
+		// cut; the list offers them only while servers that use them are
+		// known (ui/state.go), so they never stand there as dead choices.
+		last("dns", "DNS tunnel"), last("icmp", "Ping tunnel"),
 	}
 }
 

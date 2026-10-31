@@ -553,6 +553,15 @@ func (e *Engine) reachable(list []*Server, n int, exclude map[string]bool) []*Se
 // server is a good deal faster, and a slow or failing own one still loses.
 const ownFirstLead = 400
 
+// steelLead is how much faster, in rank, automatic mode treats a
+// throttle-resistant server (Cloudflare-fronted, WARP, Psiphon). Measured
+// from probes inside Iran, those answered 4 of 4 while plain servers
+// answered 1 of 10; the speed test from abroad cannot see that, and ranked
+// by speed alone a plain server that then dies in the user's hands won. A
+// plain server still wins when it is much faster; a close call goes to
+// the one that keeps working. A chosen protocol is ranked by speed alone.
+const steelLead = 300
+
 // bestServers picks the lowest-delay usable servers in a country.
 func (e *Engine) bestServers(country string, n int, exclude map[string]bool) []*Server {
 	return e.rankedServers(country, n, exclude, (*Server).usable)
@@ -601,10 +610,21 @@ func (e *Engine) rankedServers(country string, n int, exclude map[string]bool, o
 		}
 		list = append(list, s)
 	}
+	// Worked out once per server, not once per comparison in the sort.
+	auto := e.settings.Protocol == ""
+	resist := map[*Server]bool{}
+	if auto {
+		for _, s := range list {
+			resist[s] = s.throttleResistant()
+		}
+	}
 	rank := func(s *Server) float64 {
 		v := s.rankIn(now, reg, p)
 		if ownFirst && s.Own {
 			v -= ownFirstLead
+		}
+		if resist[s] {
+			v -= steelLead
 		}
 		return v
 	}

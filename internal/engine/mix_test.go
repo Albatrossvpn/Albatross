@@ -111,6 +111,54 @@ func TestThrottleResistant(t *testing.T) {
 	}
 }
 
+// In automatic mode a throttle-resistant server ranks as if steelLead
+// faster: a Cloudflare-fronted server a little slower than a plain one
+// comes first, a plain one that is much faster still wins, and with a
+// protocol chosen speed alone decides.
+func TestSteelLeadPrefersResistant(t *testing.T) {
+	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { e.pool.Close() })
+	now := time.Now()
+	plain := "vless://b831381d-6324-4d53-ad4f-8cda48b30811@plain.example:443?security=tls&type=tcp#plain"
+	cdn := "vless://b831381d-6324-4d53-ad4f-8cda48b30812@cdn.example:443?security=tls&type=ws&host=cdn.example&path=%2F#cdn"
+	set := func(link, name string, delay int) {
+		n, err := node.ParseLink(link)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.good[node.Key64(n.Key())] = &Server{Key: n.Key(), Link: link, Name: name, Proto: "vless", Country: "DE", Delay: delay, LastOK: now, TestedAt: now}
+	}
+	first := func() string {
+		got := e.bestServers("DE", 2, nil)
+		if len(got) == 0 {
+			t.Fatal("no servers")
+		}
+		return got[0].Name
+	}
+	// A little slower (200 ms over): the resistant one comes first.
+	set(plain, "plain", 100)
+	set(cdn, "cdn", 300)
+	if got := first(); got != "cdn" {
+		t.Fatalf("automatic, resistant a little slower: %s first, want cdn", got)
+	}
+	// Much slower (400 ms over, beyond steelLead): the fast plain one wins.
+	set(cdn, "cdn", 500)
+	if got := first(); got != "plain" {
+		t.Fatalf("automatic, resistant much slower: %s first, want plain", got)
+	}
+	// A chosen protocol: speed alone, even when the gap is small.
+	set(cdn, "cdn", 300)
+	e.mu.Lock()
+	e.settings.Protocol = "vless"
+	e.mu.Unlock()
+	if got := first(); got != "plain" {
+		t.Fatalf("chosen protocol: %s first, want plain", got)
+	}
+}
+
 // serverKey returns the pool key of the good server with the given name.
 func serverKey(t *testing.T, e *Engine, name string) uint64 {
 	t.Helper()
