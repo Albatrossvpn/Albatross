@@ -122,6 +122,8 @@ type publicSettings struct {
 	HelpOthers      bool   `json:"help_others"`
 	ShareStats      bool   `json:"share_stats"`
 	OverrideGPS     bool   `json:"override_gps"`
+	// DirectSites are the sites the user named to open outside the tunnel.
+	DirectSites []string `json:"direct_sites"`
 }
 
 // protocol is a protocol to choose, with how many of its servers are not
@@ -144,6 +146,7 @@ func publicSettingsOf(s engine.Settings) publicSettings {
 		Mode: s.Mode, Bypass: s.Bypass, BypassApps: s.BypassApps, Protocol: s.Protocol, BlockAds: s.BlockAds,
 		SecureOnly: s.SecureOnly, AutoConnect: s.AutoConnect, StartWithSystem: s.StartWithSystem,
 		AllowLAN: s.AllowLAN, HelpOthers: s.HelpOthers, ShareStats: s.ShareStats, OverrideGPS: s.OverrideGPS,
+		DirectSites: s.DirectSites,
 	}
 }
 

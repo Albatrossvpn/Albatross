@@ -42,6 +42,7 @@ type connection struct {
 	home        string // country the group was built in; backups stay here
 	pinned      bool   // the user picked this one server
 	bypass      string // region whose sites go direct ("" = none)
+	directSites []string // sites the user named to open directly (Settings.DirectSites)
 	mode        string
 	proxyAddr   string
 	proxyUser   string // with proxyPass, the local proxy's login ("" = none, see privateProxy)
@@ -840,6 +841,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		home:        home,
 		pinned:      pinned,
 		bypass:      set.Bypass,
+		directSites: set.DirectSites,
 		mode:        set.Mode,
 		proxyAddr:   "127.0.0.1:" + strconv.Itoa(proxyPort),
 		clashAddr:   "127.0.0.1:" + strconv.Itoa(ports[0]),
@@ -852,7 +854,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		c.proxyUser, c.proxyPass = randomToken(), randomToken()
 	}
 	opts := connOptions{
-		listen: listen, port: proxyPort, user: c.proxyUser, pass: c.proxyPass, tun: set.Mode == "tun", bypass: set.Bypass, secureOnly: set.SecureOnly,
+		listen: listen, port: proxyPort, user: c.proxyUser, pass: c.proxyPass, tun: set.Mode == "tun", bypass: set.Bypass, directSites: set.DirectSites, secureOnly: set.SecureOnly,
 		blockAds: set.BlockAds, rulesDir: filepath.Join(e.dir, "rules"), clashAddr: c.clashAddr,
 		clashSecret: c.clashSecret, probeAddr: c.probeAddr, exe: e.opt.ExeName, localDNS: e.dns(), mobile: e.opt.Mobile,
 	}
@@ -911,6 +913,11 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 		}
 	}
 	e.mu.Unlock()
+	// Say what is happening while it happens: a dead spinner is what makes
+	// people give up, a count is what keeps them.
+	if n := len(c.members); n > 1 {
+		e.setStatus(StatusConnecting, fmt.Sprintf("Connecting to %s — trying %d servers at once…", countryName(country), n))
+	}
 	// Test the whole group at once and start on the first server to answer;
 	// the rest keep being tested and become the known-good backups.
 	proxy := c.proxyURL()
@@ -983,7 +990,7 @@ func (e *Engine) start(gen int, country string, servers []*Server, pinned bool) 
 	}
 	c.exitIP, c.exitCC, c.delay, c.healthy = r.ExitIP, r.Country, int(r.Delay/time.Millisecond), true
 	if set.Mode == "proxy" {
-		switch err := e.setProxy(gen, c.proxyTarget(), proxyBypass(set.Bypass, set.BlockAds)); {
+		switch err := e.setProxy(gen, c.proxyTarget(), proxyBypass(set.Bypass, set.BlockAds, set.DirectSites)); {
 		case errors.Is(err, errStale):
 			run.Stop()
 			return err
@@ -1088,16 +1095,23 @@ func (e *Engine) Resume() bool {
 // open those without the proxy at all, so blocking ads leaves only the local
 // network there: the region's ad networks must reach the core to be blocked,
 // and the core still opens the region's sites directly.
-func proxyBypass(code string, blockAds bool) []string {
+func proxyBypass(code string, blockAds bool, sites []string) []string {
 	bypass := []string{"localhost", "127.*", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.2*", "172.30.*", "172.31.*", "192.168.*", "169.254.*", "<local>"}
-	r, ok := findRegion(code)
-	if !ok || blockAds {
+	if blockAds {
+		// The sites go through the proxy, where the core sends them direct
+		// and still blocks their ads.
 		return bypass
 	}
-	for _, s := range r.Suffixes {
-		bypass = append(bypass, "*"+s)
+	if r, ok := findRegion(code); ok {
+		for _, s := range r.Suffixes {
+			bypass = append(bypass, "*"+s)
+		}
+		for _, d := range r.Extra {
+			bypass = append(bypass, d, "*."+d)
+		}
 	}
-	for _, d := range r.Extra {
+	// The sites the user named (Settings.DirectSites).
+	for _, d := range sites {
 		bypass = append(bypass, d, "*."+d)
 	}
 	return bypass
@@ -1201,6 +1215,7 @@ type connOptions struct {
 	user, pass  string // the local proxy's login, when it has one
 	tun         bool
 	bypass      string
+	directSites []string // sites the user named to open directly
 	secureOnly  bool
 	blockAds    bool
 	rulesDir    string
@@ -1309,6 +1324,12 @@ func connectConfig(s *core.Set, o connOptions) map[string]any {
 		dnsRules = append(dnsRules, r.unlessShared(map[string]any{
 			"domain_suffix": r.names(), "rule_set": []string{r.geoSiteTag(), r.learnedTag()},
 		}, map[string]any{"action": "route", "server": "local"}))
+	}
+	if len(o.directSites) > 0 {
+		// The sites the user named: outside the tunnel whatever the region,
+		// and looked up with the network's own resolver, as the region's are.
+		rules = append(rules, map[string]any{"domain_suffix": o.directSites, "outbound": "direct"})
+		dnsRules = append(dnsRules, map[string]any{"domain_suffix": o.directSites, "action": "route", "server": "local"})
 	}
 	if o.secureOnly {
 		plainPorts := []int{21, 23, 25, 80, 110, 143}

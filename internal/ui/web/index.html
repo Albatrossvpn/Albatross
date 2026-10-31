@@ -71,6 +71,10 @@
         <div class="status-title" id="status-title">Not connected</div>
         <div class="status-sub" id="status-sub">Getting ready…</div>
       </div>
+      <!-- Desktop, in proxy mode: only programs that use the system proxy
+           (browsers, most apps) are carried; say so, so "the VPN is on but my
+           game is not protected" is never a surprise. -->
+      <p class="mode-hint desktop-only hidden" id="mode-hint">Browser and app traffic is protected. For every program and game, turn on “Protect the whole device” in Settings.</p>
       <ol class="steps-live hidden" id="steps">
         <li id="step-find"><i></i><span>Looking for a working server</span></li>
         <li id="step-connect"><i></i><span id="step-connect-text">Connecting</span></li>
@@ -215,6 +219,7 @@
       <div class="card group">
         <button class="row" id="row-protocol" data-feature="protocols"><span class="ri"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10"/></svg></span><span class="t-body"><b>Protocol</b><small id="protocol-value">Automatic</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
         <button class="row" id="row-bypass"><span class="ri"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span><span class="t-body"><b>Bypass local sites</b><small id="bypass-value">Off</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+        <button class="row" id="row-direct"><span class="ri"><svg viewBox="0 0 24 24"><path d="M4 12h10"/><path d="M10 8l4 4-4 4"/><rect x="16" y="5" width="4" height="14" rx="1"/></svg></span><span class="t-body"><b>Open these sites directly</b><small id="direct-value">None</small></span><svg class="chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
         <label class="toggle mobile-only" data-feature="bypass_apps"><span class="ri"><svg viewBox="0 0 24 24"><path d="M4 10 12 4l8 6"/><path d="M6 10v8M10 10v8M14 10v8M18 10v8M4 20h16"/></svg></span><span class="t-body"><b>Local apps outside</b><small>Banks, payment, taxi and shopping apps of your country skip the VPN</small></span><input type="checkbox" id="set-bypass_apps"><span class="switch"></span></label>
         <label class="toggle"><span class="ri"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.9a8 8 0 1 0 11.4 0"/></svg></span><span class="t-body"><b>Auto-connect</b><small>Connect when the app starts</small></span><input type="checkbox" id="set-auto_connect"><span class="switch"></span></label>
         <label class="toggle desktop-only"><span class="ri"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 21h8"/></svg></span><span class="t-body"><b>Start with system</b><small>Open the app when you sign in</small></span><input type="checkbox" id="set-start_with_system"><span class="switch"></span></label>

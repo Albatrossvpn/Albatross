@@ -117,6 +117,12 @@ function render(s) {
   state = s;
   var body = document.body;
   var busy = isBusy(s), on = s.status === "connected" && !!s.conn;
+  if (on && storeAfterConnect) {
+    // Connected for the store's sake: open it now.
+    var storeNote = storeAfterConnect;
+    storeAfterConnect = "";
+    openStoreNow(storeNote);
+  }
   body.classList.toggle("mobile", !!s.mobile);
   body.classList.toggle("busy", busy);
   body.classList.toggle("on", on);
@@ -249,6 +255,7 @@ $("smart-alt").addEventListener("click", function () {
 var connectedAt = 0;
 function renderConnected(s, on) {
   each(["on-row", "dash", "chart-card", "mini-label"], function (id) { $(id).classList.toggle("hidden", !on); });
+  $("mode-hint").classList.toggle("hidden", !(on && !s.mobile && s.settings && s.settings.mode === "proxy"));
   if (!on) return;
   var c = s.conn;
   $("on-country").textContent = c.flag + " " + c.country_name;
@@ -1093,10 +1100,22 @@ function storeLink() {
   var a = (state && state.account) || {};
   return a.renew_url || a.buy_url || "";
 }
-function openStore(note) {
+// The store is a Telegram bot, and Telegram does not open on a plain line
+// there. Not connected yet, the app connects first (anyone can, signed in or
+// not) and opens the store the moment it is; connected, it opens at once.
+var storeAfterConnect = "";
+function openStoreNow(note) {
   var url = storeLink();
   if (!url) return false;
   api("POST", "/api/open", { url: url }).then(function () { toast(note || "Opening the store in Telegram…"); }, function (e) { toast(e.message); });
+  return true;
+}
+function openStore(note) {
+  if (!storeLink()) return false;
+  if (state && state.status === "connected" && state.conn) return openStoreNow(note);
+  storeAfterConnect = note || "Opening the store in Telegram…";
+  toast("Connecting first, so the store can open…");
+  if (state && state.status === "idle") api("POST", "/api/connect", { country: state.target || "" }).then(function () { poll(); }).catch(function (e) { toast(e.message); });
   return true;
 }
 function devicesText(n) { return n === 0 ? "Unlimited devices" : n === 1 ? "1 device" : n + " devices"; }
@@ -1308,7 +1327,7 @@ var sheetKind = null;
 function openSheet(kind) {
   sheetKind = kind;
   sheetKey = "";
-  var titles = { protocol: "Protocol", bypass: "Bypass local sites", privacy: "Privacy" };
+  var titles = { protocol: "Protocol", bypass: "Bypass local sites", privacy: "Privacy", direct: "Open these sites directly" };
   $("sheet-title").textContent = titles[kind];
   $("sheet").classList.remove("hidden");
   $("sheet-backdrop").classList.remove("hidden");
@@ -1338,6 +1357,10 @@ function renderSheet() {
     html = protocolLegend() + state.protocols.map(function (p) {
       return protocolItem(p, p.value === state.settings.protocol);
     }).join("");
+  } else if (sheetKind === "direct") {
+    html = '<div class="note"><b>Sites that refuse a VPN</b>They open outside the tunnel, as if the VPN were off. One per line, like <code>example.com</code>; each covers its subdomains.</div>' +
+      '<textarea id="direct-text" rows="8" placeholder="example.com">' + esc((state.settings.direct_sites || []).join("\n")) + "</textarea>" +
+      '<button class="btn wide" id="direct-save" type="button">Save</button>';
   } else if (sheetKind === "privacy") {
     html = privacyNotes.map(function (n) { return '<div class="note"><b>' + esc(n[0]) + "</b>" + esc(n[1]) + "</div>"; }).join("");
   } else if (sheetKind === "bypass") {
@@ -1414,6 +1437,19 @@ $("row-protocol").addEventListener("click", function () {
   if (hasFeature("protocols")) openSheet("protocol");
   else showPlanModal("protocols");
 });
+// Sites the user names to open outside the tunnel: an app or site that
+// refuses a VPN and is in no list, fixed here in two taps.
+$("row-direct").addEventListener("click", function () { openSheet("direct"); });
+$("sheet-list").addEventListener("click", function (ev) {
+  if (!ev.target || ev.target.id !== "direct-save") return;
+  var sites = $("direct-text").value.split(/[\s,;]+/).filter(function (s) { return s; });
+  closeSheet();
+  saveSettings({ direct_sites: sites });
+});
+function directValue(sites) {
+  var n = (sites || []).length;
+  return n ? n + (n === 1 ? " site" : " sites") : "None";
+}
 $("row-bypass").addEventListener("click", function () { openSheet("bypass"); });
 $("row-privacy").addEventListener("click", function () { openSheet("privacy"); });
 $("row-killswitch").addEventListener("click", function () { api("POST", "/api/vpn-settings").catch(function (e) { toast(e.message); }); });
@@ -1510,6 +1546,7 @@ function fillSettings(st) {
   $("protocol-value").textContent = proto ? proto.label : "Automatic";
   var region = first(state.regions, function (r) { return r.code === st.bypass; });
   $("bypass-value").textContent = region ? region.name : "Off";
+  $("direct-value").textContent = directValue(st.direct_sites);
 }
 
 function saveSettings(patch) {

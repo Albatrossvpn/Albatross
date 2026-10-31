@@ -21,6 +21,11 @@ type Settings struct {
 	// phones (DomesticApps): banks and other services that refuse a foreign
 	// address or stop when a VPN is on keep working while connected.
 	BypassApps bool `json:"bypass_apps"`
+	// DirectSites are sites the user named to open outside the tunnel
+	// (domains; each covers its subdomains): for the app or site that
+	// refuses a VPN and is in no list, fixed in two taps rather than by
+	// giving up on the app.
+	DirectSites []string `json:"direct_sites"`
 	// Protocol limits connections to one protocol ("" = automatic); see
 	// ProtocolChoices.
 	Protocol string `json:"protocol"`
@@ -239,4 +244,55 @@ func (s *Settings) normalize() {
 		}
 	}
 	s.DomesticMirrors = mirrors
+	var sites []string
+	seen := map[string]bool{}
+	for _, d := range s.DirectSites {
+		if d = cleanSite(d); d != "" && !seen[d] && len(sites) < directSitesMax {
+			seen[d] = true
+			sites = append(sites, d)
+		}
+	}
+	s.DirectSites = sites
+}
+
+// directSitesMax bounds the sites a user names to open directly.
+const directSitesMax = 100
+
+// cleanSite turns what a user typed into a bare domain: no scheme, path,
+// port, or leading "*." or "www."; "" when it is not a domain at all.
+func cleanSite(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if i := strings.Index(s, "://"); i >= 0 {
+		s = s[i+3:]
+	}
+	if i := strings.IndexAny(s, "/?#"); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.IndexByte(s, ':'); i >= 0 {
+		s = s[:i]
+	}
+	s = strings.Trim(strings.TrimPrefix(strings.TrimPrefix(s, "*."), "www."), ".")
+	if !validSite(s) {
+		return ""
+	}
+	return s
+}
+
+// validSite reports whether s is a domain: labels of letters, digits and
+// hyphens, at least one dot.
+func validSite(s string) bool {
+	if len(s) < 4 || len(s) > 253 || !strings.Contains(s, ".") {
+		return false
+	}
+	for _, l := range strings.Split(s, ".") {
+		if l == "" || l[0] == '-' || l[len(l)-1] == '-' {
+			return false
+		}
+		for _, c := range l {
+			if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }

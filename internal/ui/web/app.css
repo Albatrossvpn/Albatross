@@ -671,3 +671,9 @@ body.mobile .sheet-backdrop, body.mobile .modal-backdrop { -webkit-backdrop-filt
 .live { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: #c7ccd8; flex: none; }
 .live.g { background: #1fb366; box-shadow: 0 0 0 3px rgba(31, 179, 102, 0.18); }
 .live.a { background: #e0a526; }
+
+/* Desktop, proxy mode: a word under the status on what is carried. */
+.mode-hint { margin: 6px 20px 0; font-size: 12px; line-height: 1.4; color: #5b6684; text-align: center; }
+/* The sites the user names to open directly. */
+#direct-text { min-height: 150px; margin: 4px 0 10px; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; resize: vertical; }
+.sheet .list .note code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; background: rgba(24, 42, 96, 0.08); padding: 1px 5px; border-radius: 5px; }
