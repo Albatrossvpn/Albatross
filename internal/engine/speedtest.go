@@ -43,9 +43,11 @@ var (
 var (
 	// speedPhase is how long download and upload each run.
 	speedPhase = 8 * time.Second
-	// speedUpChunk is the bytes of one upload request; a fast line takes
-	// several in a phase.
-	speedUpChunk int64 = 25 << 20
+	// speedUpChunk is the bytes of one upload request. Small enough that a
+	// slow uplink (a few megabits, the usual there) completes several in a
+	// phase, so the measurement rests on finished requests, not on one
+	// huge body cut short; a fast line takes many.
+	speedUpChunk int64 = 2 << 20
 	// speedCap is the most bytes a phase moves: a fast line finishes the
 	// measurement sooner instead of moving data for nothing.
 	speedCap int64 = 64 << 20
@@ -141,7 +143,17 @@ func (e *Engine) runSpeedTest(ctx context.Context, cancel context.CancelFunc, id
 	}
 	set(func(s *SpeedTest) { s.Phase = "upload" })
 	if err := speedUpload(ctx, fresh, func(bps float64) { set(func(s *SpeedTest) { s.Up = bps }) }); err != nil {
-		fail(err)
+		if ctx.Err() != nil {
+			fail(err)
+			return
+		}
+		// The download was measured; a server that will not carry the
+		// upload (many cap or drop large uploads) does not throw that
+		// away. The result stands, with a word on what could not be done.
+		e.logf("warn", "Speed test: %v", err)
+		set(func(s *SpeedTest) {
+			s.Phase, s.Error = "done", "Download measured; upload could not be measured through this server."
+		})
 		return
 	}
 	// Stopped just as it finished: it was stopped.
@@ -157,7 +169,11 @@ func (e *Engine) runSpeedTest(ctx context.Context, cancel context.CancelFunc, id
 // mean change from one to the next.
 func speedPing(ctx context.Context, client *http.Client) (ping, jitter int, err error) {
 	var times []time.Duration
+	var lastErr error
 	for i := 0; i < speedPings; i++ {
+		if ctx.Err() != nil {
+			return 0, 0, ctx.Err()
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, speedPingURL, nil)
 		if err != nil {
 			return 0, 0, err
@@ -165,13 +181,23 @@ func speedPing(ctx context.Context, client *http.Client) (ping, jitter int, err 
 		start := time.Now()
 		resp, err := client.Do(req)
 		if err != nil {
-			return 0, 0, err
+			// A flaky line drops a request now and then; the ones that
+			// answered still say what the ping is. Only a line that
+			// answers almost nothing fails the test.
+			lastErr = err
+			continue
 		}
 		io.Copy(io.Discard, resp.Body)
 		resp.Body.Close()
 		if i > 0 {
 			times = append(times, time.Since(start))
 		}
+	}
+	if len(times) < 2 {
+		if lastErr == nil {
+			lastErr = errors.New("ping: too few answers")
+		}
+		return 0, 0, lastErr
 	}
 	var sum time.Duration
 	for i := 1; i < len(times); i++ {
@@ -308,7 +334,12 @@ func speedDownload(ctx context.Context, client *http.Client, tell func(float64))
 			break
 		}
 		if err != nil {
-			if err == io.EOF || (ctx.Err() != nil && meter.bytes() > 0) {
+			// The end, the phase's end, or a line that broke after carrying
+			// a measurable amount (a second of data, or a megabyte): what
+			// moved is the measurement. Only a break before anything
+			// meaningful came through fails the test, so a flaky line is
+			// measured rather than given up on.
+			if err == io.EOF || meter.bytes() > 0 && (ctx.Err() != nil || time.Since(start) >= time.Second || meter.bytes() >= 1<<20) {
 				break
 			}
 			return err
