@@ -12,6 +12,7 @@ import (
 	"github.com/Albatrossvpn/vp/internal/antiblock"
 	"github.com/Albatrossvpn/vp/internal/node"
 	"github.com/Albatrossvpn/vp/internal/pool"
+	"github.com/Albatrossvpn/vp/internal/sources"
 )
 
 // Server is a server that has worked at least once.
@@ -122,6 +123,11 @@ func (s *Server) method() string {
 func (s *Server) throttleResistant() bool {
 	if s.Proto == "warpplus" {
 		return s.Source != "tor"
+	}
+	if s.Source == sources.Warp().Label() {
+		// The device's own WARP: AmneziaWG or WireGuard straight to
+		// Cloudflare, so it rides the CDN like the methods do.
+		return true
 	}
 	if n := s.Node(); n != nil {
 		return antiblock.CDNFrontable(n)

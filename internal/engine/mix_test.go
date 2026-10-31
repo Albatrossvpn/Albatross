@@ -83,6 +83,34 @@ func TestMixedGroupKeepsAnchor(t *testing.T) {
 	}
 }
 
+// throttleResistant marks the anchors of a mix: the WARP/Psiphon/MASQUE
+// methods, the device's own Cloudflare WARP, and CDN-fronted servers — but
+// not Tor (the slow last resort) nor a plain throttleable server.
+func TestThrottleResistant(t *testing.T) {
+	resistant := func(proto, source, link string) bool {
+		s := &Server{Proto: proto, Source: source, Link: link}
+		return s.throttleResistant()
+	}
+	warp := node.WarpPlus("warp", "")
+	cases := []struct {
+		name string
+		got  bool
+		want bool
+	}{
+		{"warp method", resistant("warpplus", "warp-plus", warp.Link()), true},
+		{"psiphon method", resistant("warpplus", "warp-plus", node.WarpPlus("psiphon", "DE").Link()), true},
+		{"tor method", resistant("warpplus", "tor", node.WarpPlus("tor", "").Link()), false},
+		{"device WARP", resistant("wireguard", sources.Warp().Label(), ""), true},
+		{"CDN-fronted vless-ws", resistant("vless", "a.example", "vless://b831381d-6324-4d53-ad4f-8cda48b30811@cdn.example:443?security=tls&type=ws&host=cdn.example&path=%2F#c"), true},
+		{"plain vless-tcp", resistant("vless", "a.example", "vless://b831381d-6324-4d53-ad4f-8cda48b30811@plain.example:443?security=tls&type=tcp#p"), false},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("%s: throttleResistant = %v, want %v", c.name, c.got, c.want)
+		}
+	}
+}
+
 // serverKey returns the pool key of the good server with the given name.
 func serverKey(t *testing.T, e *Engine, name string) uint64 {
 	t.Helper()
