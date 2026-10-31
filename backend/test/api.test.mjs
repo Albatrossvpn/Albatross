@@ -189,7 +189,9 @@ test("the own servers' lists' keys go to signed-in users who may connect on a pl
   const admin = (await call("POST", "admin/login", { body: { username: ADMIN.username, password: ADMIN.password } })).body.token;
   await call("POST", "admin/users", { token: admin, body: { username: "keys-1", password: "keys-pass-1", quota_bytes: 0, max_seconds: 0, valid_days: 30 } });
   const token = (await call("POST", "login", { body: { username: "keys-1", password: "keys-pass-1" } })).body.token;
-  const r = await call("GET", "listkeys", { token });
+  const r = await call("GET", "listkeys", { token, headers: { "X-Albatross-Version": "1.3.0" } });
+  // Copies older than 1.3.0 know no slice: while they may connect they get the collection's keys too.
+  assert.deepEqual((await call("GET", "listkeys", { token })).body.keys.map((k) => k.id), [2001, 2000, 1001, 1000]);
   assert.equal(r.status, 200);
   assert.equal(r.headers.get("cache-control"), "no-store");
   // No limit is VIP, whose plan has the own servers: their keys come, newest
@@ -222,8 +224,8 @@ test("each plan has its features: the own servers' keys, the edge and a country'
   me = (await call("GET", "me", { token: gold })).body.account;
   assert.deepEqual(me.features, ["locations", "adblock", "bypass_apps", "protocols", "tun", "gps", "edge", "own"]);
   // The lists' keys: the own servers' only on a plan that has them.
-  assert.deepEqual((await call("GET", "listkeys", { token: bronze })).body.keys, []);
-  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys.map((k) => k.id), [2000, 1000]);
+  assert.deepEqual((await call("GET", "listkeys", { token: bronze, headers: { "X-Albatross-Version": "1.3.0" } })).body.keys, []);
+  assert.deepEqual((await call("GET", "listkeys", { token: gold, headers: { "X-Albatross-Version": "1.3.0" } })).body.keys.map((k) => k.id), [2000, 1000]);
   // The edge: Gold has it (none is deployed here), Bronze is told why not.
   assert.deepEqual((await call("GET", "edge", { token: bronze })).body, { links: [], reason: "plan" });
   assert.equal((await call("GET", "edge", { token: gold })).body.reason, "");
@@ -244,7 +246,7 @@ test("each plan has its features: the own servers' keys, the edge and a country'
   assert.equal(saved.status, 200);
   assert.equal(JSON.parse(saved.body.plan_features).own, "vip");
   assert.deepEqual((await call("GET", "me", { token: bronze })).body.account.features, ["locations"]);
-  assert.deepEqual((await call("GET", "listkeys", { token: gold })).body.keys, [], "the own servers moved to VIP");
+  assert.deepEqual((await call("GET", "listkeys", { token: gold, headers: { "X-Albatross-Version": "1.3.0" } })).body.keys, [], "the own servers moved to VIP");
   assert.equal((await fetch(bs + "?c=de")).status, 200);
   assert.equal((await call("GET", "public")).body.plans.own, "vip");
   assert.equal((await call("PUT", "admin/settings", { token: admin, body: { plan_features: {} } })).status, 200);

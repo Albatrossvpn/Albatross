@@ -470,3 +470,20 @@ test("the oldest version that may connect: the newer of the manifest's and the d
   assert.equal(newest("1.2.0", "nonsense"), "1.2.0", "a floor that is not a version is ignored");
   assert.equal(newest("", ""), "");
 });
+
+test("each account also gets its own share of the servers reached through the CDN", async () => {
+  const { resistantFor, SLICE_RESIST } = await import("../src/sub.js");
+  const lines = [];
+  for (let i = 0; i < 300; i++) lines.push(`vless://u@cdn${i}.example.com:443?security=tls&type=ws&host=cdn${i}.example.com#DE-${i}`);
+  for (let i = 0; i < 100; i++) lines.push(`vless://u@1.2.3.${i % 250}:443?security=reality&sni=a.com#NL-${i}`);
+  const files = { "list/servers/hot.txt": lines.join("\n") };
+  const env = { TOKEN_SECRET: "s".repeat(40), FILES: { get: async (k) => (k in files ? { text: async () => files[k], arrayBuffer: async () => new ArrayBuffer(0) } : null) } };
+  const t = Date.UTC(2026, 9, 31, 12);
+  const have = [{ link: lines[0], country: "DE" }];
+  const a = await resistantFor(env, 7, t, have);
+  assert.equal(a.length, SLICE_RESIST);
+  assert.ok(a.every((e) => carrierOf(e.link) === "cdn"), "only servers reached through the CDN");
+  assert.ok(!a.some((e) => e.link === lines[0]), "none the account already has");
+  assert.deepEqual((await resistantFor(env, 7, t, have)).map((e) => e.link), a.map((e) => e.link), "the same all day");
+  assert.notDeepEqual((await resistantFor(env, 8, t, have)).map((e) => e.link), a.map((e) => e.link), "another for another account");
+});

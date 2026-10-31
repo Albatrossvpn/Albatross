@@ -443,6 +443,34 @@ export function slice(entries, seed, cap = SLICE_MAX) {
   return out.sort((a, b) => a.i - b.i).map((x) => x.e);
 }
 
+// What gets through when only approved sites do (an allowlist): servers
+// reached through the CDN, on Cloudflare's own addresses. A slice of the
+// best-tested servers holds few of them, so each account also gets its own
+// share of them from the wider lists, the same all day.
+export const SLICE_RESIST = 60;
+const RESIST_LISTS = ["hot.txt", "fresh.txt", "all-1.txt"];
+
+/** An account's share of the servers reached through the CDN, apart from those it already has. */
+export async function resistantFor(env, userId, t, have, n = SLICE_RESIST) {
+  const seen = new Set(have.map((e) => e.link));
+  const cands = [];
+  for (const name of RESIST_LISTS) {
+    for (const e of parseList(await listFile(env, name))) {
+      if (cands.length >= n * 8) break;
+      if (e.country === "IR" || seen.has(e.link)) continue;
+      const c = carrierOf(e.link);
+      if (c !== "cdn" && c !== "grpc") continue;
+      seen.add(e.link);
+      cands.push(e);
+    }
+  }
+  const pick = seededPick("resist|" + (await sliceSeed(env, userId, t)));
+  const chosen = new Set();
+  const want = Math.min(n, cands.length);
+  while (chosen.size < want) chosen.add(Math.floor(pick() * cands.length) % cands.length);
+  return cands.filter((_, i) => chosen.has(i));
+}
+
 /** An account's slice of a pool for the day of t (slice, sliceSeed). */
 export async function sliceFor(env, userId, entries, t, cap = SLICE_MAX) {
   return slice(entries, await sliceSeed(env, userId, t), cap);
