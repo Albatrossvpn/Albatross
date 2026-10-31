@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -160,6 +161,28 @@ func TestCodeHostsSkipEmptyProjects(t *testing.T) {
 	cb, err := d.codebergFiles(context.Background(), "v2ray")
 	if err != nil || len(cb) != 1 || cb[0] != "https://codeberg.org/b/lists/raw/branch/main/sub.txt" {
 		t.Fatalf("codeberg: %v %v", cb, err)
+	}
+}
+
+// githubIssues mines issue and pull-request titles and bodies for the
+// subscription addresses and channels mentioned in them; a query the hour's
+// slice does not cover is simply not searched, and one that errors (404
+// here) is passed over without losing the others.
+func TestGithubIssues(t *testing.T) {
+	d := newDiscoverer("tok", nil)
+	q := issueQueries[0]
+	u := "https://api.github.com/search/issues?per_page=100&sort=updated&order=desc&q=" + url.QueryEscape(q)
+	body := `{"items":[
+		{"title":"please add my source","body":"here it is https://raw.githubusercontent.com/o/r/main/sub.txt and join t.me/FreeNodes for more"},
+		{"title":"nothing useful","body":"just a question about the app"}
+	]}`
+	d.client = &http.Client{Transport: fakeTransport{u: body}}
+	subs, tgs := d.githubIssues(context.Background(), 0)
+	if len(subs) != 1 || subs[0] != "https://raw.githubusercontent.com/o/r/main/sub.txt" {
+		t.Fatalf("subs %v", subs)
+	}
+	if len(tgs) != 1 || tgs[0] != "freenodes" {
+		t.Fatalf("tgs %v", tgs)
 	}
 }
 

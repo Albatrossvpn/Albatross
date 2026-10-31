@@ -88,6 +88,27 @@ var discoverRepoQueries = []string{
 // another slice (rotate), so a day of runs reads them all.
 var codeSlices = []string{"size:<2000", "size:2000..10000", "size:10000..50000", "size:50000..250000", "size:>250000"}
 
+// issueQueries search GitHub's issues and pull requests, which code search
+// (files alone) never reads: people post their subscription addresses and
+// import links in a collector's "add my source" issues, in pull requests
+// that add a list, and in the threads under them. A slice each run (rotate),
+// so a day reads them all.
+var issueQueries = []string{
+	`"raw.githubusercontent.com" vless subscription`,
+	`"workers.dev" vmess sub`,
+	`"pages.dev" v2ray subscription`,
+	`"/sub?token=" v2ray`,
+	`hysteria2 subscription free`,
+	`"t.me/" vless vmess config`,
+	`add subscription source v2ray`,
+	`reality vless free subscription`,
+	`کانفیگ رایگان اشتراک v2ray`,
+	`免费 订阅 v2ray 节点`,
+}
+
+// issuesPerRun is how many of issueQueries a run searches.
+const issuesPerRun = 4
+
 // pasteRe finds lists kept on paste sites, which have no file names.
 var pasteRe = regexp.MustCompile(`https?://(?:pastebin\.com/raw/[A-Za-z0-9]{6,12}|paste\.ee/r/[A-Za-z0-9]{4,12}|rentry\.(?:co|org)/[A-Za-z0-9_-]{3,40}/raw|dpaste\.org/[A-Za-z0-9]{4,12}/raw|gitee\.com/[^\s"'<>()\[\]/]+/[^\s"'<>()\[\]/]+/raw/[^\s"'<>()\[\]]+)\b`)
 
@@ -304,10 +325,14 @@ func runDiscover(ctx context.Context, dir, prevDir, token string, minutes int) {
 		gh = append(gh, d.githubRepos(ctx)...)
 		gh = append(gh, d.githubGists(ctx)...)
 		gh = append(gh, d.githubForks(ctx, knownSubs, hour)...)
-		before := len(candSubs)
+		before := len(candSubs) + len(candTG)
 		add(gh, nil)
-		d.stats["from_github"] = len(candSubs) - before
-		log.Printf("discover: %d new addresses from GitHub", len(candSubs)-before)
+		// Issues and pull requests carry addresses and channels that code
+		// search, which reads files alone, never sees.
+		is, itg := d.githubIssues(ctx, hour)
+		add(is, itg)
+		d.stats["from_github"] = len(candSubs) + len(candTG) - before
+		log.Printf("discover: %d new candidates from GitHub", len(candSubs)+len(candTG)-before)
 	} else {
 		log.Print("discover: no GITHUB_TOKEN; GitHub search skipped")
 	}
@@ -732,6 +757,36 @@ func (d *discoverer) githubGists(ctx context.Context) []string {
 	}
 	log.Printf("discover: %d gist files", len(out))
 	return out
+}
+
+// githubIssues searches GitHub's issues and pull requests and returns the
+// subscription addresses and channels mentioned in their titles and bodies:
+// people post their lists and import links there (a collector's "add my
+// source" issue, a pull request that adds a list), where code search, which
+// reads files alone, never finds them. A slice of the queries each run.
+func (d *discoverer) githubIssues(ctx context.Context, hour int) (subs, tgs []string) {
+	for _, q := range rotate(issueQueries, hour, issuesPerRun) {
+		var res struct {
+			Items []struct {
+				Title string `json:"title"`
+				Body  string `json:"body"`
+			} `json:"items"`
+		}
+		u := "https://api.github.com/search/issues?per_page=100&sort=updated&order=desc&q=" + url.QueryEscape(q)
+		if err := d.github(ctx, u, &res); err != nil {
+			log.Printf("discover: issue search %s: %v", q, err)
+			continue
+		}
+		n := 0
+		for _, it := range res.Items {
+			s, c := mentions(it.Title + "\n" + it.Body)
+			subs = append(subs, s...)
+			tgs = append(tgs, c...)
+			n += len(s) + len(c)
+		}
+		log.Printf("discover: issue search %s: %d items, %d mentions", q, len(res.Items), n)
+	}
+	return subs, tgs
 }
 
 // githubForks reads the newest forks of the repositories that hold known
