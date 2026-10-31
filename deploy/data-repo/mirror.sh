@@ -36,6 +36,21 @@ else
   echo "release $tag: copied, $(ls "$tmp/rel" | wc -l) files"
 fi
 
+# Older releases go: the public copy keeps only the newest release and the
+# one update.json sends installed copies to (the same one but for a moment
+# during a release), so old versions do not pile up in public. Only once
+# the newest one is in place, so downloads never find nothing.
+if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && gh release view "$tag" --repo "$pub" >/dev/null 2>&1; then
+  served="v$(jq -r '.latest_version // empty' "$root/update.json" 2>/dev/null)"
+  pruned=0
+  for old in $(gh release list --repo "$pub" --limit 100 --json tagName --jq '.[].tagName' 2>>"$log"); do
+    [[ "$old" == "$tag" || "$old" == "$served" ]] && continue
+    [[ "$old" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+    gh release delete "$old" --repo "$pub" --cleanup-tag --yes >>"$log" 2>&1 && pruned=$((pruned + 1))
+  done
+  echo "releases: $pruned older removed"
+fi
+
 # The website's mirror.
 site="$tmp/site"
 rm -rf "$site" && cp -r "$root/site/public" "$site"
