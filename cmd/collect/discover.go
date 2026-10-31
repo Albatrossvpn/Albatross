@@ -139,7 +139,7 @@ var (
 	tgMentionRe = regexp.MustCompile(`(?i)(?:t\.me/(?:s/)?|@)([A-Za-z][A-Za-z0-9_]{4,31})\b`)
 	// Addresses of lists inside texts: GitHub raw or blob files and other
 	// https files of the usual types.
-	listURLRe = regexp.MustCompile(`https?://(?:raw\.githubusercontent\.com|github\.com|gist\.githubusercontent\.com|cdn\.jsdelivr\.net|[a-z0-9.-]+\.(?:workers\.dev|pages\.dev|github\.io|vercel\.app|netlify\.app|dpdns\.org|xyz|top|ir|ru|net|org|com))/[^\s"'<>()\[\]]+\.(?:txt|yaml|yml|json|conf|ovpn)\b[^\s"'<>()\[\]]*`)
+	listURLRe = regexp.MustCompile(`https?://(?:raw\.githubusercontent\.com|github\.com|gist\.githubusercontent\.com|cdn\.jsdelivr\.net|[a-z0-9.-]+\.(?:workers\.dev|pages\.dev|github\.io|vercel\.app|netlify\.app|dpdns\.org|xyz|top|ir|ru|net|org|com|io|me|app|dev|cc|co|info|site|online|pro|link|click|fun|space|host|live|store|website))/[^\s"'<>()\[\]]+\.(?:txt|yaml|yml|json|conf|ovpn)\b[^\s"'<>()\[\]]*`)
 	blobRe    = regexp.MustCompile(`^https?://github\.com/([^/]+)/([^/]+)/(?:blob|raw)/([^/]+)/(.+)$`)
 )
 

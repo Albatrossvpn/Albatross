@@ -257,6 +257,11 @@ func TestGistsForksAndPastes(t *testing.T) {
 	if len(pages) != 2 || pages[0] != "https://telegra.ph/Free-V2ray-10-31" || pages[1] != "https://teletype.in/@chan/sub" {
 		t.Fatalf("telegraph pages: %v", pages)
 	}
+	// Subscription files mentioned on the wider set of hosts are caught too.
+	tld, _ := mentions("mirrors https://free.example.io/sub.txt and https://nodes.example.me/v2ray.yaml and https://a.pages.dev/c.json")
+	if len(tld) != 3 {
+		t.Fatalf("tld breadth: %v", tld)
+	}
 }
 
 // SearXNG's JSON, Mojeek's HTML, and the site: queries that reach the
