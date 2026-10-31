@@ -330,3 +330,5 @@ button, .btn, summary, .tabs button { touch-action: manipulation; -webkit-tap-hi
 .assure svg { width: 15px; height: 15px; color: var(--gold-ink); flex: none; }
 @media (max-width: 480px) { .panel.auth { padding: 28px 20px 20px; border-radius: 18px; } }
 @media (prefers-reduced-motion: reduce) { .btn .spin { animation: none; } }
+.notice .ico { width: 16px; height: 16px; vertical-align: -3px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.auth .notice { text-align: left; }

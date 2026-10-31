@@ -117,6 +117,9 @@ function render(s) {
   state = s;
   var body = document.body;
   var busy = isBusy(s), on = s.status === "connected" && !!s.conn;
+  // A connection that never came (it gave up after its three minutes) does
+  // not open the store at some later connection.
+  if (storeAfterConnect && !on && Date.now() - storeAskedAt > 180000) storeAfterConnect = "";
   if (on && storeAfterConnect) {
     // Connected for the store's sake: open it now.
     var storeNote = storeAfterConnect;
@@ -1103,7 +1106,7 @@ function storeLink() {
 // The store is a Telegram bot, and Telegram does not open on a plain line
 // there. Not connected yet, the app connects first (anyone can, signed in or
 // not) and opens the store the moment it is; connected, it opens at once.
-var storeAfterConnect = "";
+var storeAfterConnect = "", storeAskedAt = 0;
 function openStoreNow(note) {
   var url = storeLink();
   if (!url) return false;
@@ -1112,10 +1115,23 @@ function openStoreNow(note) {
 }
 function openStore(note) {
   if (!storeLink()) return false;
+  var a = (state && state.account) || {};
+  // Not signed in (the sign-in screen): this app cannot connect without an
+  // account, so the store opens at once; the Telegram app gets through on
+  // its own on most networks.
+  if (a.enabled && !a.signed_in) return openStoreNow(note);
   if (state && state.status === "connected" && state.conn) return openStoreNow(note);
   storeAfterConnect = note || "Opening the store in Telegram…";
+  storeAskedAt = Date.now();
   toast("Connecting first, so the store can open…");
-  if (state && state.status === "idle") api("POST", "/api/connect", { country: state.target || "" }).then(function () { poll(); }).catch(function (e) { toast(e.message); });
+  if (state && state.status === "idle") {
+    api("POST", "/api/connect", { country: state.target || "" }).then(function () { poll(); }).catch(function () {
+      // Could not connect (an account limit, no server): open the store anyway.
+      var n = storeAfterConnect;
+      storeAfterConnect = "";
+      openStoreNow(n);
+    });
+  }
   return true;
 }
 function devicesText(n) { return n === 0 ? "Unlimited devices" : n === 1 ? "1 device" : n + " devices"; }
