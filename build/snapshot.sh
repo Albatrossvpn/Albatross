@@ -10,6 +10,18 @@
 set -uo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 out="$root/internal/sources/lists/snapshot.txt.gz"
+ownout="$root/internal/sources/lists/own-0.bin"
+# A release carries no servers at all: an opened list inside the app is a
+# list anyone who unpacks it can take, and the relay list here would be
+# sealed only with OwnKey, which the app itself holds. A release asks for
+# an account first, and the account service hands a signed-in app the keys
+# to the sealed lists, so a fresh install loses nothing it could use.
+if [ -n "${RELEASE:-}" ] || [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+  gzip -9 -c </dev/null >"$out"
+  : >"$ownout"
+  echo "release: no servers bundled"
+  exit 0
+fi
 # The project's own storage first (the account service's /list/), then the
 # public repository the collector publishes to, then this one's old branch.
 own="$(bash "$root/build/account-url.sh" 2>/dev/null | cut -d, -f1)"
@@ -49,7 +61,6 @@ rm -f "$tmp"
 # The relay list (own-0.bin, sealed with the build key), so a fresh
 # install during a shutdown knows the relays inside the country. Kept as
 # it was when unreachable.
-ownout="$root/internal/sources/lists/own-0.bin"
 for url in "${urls[@]/fresh.txt/own-0.bin}"; do
   if get "$url" "$tmp.own" && [ -s "$tmp.own" ]; then
     mv "$tmp.own" "$ownout"
