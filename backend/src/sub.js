@@ -383,7 +383,7 @@ export const sliceSeed = (env, userId, t) => tag(env.TOKEN_SECRET, `servers|${us
  * (SLICE_COUNTRY for one country's), though never below one server for
  * each country.
  */
-export function slice(entries, seed, cap = SLICE_MAX) {
+export function slice(entries, seed, cap = SLICE_MAX, base = SLICE_BASE) {
   const groups = new Map();
   for (const [i, e] of entries.entries()) {
     if (e.country === "IR") continue;
@@ -393,7 +393,7 @@ export function slice(entries, seed, cap = SLICE_MAX) {
   }
   const size = [...groups.values()].reduce((n, g) => n + g.length, 0);
   const countries = [...groups.keys()].sort();
-  let total = Math.min(size, Math.max(SLICE_BASE, Math.min(SLICE_MAX, countries.length * SLICE_PER_COUNTRY)));
+  let total = Math.min(size, Math.max(base, Math.min(Math.max(cap, base), countries.length * SLICE_PER_COUNTRY)));
   // More countries than the slice holds: one each, so every one is still there.
   total = Math.max(total, Math.min(size, countries.length));
   total = Math.min(total, Math.max(cap, Math.min(size, countries.length)));
@@ -472,8 +472,30 @@ export async function resistantFor(env, userId, t, have, n = SLICE_RESIST) {
 }
 
 /** An account's slice of a pool for the day of t (slice, sliceSeed). */
-export async function sliceFor(env, userId, entries, t, cap = SLICE_MAX) {
-  return slice(entries, await sliceSeed(env, userId, t), cap);
+export async function sliceFor(env, userId, entries, t, cap = SLICE_MAX, base = SLICE_BASE) {
+  return slice(entries, await sliceSeed(env, userId, t), cap, base);
+}
+
+/**
+ * How many servers each plan gets: a higher plan more of the best-tested
+ * ones (base, growing to max with many countries) and more of those reached
+ * through the CDN (resist). Even the highest gets a small part of what the
+ * collector holds, and never more than SLICE_SHARE of the pool, so no
+ * account takes the best-tested list whole.
+ */
+export const SLICE_TIERS = {
+  bronze: { base: 60, max: 120, resist: 40 },
+  silver: { base: 90, max: 160, resist: 60 },
+  gold: { base: 120, max: 200, resist: 80 },
+  vip: { base: 160, max: 260, resist: 100 },
+};
+export const SLICE_SHARE = 0.7;
+
+/** The sizes of a plan's slice of a pool of n servers (SLICE_TIERS). */
+export function sliceSize(tier, n) {
+  const s = SLICE_TIERS[tier] || SLICE_TIERS.bronze;
+  const most = Math.max(SLICE_BASE, Math.ceil(n * SLICE_SHARE));
+  return { base: Math.min(s.base, most), max: Math.min(s.max, most), resist: s.resist };
 }
 
 /**

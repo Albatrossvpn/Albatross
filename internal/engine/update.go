@@ -369,6 +369,19 @@ var directUpdateClient = func() *http.Client { return &http.Client{} }
 // VPN takes the VPN in a later round once it is up. Tests shorten them.
 var updateHeaders, updateIdle, updateTry = 30 * time.Second, time.Minute, 20 * time.Minute
 
+// updateTries bounds the tries at one address; updatePause is the wait
+// after a cut, longer while tries bring nothing.
+var updateTries, updatePause = 60, 2 * time.Second
+
+// partSize is how much of a download's partial file is there, or 0.
+func partSize(path string) int64 {
+	fi, err := os.Stat(path + ".part")
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
+}
+
 // errStalled ends a try that received nothing for updateIdle.
 var errStalled = errors.New("the download stalled")
 
@@ -472,9 +485,31 @@ func (e *Engine) downloadUpdate(f UpdateFile, version string) (string, error) {
 				uc = withHeaderTimeout(e.privateDirect)
 			}
 			// A cut line resumes where it stopped (fetchUpdate keeps the
-			// partial file), so a few tries finish a large file.
-			for try := 0; try < 4; try++ {
-				if err = e.fetchUpdate(uc, u, path, version); err == nil || e.ctx != nil && e.ctx.Err() != nil {
+			// partial file). Through the VPN each try takes the connection
+			// as it is now: a reconnect replaces it, and a client made for
+			// the old one only fails. Tries go on while they bring bytes;
+			// only a few that bring nothing move on to another address.
+			for try, idle := 0, 0; idle < 4 && try < updateTries; try++ {
+				cur := uc
+				if !isDirect {
+					pc := e.proxyClient()
+					if pc == nil {
+						err = errors.New("the VPN is not connected")
+						break
+					}
+					cur = withHeaderTimeout(pc)
+				}
+				before := partSize(path)
+				if err = e.fetchUpdate(cur, u, path, version); err == nil || e.ctx != nil && e.ctx.Err() != nil {
+					break
+				}
+				if partSize(path) > before {
+					idle = 0
+				} else {
+					idle++
+				}
+				e.setUpdateStep(version, "The download was cut; resuming…")
+				if !e.sleepCtx(time.Duration(idle+1) * updatePause) {
 					break
 				}
 			}
@@ -740,4 +775,18 @@ func (e *Engine) InstallerFile() (string, error) {
 		return "", errors.New("The installer could not be downloaded: " + err.Error())
 	}
 	return path, nil
+}
+
+// sleepCtx waits d, or less when the engine stops; false when it stopped.
+func (e *Engine) sleepCtx(d time.Duration) bool {
+	ctx := e.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
+	}
 }

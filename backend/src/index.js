@@ -7,7 +7,7 @@ import {
 import { LIST_PATH, MAX_LIST, pullFile, putList, serveFile, serveList } from "./files.js";
 import { armor, httpsRedirect, securityTxt } from "./headers.js";
 import { singBoxConfig, wantsSingBox } from "./singbox.js";
-import { appLinks, appPool, resistantFor, build as buildSub, countriesOf, dayPick, edgeFor, headers as subHeaders, listUpdated, readSubToken, SLICE_COUNTRY, SLICE_MAX, sliceFor, storedListKeys, subPool, subToken } from "./sub.js";
+import { appLinks, appPool, resistantFor, sliceSize, build as buildSub, countriesOf, dayPick, edgeFor, headers as subHeaders, listUpdated, readSubToken, SLICE_COUNTRY, SLICE_MAX, sliceFor, storedListKeys, subPool, subToken } from "./sub.js";
 import { chat as supportChat, close as supportClose, withCors as supportCors } from "./support.js";
 import { refreshRates } from "./fx.js";
 import { MAX_GB, MIN_GB, MONTHS, SALES_DEFAULTS, SALES_RANGE, catalog as salesCatalog, config as salesConfig, parseSteps } from "./sales.js";
@@ -621,10 +621,12 @@ async function servers(request, env) {
   if (await blocked(env, key, SERVERS_PER_HOUR, 3600)) throw tooMany();
   await count(env, key, 3600);
   const entries = await appPool(env, dayPick(t));
-  const base = await sliceFor(env, user.id, entries, t);
+  // A higher plan gets more servers (sub.js SLICE_TIERS).
+  const size = sliceSize(a.tier, entries.length);
+  const base = await sliceFor(env, user.id, entries, t, size.max, size.base);
   // Plus a share of the servers reached through the CDN, which are what
   // still gets out when the network lets only approved sites through.
-  const resist = await resistantFor(env, user.id, t, base);
+  const resist = await resistantFor(env, user.id, t, base, size.resist);
   return json({ servers: appLinks([...base, ...resist]), reason: "" });
 }
 
@@ -660,7 +662,7 @@ async function subInfo(request, env, url) {
   return json({
     url: `${url.origin}/sub/${await subToken(env, user, t)}`,
     countries: countriesOf(entries),
-    servers: (await sliceFor(env, user.id, entries, t)).length,
+    servers: (await sliceFor(env, user.id, entries, t, sliceSize(a.tier, entries.length).max, sliceSize(a.tier, entries.length).base)).length,
     edge: (await edgeFor(env, a)).length,
     brand: env.SITE_NAME || "Albatross",
   });
@@ -691,8 +693,9 @@ async function subscription(request, url, env) {
   // The account's slice (sub.js slice), of the chosen country's servers
   // when there is a choice (fewer: SLICE_COUNTRY): the whole pool goes to no one.
   const chosen = choice === "edge" ? [] : choice ? entries.filter((e) => e.country === choice) : entries;
-  const cap = choice && choice !== "edge" ? SLICE_COUNTRY : SLICE_MAX;
-  const sub = buildSub(await sliceFor(env, user.id, chosen, t, cap), choice, env.SITE_NAME || "Albatross", edge, updated);
+  const size = sliceSize(a.tier, entries.length);
+  const [cap, base] = choice && choice !== "edge" ? [SLICE_COUNTRY, SLICE_COUNTRY] : [size.max, size.base];
+  const sub = buildSub(await sliceFor(env, user.id, chosen, t, cap, base), choice, env.SITE_NAME || "Albatross", edge, updated);
   const h = subHeaders(sub.title, a);
   if (wantsSingBox(request, url)) {
     // The sing-box apps load a whole config, not a list of links.

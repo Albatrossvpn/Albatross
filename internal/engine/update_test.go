@@ -189,8 +189,10 @@ func TestUpdateStalls(t *testing.T) {
 	defer srv.Close()
 	defer close(done)
 	old, oldHeaders, oldIdle := directUpdateClient, updateHeaders, updateIdle
-	directUpdateClient, updateHeaders, updateIdle = srv.Client, 200*time.Millisecond, 300*time.Millisecond
-	defer func() { directUpdateClient, updateHeaders, updateIdle = old, oldHeaders, oldIdle }()
+	directUpdateClient, updateHeaders, updateIdle, updatePause = srv.Client, 200*time.Millisecond, 300*time.Millisecond, 10*time.Millisecond
+	defer func() {
+		directUpdateClient, updateHeaders, updateIdle, updatePause = old, oldHeaders, oldIdle, 2*time.Second
+	}()
 
 	installed := ""
 	e, err := New(Options{DataDir: t.TempDir(), Sources: []sources.Source{}, Version: "0.2.1",
