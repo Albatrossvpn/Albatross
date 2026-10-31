@@ -112,6 +112,13 @@ const issuesPerRun = 4
 // pasteRe finds lists kept on paste sites, which have no file names.
 var pasteRe = regexp.MustCompile(`https?://(?:pastebin\.com/raw/[A-Za-z0-9]{6,12}|paste\.ee/r/[A-Za-z0-9]{4,12}|rentry\.(?:co|org)/[A-Za-z0-9_-]{3,40}/raw|dpaste\.org/[A-Za-z0-9]{4,12}/raw|gitee\.com/[^\s"'<>()\[\]/]+/[^\s"'<>()\[\]/]+/raw/[^\s"'<>()\[\]]+)\b`)
 
+// pageRe finds pages that hold servers in their text rather than as a file:
+// Telegraph articles (telegra.ph and its graph.org alias) and Teletype
+// posts, where channels park their configs and pass the link on. The page
+// is fetched like any source and EachText reads the servers out of its
+// HTML, so no file name is needed.
+var pageRe = regexp.MustCompile(`https?://(?:telegra\.ph|graph\.org|teletype\.in)/[A-Za-z0-9@][A-Za-z0-9@/_-]{2,120}`)
+
 // gistWords pick, among the newest public gists, the ones that may hold
 // servers: by their description or their files' names.
 var gistWords = regexp.MustCompile(`(?i)v2ray|vless|vmess|trojan|hysteria|tuic|shadowsocks|clash|sing-?box|xray|proxy|proxies|config|sub(scri)?|vpn|nodes?|wireguard|节点|订阅|کانفیگ|فیلترشکن`)
@@ -567,6 +574,11 @@ func mentions(text string) (subs, channels []string) {
 		}
 	}
 	for _, m := range pasteRe.FindAllString(text, -1) {
+		if u := canonical(m); u != "" {
+			subs = append(subs, u)
+		}
+	}
+	for _, m := range pageRe.FindAllString(text, -1) {
 		if u := canonical(m); u != "" {
 			subs = append(subs, u)
 		}

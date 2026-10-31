@@ -251,6 +251,12 @@ func TestGistsForksAndPastes(t *testing.T) {
 	if len(subs) < 3 {
 		t.Fatalf("paste sites: %v", subs)
 	}
+	// Telegraph and Teletype pages, where channels park their configs, are
+	// followed too; EachText reads the servers out of their HTML.
+	pages, _ := mentions("today's nodes: https://telegra.ph/Free-V2ray-10-31 and https://teletype.in/@chan/sub, but not https://telegra.ph/ (no title)")
+	if len(pages) != 2 || pages[0] != "https://telegra.ph/Free-V2ray-10-31" || pages[1] != "https://teletype.in/@chan/sub" {
+		t.Fatalf("telegraph pages: %v", pages)
+	}
 }
 
 // SearXNG's JSON, Mojeek's HTML, and the site: queries that reach the
