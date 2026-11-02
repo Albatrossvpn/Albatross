@@ -2,26 +2,27 @@
   "download_url": "https://albatrossvpn.online/#download",
   "files": {
     "android-arm64-v8a": {
-      "sha256": "17f82f9a776b145a0a01e85c3190c7ce5701b5df7d3472f582d06f9020a8fb7f",
+      "sha256": "28b7e4bbe7cf796991940e797727a020c3a2951a3be58e575d8a0757afc93321",
       "urls": [
-        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.3/Albatross-1.3.3-android.apk",
-        "https://albatrossvpn.online/download/Albatross-1.3.3-android.apk",
-        "https://accounts.albatrossvpn.online/dl/v1.3.3/Albatross-1.3.3-android.apk"
+        "https://albatrossvpn.online/download/Albatross-1.3.4-android.apk",
+        "https://accounts.albatrossvpn.online/dl/v1.3.4/Albatross-1.3.4-android.apk",
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.4/Albatross-1.3.4-android.apk"
       ]
     },
     "windows": {
-      "sha256": "ec44d0d792fb3184381646256ae4d162fd30783f963c5934a8345a8d04abec4b",
+      "sha256": "4b7b3dc0a1e6243fee9053c565651d2fc979223d06d8cc7d2102aca57a267eee",
       "urls": [
-        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.3/Albatross-Setup-1.3.3.exe",
-        "https://albatrossvpn.online/download/Albatross-Setup-1.3.3.exe",
-        "https://accounts.albatrossvpn.online/dl/v1.3.3/Albatross-Setup-1.3.3.exe"
+        "https://albatrossvpn.online/download/Albatross-Setup-1.3.4.exe",
+        "https://accounts.albatrossvpn.online/dl/v1.3.4/Albatross-Setup-1.3.4.exe",
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.4/Albatross-Setup-1.3.4.exe"
       ]
     }
   },
-  "latest_version": "1.3.3",
-  "message": "Albatross 1.3.3 is required and this version no longer connects. If the app does not update by itself: 1) Uninstall Albatross. 2) Download the new version with Get the update, or open https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.3/Albatross-1.3.3-android.apk in your browser (Windows: Albatross-Setup-1.3.3.exe from https://albatrossvpn.online/#download). 3) Install it and sign in with the username and password you were given. Later updates install from inside the app.",
-  "min_version": "1.3.3",
-  "require": "1.3.3",
-  "sig": "f0XXjwhskqzMgwLokZtJSS+xqtpHLObmk5d+opawvqxIGdLoOz1zaOyHVTqd2H8uk82ZXQSHheHtTtQ7OqAnCw==",
-  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiMTdmODJmOWE3NzZiMTQ1YTBhMDFlODVjMzE5MGM3Y2U1NzAxYjVkZjdkMzQ3MmY1ODJkMDZmOTAyMGE4ZmI3ZiIsInVybHMiOlsiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9hbGJhLWRhdGEvcmVsZWFzZXMvZG93bmxvYWQvdjEuMy4zL0FsYmF0cm9zcy0xLjMuMy1hbmRyb2lkLmFwayIsImh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS9kb3dubG9hZC9BbGJhdHJvc3MtMS4zLjMtYW5kcm9pZC5hcGsiLCJodHRwczovL2FjY291bnRzLmFsYmF0cm9zc3Zwbi5vbmxpbmUvZGwvdjEuMy4zL0FsYmF0cm9zcy0xLjMuMy1hbmRyb2lkLmFwayJdfSwid2luZG93cyI6eyJzaGEyNTYiOiJlYzQ0ZDBkNzkyZmIzMTg0MzgxNjQ2MjU2YWU0ZDE2MmZkMzA3ODNmOTYzYzU5MzRhODM0NWE4ZDA0YWJlYzRiIiwidXJscyI6WyJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL2FsYmEtZGF0YS9yZWxlYXNlcy9kb3dubG9hZC92MS4zLjMvQWxiYXRyb3NzLVNldHVwLTEuMy4zLmV4ZSIsImh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS9kb3dubG9hZC9BbGJhdHJvc3MtU2V0dXAtMS4zLjMuZXhlIiwiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjMuMy9BbGJhdHJvc3MtU2V0dXAtMS4zLjMuZXhlIl19fSwibGF0ZXN0X3ZlcnNpb24iOiIxLjMuMyIsIm1lc3NhZ2UiOiJBbGJhdHJvc3MgMS4zLjMgaXMgcmVxdWlyZWQgYW5kIHRoaXMgdmVyc2lvbiBubyBsb25nZXIgY29ubmVjdHMuIElmIHRoZSBhcHAgZG9lcyBub3QgdXBkYXRlIGJ5IGl0c2VsZjogMSkgVW5pbnN0YWxsIEFsYmF0cm9zcy4gMikgRG93bmxvYWQgdGhlIG5ldyB2ZXJzaW9uIHdpdGggR2V0IHRoZSB1cGRhdGUsIG9yIG9wZW4gaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9hbGJhLWRhdGEvcmVsZWFzZXMvZG93bmxvYWQvdjEuMy4zL0FsYmF0cm9zcy0xLjMuMy1hbmRyb2lkLmFwayBpbiB5b3VyIGJyb3dzZXIgKFdpbmRvd3M6IEFsYmF0cm9zcy1TZXR1cC0xLjMuMy5leGUgZnJvbSBodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkKS4gMykgSW5zdGFsbCBpdCBhbmQgc2lnbiBpbiB3aXRoIHRoZSB1c2VybmFtZSBhbmQgcGFzc3dvcmQgeW91IHdlcmUgZ2l2ZW4uIExhdGVyIHVwZGF0ZXMgaW5zdGFsbCBmcm9tIGluc2lkZSB0aGUgYXBwLiIsIm1pbl92ZXJzaW9uIjoiMS4zLjMiLCJyZXF1aXJlIjoiMS4zLjMifQ=="
+  "latest_version": "1.3.4",
+  "message": "Albatross 1.3.4: more servers connect, connections are steadier, Telegram sign-in is fixed, and Windows gets a tray icon and hotspot sharing. This update is required and older versions no longer connect. If the app does not update by itself: download the new version with Get the update, or from https://albatrossvpn.online/#download, and install it. If Android refuses to install it over the old one, uninstall Albatross first. Sign in with the username and password you were given if asked. Later updates install from inside the app.",
+  "min_version": "1.3.4",
+  "require": "1.3.4",
+  "sig": "K3yMCGaF4p89JYbI+2jvJ+hC1JmE4bWtPIyzeh6G4AyGjHA3s5BlTHFccm5CY1zq+VuB/Lc1c3Sixzb3gt1EDQ==",
+  "sig2": "W6IgBd7aBS8E67DzeWm5EHnoPrNmbXMdX2NcIIojX+gHhQ/G9iq+X4bC+MPfubfPlEur3Ctb/oBDOjc38cWKCg==",
+  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiMjhiN2U0YmJlN2NmNzk2OTkxOTQwZTc5NzcyN2EwMjBjM2EyOTUxYTNiZTU4ZTU3NWQ4YTA3NTdhZmM5MzMyMSIsInVybHMiOlsiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy0xLjMuNC1hbmRyb2lkLmFwayIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4zLjQvQWxiYXRyb3NzLTEuMy40LWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9hbGJhLWRhdGEvcmVsZWFzZXMvZG93bmxvYWQvdjEuMy40L0FsYmF0cm9zcy0xLjMuNC1hbmRyb2lkLmFwayJdfSwid2luZG93cyI6eyJzaGEyNTYiOiI0YjdiM2RjMGExZTYyNDNmZWU5MDUzYzU2NTY1MWQyZmM5NzkyMjNkMDZkOGNjN2QyMTAyYWNhNTdhMjY3ZWVlIiwidXJscyI6WyJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvZG93bmxvYWQvQWxiYXRyb3NzLVNldHVwLTEuMy40LmV4ZSIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4zLjQvQWxiYXRyb3NzLVNldHVwLTEuMy40LmV4ZSIsImh0dHBzOi8vZ2l0aHViLmNvbS9BbGJhdHJvc3N2cG4vYWxiYS1kYXRhL3JlbGVhc2VzL2Rvd25sb2FkL3YxLjMuNC9BbGJhdHJvc3MtU2V0dXAtMS4zLjQuZXhlIl19fSwibGF0ZXN0X3ZlcnNpb24iOiIxLjMuNCIsIm1lc3NhZ2UiOiJBbGJhdHJvc3MgMS4zLjQ6IG1vcmUgc2VydmVycyBjb25uZWN0LCBjb25uZWN0aW9ucyBhcmUgc3RlYWRpZXIsIFRlbGVncmFtIHNpZ24taW4gaXMgZml4ZWQsIGFuZCBXaW5kb3dzIGdldHMgYSB0cmF5IGljb24gYW5kIGhvdHNwb3Qgc2hhcmluZy4gVGhpcyB1cGRhdGUgaXMgcmVxdWlyZWQgYW5kIG9sZGVyIHZlcnNpb25zIG5vIGxvbmdlciBjb25uZWN0LiBJZiB0aGUgYXBwIGRvZXMgbm90IHVwZGF0ZSBieSBpdHNlbGY6IGRvd25sb2FkIHRoZSBuZXcgdmVyc2lvbiB3aXRoIEdldCB0aGUgdXBkYXRlLCBvciBmcm9tIGh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS8jZG93bmxvYWQsIGFuZCBpbnN0YWxsIGl0LiBJZiBBbmRyb2lkIHJlZnVzZXMgdG8gaW5zdGFsbCBpdCBvdmVyIHRoZSBvbGQgb25lLCB1bmluc3RhbGwgQWxiYXRyb3NzIGZpcnN0LiBTaWduIGluIHdpdGggdGhlIHVzZXJuYW1lIGFuZCBwYXNzd29yZCB5b3Ugd2VyZSBnaXZlbiBpZiBhc2tlZC4gTGF0ZXIgdXBkYXRlcyBpbnN0YWxsIGZyb20gaW5zaWRlIHRoZSBhcHAuIiwibWluX3ZlcnNpb24iOiIxLjMuNCIsInJlcXVpcmUiOiIxLjMuNCJ9"
 }
