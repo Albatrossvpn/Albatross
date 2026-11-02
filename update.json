@@ -4,17 +4,17 @@
     "android-arm64-v8a": {
       "sha256": "28b7e4bbe7cf796991940e797727a020c3a2951a3be58e575d8a0757afc93321",
       "urls": [
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.4/Albatross-1.3.4-android.apk",
         "https://albatrossvpn.online/download/Albatross-1.3.4-android.apk",
-        "https://accounts.albatrossvpn.online/dl/v1.3.4/Albatross-1.3.4-android.apk",
-        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.4/Albatross-1.3.4-android.apk"
+        "https://accounts.albatrossvpn.online/dl/v1.3.4/Albatross-1.3.4-android.apk"
       ]
     },
     "windows": {
       "sha256": "4b7b3dc0a1e6243fee9053c565651d2fc979223d06d8cc7d2102aca57a267eee",
       "urls": [
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.4/Albatross-Setup-1.3.4.exe",
         "https://albatrossvpn.online/download/Albatross-Setup-1.3.4.exe",
-        "https://accounts.albatrossvpn.online/dl/v1.3.4/Albatross-Setup-1.3.4.exe",
-        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.4/Albatross-Setup-1.3.4.exe"
+        "https://accounts.albatrossvpn.online/dl/v1.3.4/Albatross-Setup-1.3.4.exe"
       ]
     }
   },
@@ -22,7 +22,7 @@
   "message": "Albatross 1.3.4: more servers connect, connections are steadier, Telegram sign-in is fixed, and Windows gets a tray icon and hotspot sharing. This update is required and older versions no longer connect. If the app does not update by itself: download the new version with Get the update, or from https://albatrossvpn.online/#download, and install it. If Android refuses to install it over the old one, uninstall Albatross first. Sign in with the username and password you were given if asked. Later updates install from inside the app.",
   "min_version": "1.3.4",
   "require": "1.3.4",
-  "sig": "K3yMCGaF4p89JYbI+2jvJ+hC1JmE4bWtPIyzeh6G4AyGjHA3s5BlTHFccm5CY1zq+VuB/Lc1c3Sixzb3gt1EDQ==",
-  "sig2": "W6IgBd7aBS8E67DzeWm5EHnoPrNmbXMdX2NcIIojX+gHhQ/G9iq+X4bC+MPfubfPlEur3Ctb/oBDOjc38cWKCg==",
-  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiMjhiN2U0YmJlN2NmNzk2OTkxOTQwZTc5NzcyN2EwMjBjM2EyOTUxYTNiZTU4ZTU3NWQ4YTA3NTdhZmM5MzMyMSIsInVybHMiOlsiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy0xLjMuNC1hbmRyb2lkLmFwayIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4zLjQvQWxiYXRyb3NzLTEuMy40LWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9hbGJhLWRhdGEvcmVsZWFzZXMvZG93bmxvYWQvdjEuMy40L0FsYmF0cm9zcy0xLjMuNC1hbmRyb2lkLmFwayJdfSwid2luZG93cyI6eyJzaGEyNTYiOiI0YjdiM2RjMGExZTYyNDNmZWU5MDUzYzU2NTY1MWQyZmM5NzkyMjNkMDZkOGNjN2QyMTAyYWNhNTdhMjY3ZWVlIiwidXJscyI6WyJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvZG93bmxvYWQvQWxiYXRyb3NzLVNldHVwLTEuMy40LmV4ZSIsImh0dHBzOi8vYWNjb3VudHMuYWxiYXRyb3NzdnBuLm9ubGluZS9kbC92MS4zLjQvQWxiYXRyb3NzLVNldHVwLTEuMy40LmV4ZSIsImh0dHBzOi8vZ2l0aHViLmNvbS9BbGJhdHJvc3N2cG4vYWxiYS1kYXRhL3JlbGVhc2VzL2Rvd25sb2FkL3YxLjMuNC9BbGJhdHJvc3MtU2V0dXAtMS4zLjQuZXhlIl19fSwibGF0ZXN0X3ZlcnNpb24iOiIxLjMuNCIsIm1lc3NhZ2UiOiJBbGJhdHJvc3MgMS4zLjQ6IG1vcmUgc2VydmVycyBjb25uZWN0LCBjb25uZWN0aW9ucyBhcmUgc3RlYWRpZXIsIFRlbGVncmFtIHNpZ24taW4gaXMgZml4ZWQsIGFuZCBXaW5kb3dzIGdldHMgYSB0cmF5IGljb24gYW5kIGhvdHNwb3Qgc2hhcmluZy4gVGhpcyB1cGRhdGUgaXMgcmVxdWlyZWQgYW5kIG9sZGVyIHZlcnNpb25zIG5vIGxvbmdlciBjb25uZWN0LiBJZiB0aGUgYXBwIGRvZXMgbm90IHVwZGF0ZSBieSBpdHNlbGY6IGRvd25sb2FkIHRoZSBuZXcgdmVyc2lvbiB3aXRoIEdldCB0aGUgdXBkYXRlLCBvciBmcm9tIGh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS8jZG93bmxvYWQsIGFuZCBpbnN0YWxsIGl0LiBJZiBBbmRyb2lkIHJlZnVzZXMgdG8gaW5zdGFsbCBpdCBvdmVyIHRoZSBvbGQgb25lLCB1bmluc3RhbGwgQWxiYXRyb3NzIGZpcnN0LiBTaWduIGluIHdpdGggdGhlIHVzZXJuYW1lIGFuZCBwYXNzd29yZCB5b3Ugd2VyZSBnaXZlbiBpZiBhc2tlZC4gTGF0ZXIgdXBkYXRlcyBpbnN0YWxsIGZyb20gaW5zaWRlIHRoZSBhcHAuIiwibWluX3ZlcnNpb24iOiIxLjMuNCIsInJlcXVpcmUiOiIxLjMuNCJ9"
+  "sig": "qi1KVkJ84eMe4fzU5mB8YT3ZatW7HhYstxS25POOatURufvUuWg3id+ieB0AACRNpHfrflCtyMDzISgZcvQoBQ==",
+  "sig2": "1BSQsSSJq1K7oQ9PzH+RGNaRNjE5sIKGzgbZ0ymZ7hWctB2Ms8cOhNaBTly7RtoQuG+P1jIStVLOaDrlNTpiCQ==",
+  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiMjhiN2U0YmJlN2NmNzk2OTkxOTQwZTc5NzcyN2EwMjBjM2EyOTUxYTNiZTU4ZTU3NWQ4YTA3NTdhZmM5MzMyMSIsInVybHMiOlsiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9hbGJhLWRhdGEvcmVsZWFzZXMvZG93bmxvYWQvdjEuMy40L0FsYmF0cm9zcy0xLjMuNC1hbmRyb2lkLmFwayIsImh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS9kb3dubG9hZC9BbGJhdHJvc3MtMS4zLjQtYW5kcm9pZC5hcGsiLCJodHRwczovL2FjY291bnRzLmFsYmF0cm9zc3Zwbi5vbmxpbmUvZGwvdjEuMy40L0FsYmF0cm9zcy0xLjMuNC1hbmRyb2lkLmFwayJdfSwid2luZG93cyI6eyJzaGEyNTYiOiI0YjdiM2RjMGExZTYyNDNmZWU5MDUzYzU2NTY1MWQyZmM5NzkyMjNkMDZkOGNjN2QyMTAyYWNhNTdhMjY3ZWVlIiwidXJscyI6WyJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL2FsYmEtZGF0YS9yZWxlYXNlcy9kb3dubG9hZC92MS4zLjQvQWxiYXRyb3NzLVNldHVwLTEuMy40LmV4ZSIsImh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS9kb3dubG9hZC9BbGJhdHJvc3MtU2V0dXAtMS4zLjQuZXhlIiwiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjMuNC9BbGJhdHJvc3MtU2V0dXAtMS4zLjQuZXhlIl19fSwibGF0ZXN0X3ZlcnNpb24iOiIxLjMuNCIsIm1lc3NhZ2UiOiJBbGJhdHJvc3MgMS4zLjQ6IG1vcmUgc2VydmVycyBjb25uZWN0LCBjb25uZWN0aW9ucyBhcmUgc3RlYWRpZXIsIFRlbGVncmFtIHNpZ24taW4gaXMgZml4ZWQsIGFuZCBXaW5kb3dzIGdldHMgYSB0cmF5IGljb24gYW5kIGhvdHNwb3Qgc2hhcmluZy4gVGhpcyB1cGRhdGUgaXMgcmVxdWlyZWQgYW5kIG9sZGVyIHZlcnNpb25zIG5vIGxvbmdlciBjb25uZWN0LiBJZiB0aGUgYXBwIGRvZXMgbm90IHVwZGF0ZSBieSBpdHNlbGY6IGRvd25sb2FkIHRoZSBuZXcgdmVyc2lvbiB3aXRoIEdldCB0aGUgdXBkYXRlLCBvciBmcm9tIGh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS8jZG93bmxvYWQsIGFuZCBpbnN0YWxsIGl0LiBJZiBBbmRyb2lkIHJlZnVzZXMgdG8gaW5zdGFsbCBpdCBvdmVyIHRoZSBvbGQgb25lLCB1bmluc3RhbGwgQWxiYXRyb3NzIGZpcnN0LiBTaWduIGluIHdpdGggdGhlIHVzZXJuYW1lIGFuZCBwYXNzd29yZCB5b3Ugd2VyZSBnaXZlbiBpZiBhc2tlZC4gTGF0ZXIgdXBkYXRlcyBpbnN0YWxsIGZyb20gaW5zaWRlIHRoZSBhcHAuIiwibWluX3ZlcnNpb24iOiIxLjMuNCIsInJlcXVpcmUiOiIxLjMuNCJ9"
 }
