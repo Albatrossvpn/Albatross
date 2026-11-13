@@ -1,0 +1,70 @@
+{
+  "download_url": "https://albatrossvpn.online/#download",
+  "files": {
+    "android-arm64-v8a": {
+      "sha256": "529cf95739b8dc594ada0580289978c75ad0b27225a51271f29645ce75532abd",
+      "urls": [
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.10/Albatross-1.3.10-android.apk",
+        "https://albatrossvpn.online/download/Albatross-1.3.10-android.apk",
+        "https://accounts.albatrossvpn.online/dl/v1.3.10/Albatross-1.3.10-android.apk"
+      ]
+    },
+    "android-armeabi-v7a": {
+      "sha256": "d6efbd694bbd577ac8146b8e10f17f6b041418d24f601103d58e0df6aad186a7",
+      "urls": [
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.10/Albatross-1.3.10-android-armv7.apk",
+        "https://albatrossvpn.online/download/Albatross-1.3.10-android-armv7.apk",
+        "https://accounts.albatrossvpn.online/dl/v1.3.10/Albatross-1.3.10-android-armv7.apk"
+      ]
+    },
+    "windows": {
+      "sha256": "3c36d7d571cd97026b3fe563d6acdc41f1d40b1ae694499291e8222f41c1f5fb",
+      "urls": [
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.10/Albatross-Setup-1.3.10.exe",
+        "https://albatrossvpn.online/download/Albatross-Setup-1.3.10.exe",
+        "https://accounts.albatrossvpn.online/dl/v1.3.10/Albatross-Setup-1.3.10.exe"
+      ]
+    }
+  },
+  "held": {
+    "linux-arm64": {
+      "sha256": "9d461d95ad138d951faa90e110d2ac8769e4588b1f0b84b0ea5875127f8fccd7",
+      "urls": [
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.8/Albatross-1.3.8-linux-arm64.tar.gz",
+        "https://albatrossvpn.online/download/Albatross-1.3.8-linux-arm64.tar.gz",
+        "https://accounts.albatrossvpn.online/dl/v1.3.8/Albatross-1.3.8-linux-arm64.tar.gz"
+      ]
+    },
+    "linux-x86_64": {
+      "sha256": "5c131769d9b1f15fa899e368b0da80a10199478699939065f68381f2d3a1d5df",
+      "urls": [
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.8/Albatross-1.3.8-linux-x86_64.tar.gz",
+        "https://albatrossvpn.online/download/Albatross-1.3.8-linux-x86_64.tar.gz",
+        "https://accounts.albatrossvpn.online/dl/v1.3.8/Albatross-1.3.8-linux-x86_64.tar.gz"
+      ]
+    },
+    "macos-arm64": {
+      "sha256": "6cf292a4cb3d051091c8687c027f1dd537978615609acf887bac34ac51206a7c",
+      "urls": [
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.8/Albatross-1.3.8-macos-arm64.zip",
+        "https://albatrossvpn.online/download/Albatross-1.3.8-macos-arm64.zip",
+        "https://accounts.albatrossvpn.online/dl/v1.3.8/Albatross-1.3.8-macos-arm64.zip"
+      ]
+    },
+    "macos-x86_64": {
+      "sha256": "310c46afe381a4f1e7c5eab6450ddccebef7145c26be57999a1fc6b53b5d3f8c",
+      "urls": [
+        "https://github.com/Albatrossvpn/alba-data/releases/download/v1.3.8/Albatross-1.3.8-macos-x86_64.zip",
+        "https://albatrossvpn.online/download/Albatross-1.3.8-macos-x86_64.zip",
+        "https://accounts.albatrossvpn.online/dl/v1.3.8/Albatross-1.3.8-macos-x86_64.zip"
+      ]
+    }
+  },
+  "latest_version": "1.3.10",
+  "message": "Version 1.3.10: Google's AI tools (Gemini, Antigravity) leave through a server in a country Google serves, AmneziaWG connects on Android, and Whole device shows the real location.",
+  "min_version": "1.3.8",
+  "require": "1.3.8",
+  "sig": "XsrjTwPvimdFhupEnCmAO3ZtXZYOTfD70nUgPhVdHJ+5lMQaVbWrBxgapD53FfPqkMyDDV6qMhdxwBYGa+AzBw==",
+  "sig2": "JQe/akm1ZflmHU4qHHvsiigUIPFb1DC7mD5lkKUPibvPXBTYmNQ9M4a1bVuXlJukbX1riBpXrqteWGeU2aMqAA==",
+  "signed": "eyJkb3dubG9hZF91cmwiOiJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvI2Rvd25sb2FkIiwiZmlsZXMiOnsiYW5kcm9pZC1hcm02NC12OGEiOnsic2hhMjU2IjoiNTI5Y2Y5NTczOWI4ZGM1OTRhZGEwNTgwMjg5OTc4Yzc1YWQwYjI3MjI1YTUxMjcxZjI5NjQ1Y2U3NTUzMmFiZCIsInVybHMiOlsiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9hbGJhLWRhdGEvcmVsZWFzZXMvZG93bmxvYWQvdjEuMy4xMC9BbGJhdHJvc3MtMS4zLjEwLWFuZHJvaWQuYXBrIiwiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy0xLjMuMTAtYW5kcm9pZC5hcGsiLCJodHRwczovL2FjY291bnRzLmFsYmF0cm9zc3Zwbi5vbmxpbmUvZGwvdjEuMy4xMC9BbGJhdHJvc3MtMS4zLjEwLWFuZHJvaWQuYXBrIl19LCJhbmRyb2lkLWFybWVhYmktdjdhIjp7InNoYTI1NiI6ImQ2ZWZiZDY5NGJiZDU3N2FjODE0NmI4ZTEwZjE3ZjZiMDQxNDE4ZDI0ZjYwMTEwM2Q1OGUwZGY2YWFkMTg2YTciLCJ1cmxzIjpbImh0dHBzOi8vZ2l0aHViLmNvbS9BbGJhdHJvc3N2cG4vYWxiYS1kYXRhL3JlbGVhc2VzL2Rvd25sb2FkL3YxLjMuMTAvQWxiYXRyb3NzLTEuMy4xMC1hbmRyb2lkLWFybXY3LmFwayIsImh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS9kb3dubG9hZC9BbGJhdHJvc3MtMS4zLjEwLWFuZHJvaWQtYXJtdjcuYXBrIiwiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjMuMTAvQWxiYXRyb3NzLTEuMy4xMC1hbmRyb2lkLWFybXY3LmFwayJdfSwid2luZG93cyI6eyJzaGEyNTYiOiIzYzM2ZDdkNTcxY2Q5NzAyNmIzZmU1NjNkNmFjZGM0MWYxZDQwYjFhZTY5NDQ5OTI5MWU4MjIyZjQxYzFmNWZiIiwidXJscyI6WyJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL2FsYmEtZGF0YS9yZWxlYXNlcy9kb3dubG9hZC92MS4zLjEwL0FsYmF0cm9zcy1TZXR1cC0xLjMuMTAuZXhlIiwiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy1TZXR1cC0xLjMuMTAuZXhlIiwiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjMuMTAvQWxiYXRyb3NzLVNldHVwLTEuMy4xMC5leGUiXX19LCJoZWxkIjp7ImxpbnV4LWFybTY0Ijp7InNoYTI1NiI6IjlkNDYxZDk1YWQxMzhkOTUxZmFhOTBlMTEwZDJhYzg3NjllNDU4OGIxZjBiODRiMGVhNTg3NTEyN2Y4ZmNjZDciLCJ1cmxzIjpbImh0dHBzOi8vZ2l0aHViLmNvbS9BbGJhdHJvc3N2cG4vYWxiYS1kYXRhL3JlbGVhc2VzL2Rvd25sb2FkL3YxLjMuOC9BbGJhdHJvc3MtMS4zLjgtbGludXgtYXJtNjQudGFyLmd6IiwiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy0xLjMuOC1saW51eC1hcm02NC50YXIuZ3oiLCJodHRwczovL2FjY291bnRzLmFsYmF0cm9zc3Zwbi5vbmxpbmUvZGwvdjEuMy44L0FsYmF0cm9zcy0xLjMuOC1saW51eC1hcm02NC50YXIuZ3oiXX0sImxpbnV4LXg4Nl82NCI6eyJzaGEyNTYiOiI1YzEzMTc2OWQ5YjFmMTVmYTg5OWUzNjhiMGRhODBhMTAxOTk0Nzg2OTk5MzkwNjVmNjgzODFmMmQzYTFkNWRmIiwidXJscyI6WyJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL2FsYmEtZGF0YS9yZWxlYXNlcy9kb3dubG9hZC92MS4zLjgvQWxiYXRyb3NzLTEuMy44LWxpbnV4LXg4Nl82NC50YXIuZ3oiLCJodHRwczovL2FsYmF0cm9zc3Zwbi5vbmxpbmUvZG93bmxvYWQvQWxiYXRyb3NzLTEuMy44LWxpbnV4LXg4Nl82NC50YXIuZ3oiLCJodHRwczovL2FjY291bnRzLmFsYmF0cm9zc3Zwbi5vbmxpbmUvZGwvdjEuMy44L0FsYmF0cm9zcy0xLjMuOC1saW51eC14ODZfNjQudGFyLmd6Il19LCJtYWNvcy1hcm02NCI6eyJzaGEyNTYiOiI2Y2YyOTJhNGNiM2QwNTEwOTFjODY4N2MwMjdmMWRkNTM3OTc4NjE1NjA5YWNmODg3YmFjMzRhYzUxMjA2YTdjIiwidXJscyI6WyJodHRwczovL2dpdGh1Yi5jb20vQWxiYXRyb3NzdnBuL2FsYmEtZGF0YS9yZWxlYXNlcy9kb3dubG9hZC92MS4zLjgvQWxiYXRyb3NzLTEuMy44LW1hY29zLWFybTY0LnppcCIsImh0dHBzOi8vYWxiYXRyb3NzdnBuLm9ubGluZS9kb3dubG9hZC9BbGJhdHJvc3MtMS4zLjgtbWFjb3MtYXJtNjQuemlwIiwiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjMuOC9BbGJhdHJvc3MtMS4zLjgtbWFjb3MtYXJtNjQuemlwIl19LCJtYWNvcy14ODZfNjQiOnsic2hhMjU2IjoiMzEwYzQ2YWZlMzgxYTRmMWU3YzVlYWI2NDUwZGRjY2ViZWY3MTQ1YzI2YmU1Nzk5OWExZmM2YjUzYjVkM2Y4YyIsInVybHMiOlsiaHR0cHM6Ly9naXRodWIuY29tL0FsYmF0cm9zc3Zwbi9hbGJhLWRhdGEvcmVsZWFzZXMvZG93bmxvYWQvdjEuMy44L0FsYmF0cm9zcy0xLjMuOC1tYWNvcy14ODZfNjQuemlwIiwiaHR0cHM6Ly9hbGJhdHJvc3N2cG4ub25saW5lL2Rvd25sb2FkL0FsYmF0cm9zcy0xLjMuOC1tYWNvcy14ODZfNjQuemlwIiwiaHR0cHM6Ly9hY2NvdW50cy5hbGJhdHJvc3N2cG4ub25saW5lL2RsL3YxLjMuOC9BbGJhdHJvc3MtMS4zLjgtbWFjb3MteDg2XzY0LnppcCJdfX0sImxhdGVzdF92ZXJzaW9uIjoiMS4zLjEwIiwibWVzc2FnZSI6IlZlcnNpb24gMS4zLjEwOiBHb29nbGUncyBBSSB0b29scyAoR2VtaW5pLCBBbnRpZ3Jhdml0eSkgbGVhdmUgdGhyb3VnaCBhIHNlcnZlciBpbiBhIGNvdW50cnkgR29vZ2xlIHNlcnZlcywgQW1uZXppYVdHIGNvbm5lY3RzIG9uIEFuZHJvaWQsIGFuZCBXaG9sZSBkZXZpY2Ugc2hvd3MgdGhlIHJlYWwgbG9jYXRpb24uIiwibWluX3ZlcnNpb24iOiIxLjMuOCIsInJlcXVpcmUiOiIxLjMuOCJ9"
+}
